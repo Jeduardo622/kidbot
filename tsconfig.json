@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.base.json",
+  "files": [],
+  "references": [
+    { "path": "apps/mcp-server" },
+    { "path": "apps/web-widget" },
+    { "path": "apps/agent-service" }
+  ]
+}

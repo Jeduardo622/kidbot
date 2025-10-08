@@ -1,0 +1,33 @@
+{
+  "name": "kidbot",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build:widget": "pnpm --filter web-widget build",
+    "dev:mcp": "pnpm --filter mcp-server dev",
+    "dev:agent": "pnpm --filter agent-service dev",
+    "dev": "concurrently -c auto -n WIDGET,MCP,AGENT \"pnpm --filter web-widget dev\" \"pnpm --filter mcp-server dev\" \"pnpm --filter agent-service dev\"",
+    "lint": "node ./scripts/run-lint.mjs",
+    "typecheck": "node ./scripts/run-typecheck.mjs",
+    "test": "node ./scripts/run-test.mjs"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^7.9.0",
+    "@typescript-eslint/parser": "^7.9.0",
+    "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-react": "^7.34.1",
+    "prettier": "^3.2.5",
+    "ts-node": "^10.9.2",
+    "tslib": "^2.6.2",
+    "tsx": "^4.7.1",
+    "typescript": "^5.4.5",
+    "vitest": "^1.5.2",
+    "@vitest/coverage-v8": "^1.5.2"
+  }
+}

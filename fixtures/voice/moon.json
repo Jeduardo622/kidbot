@@ -1,0 +1,7 @@
+{
+  "persona": "robot",
+  "text": "🤖 Beep! The Moon is Earth’s rocky neighbor. Its craters were made by space rocks. It looks bright because it reflects sunlight!",
+  "ssml": "<speak>Beep! The Moon is Earth’s rocky neighbor. Its craters were made by space rocks. It looks bright because it reflects sunlight!</speak>",
+  "blocked": false,
+  "source": "fixture"
+}

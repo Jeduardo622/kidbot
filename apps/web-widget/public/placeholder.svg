@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 180" role="img" aria-labelledby="title desc">
+  <title id="title">KidBot story placeholder</title>
+  <desc id="desc">A friendly robot waving inside a dashed frame.</desc>
+  <rect x="4" y="4" width="232" height="172" rx="16" ry="16" fill="#f8fafc" stroke="#cbd5f5" stroke-width="4" stroke-dasharray="14 10" />
+  <g fill="none" stroke="#64748b" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="80" y="70" width="80" height="70" rx="16" />
+    <circle cx="120" cy="60" r="28" />
+    <path d="M96 56 h8" />
+    <path d="M136 56 h8" />
+    <path d="M104 120 q16 16 32 0" />
+    <path d="M88 92 l-22 -22" />
+    <path d="M152 92 l22 -22" />
+    <path d="M108 140 v20" />
+    <path d="M132 140 v20" />
+  </g>
+  <text x="120" y="162" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif" font-size="14" text-anchor="middle" fill="#475569">
+    Imagine the scene!
+  </text>
+</svg>

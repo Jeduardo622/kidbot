@@ -1,0 +1,15 @@
+{
+  "title": "Float or Sink?",
+  "objective": "Explore why some things float.",
+  "materials": ["Bowl of water", "Orange", "Spoon", "Paper clip"],
+  "steps": ["Fill the bowl", "Guess float/sink", "Place each item", "Observe"],
+  "prediction": {
+    "question": "What happens to the orange?",
+    "choices": ["Floats with peel", "Sinks with peel", "Spins like a top"],
+    "answerIndex": 0
+  },
+  "explanation": "The peel traps tiny air pockets, helping it float.",
+  "supervision": "Ask an adult to help with water spills.",
+  "blocked": false,
+  "source": "fixture"
+}
