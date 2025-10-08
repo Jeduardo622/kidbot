@@ -109,7 +109,7 @@ const stubVoice = (payload: VoiceRequest) => {
   return {
     blocked: false,
     persona: payload.persona,
-    text: `${flair}${text.replace(/^([🤖✨🧭]\s)?/, '')}`,
+    text: `${flair}${text.replace(/^([🤖✨🧭]\s)?/u, '')}`,
     ssml: base.ssml,
     source: 'stub' as const
   };
@@ -230,6 +230,7 @@ app.post(
 );
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  void _next;
   res.status(500).json({ error: 'Internal Error', message: err.message, correlationId: correlationId() });
 });
 
@@ -237,7 +238,6 @@ const port = Number(process.env.PORT ?? process.env.AGENT_PORT ?? 4505);
 
 export const start = () =>
   app.listen(port, () => {
-    // eslint-disable-next-line no-console
     console.log(`Agent service listening on http://localhost:${port}`);
   });
 

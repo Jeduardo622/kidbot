@@ -7,7 +7,7 @@ const hasNodeModules = ['node_modules', 'apps/agent-service/node_modules', 'apps
   .some((dir) => existsSync(dir));
 
 if (hasPnpm && hasNodeModules) {
-  const result = spawnSync('pnpm', ['-r', 'test', '--', '--run'], { stdio: 'inherit' });
+  const result = spawnSync('pnpm', ['-r', 'test'], { stdio: 'inherit' });
   process.exit(result.status ?? 0);
 }
 

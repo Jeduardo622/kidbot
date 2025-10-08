@@ -1,7 +1,7 @@
 import type { StoryPanel, StoryRequest, StoryResponse } from '../types.js';
 import { kidTone, moderate } from '../guardrails.js';
 
-const buildPanelCaption = (theme: string, toneNote: string, index: number, total: number): string => {
+const buildPanelCaption = (theme: string, toneNote: string, index: number): string => {
   const intro = [
     'First',
     'Next',
@@ -30,7 +30,7 @@ const createPanels = (request: StoryRequest): StoryPanel[] => {
     const prompt = prompts[Math.min(i, prompts.length - 1)];
     panels.push({
       title: `${request.theme} — Panel ${i + 1}`,
-      caption: buildPanelCaption(request.theme, tone.vocabulary, i, total),
+      caption: buildPanelCaption(request.theme, tone.vocabulary, i),
       imagePrompt: `${request.theme} for kids, ${prompt}, bright colors`,
       imageUrl: null
     });

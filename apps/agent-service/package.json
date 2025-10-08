@@ -7,7 +7,7 @@
     "dev": "cross-env NODE_ENV=development tsx watch src/index.ts",
     "start": "node --enable-source-maps dist/index.js",
     "build": "tsc -p tsconfig.json",
-    "test": "vitest --coverage",
+    "test": "vitest --coverage --run",
     "lint": "eslint src --max-warnings=0"
   },
   "dependencies": {

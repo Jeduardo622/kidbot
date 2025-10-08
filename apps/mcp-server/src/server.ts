@@ -127,6 +127,5 @@ app.post('/mcp', async (req, res) => {
 const port = Number(process.env.MCP_PORT ?? 3000);
 
 app.listen(port, () => {
-  // eslint-disable-next-line no-console
   console.log(`KidBot MCP server listening on http://localhost:${port}`);
 });

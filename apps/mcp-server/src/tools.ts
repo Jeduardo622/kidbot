@@ -142,7 +142,7 @@ const fixtureVoice = (input: z.infer<typeof voiceInputSchema>) => {
   return {
     blocked: false,
     persona: input.persona,
-    text: `${flair}${text.replace(/^([🤖✨🧭]\s)?/, '')}`,
+    text: `${flair}${text.replace(/^([🤖✨🧭]\s)?/u, '')}`,
     ssml: base.ssml,
     source: 'fixture' as const
   };
