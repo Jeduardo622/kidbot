@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>KidBot Diagnostic Harness</title>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, "Segoe UI", sans-serif; margin: 24px; background: #f5f5fa; color: #121212; }
+    h1 { margin-bottom: 8px; }
+    p { max-width: 720px; }
+    .controls { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+    button { padding: 8px 14px; border-radius: 8px; border: 1px solid #d0d0dd; background: #fff; cursor: pointer; box-shadow: 0 1px 2px rgba(15,15,30,0.1); }
+    iframe { width: 100%; height: 640px; border: 1px solid #d0d0dd; border-radius: 12px; background: #fff; }
+    .status { font-size: 14px; color: #555; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <h1>KidBot Diagnostic Harness</h1>
+  <p>Use this page to preview the fallback widget without the Apps host. Buttons below run scripted interactions to help with screenshots and smoke tests.</p>
+  <div class="controls">
+    <button data-action="voice">Simulate Voice Reply</button>
+    <button data-action="comics">Simulate Comic Panels</button>
+    <button data-action="coloring">Simulate Coloring Outline</button>
+    <button data-action="science">Simulate Science Plan</button>
+    <button data-action="reset">Reset Widget</button>
+  </div>
+  <iframe id="kb-frame" src="/widget/kidbot-fallback.html" title="KidBot widget preview"></iframe>
+  <div class="status" id="kb-status">Loaded at <span id="kb-time"></span></div>
+  <script>
+    const frame = document.getElementById('kb-frame');
+    const stamp = document.getElementById('kb-time');
+    const updateStamp = () => { stamp.textContent = new Date().toLocaleTimeString(); };
+    updateStamp();
+
+    const send = (fn) => {
+      const doc = frame?.contentWindow?.document;
+      if (!doc) return;
+      fn(doc);
+      updateStamp();
+    };
+
+    const clickTab = (doc, tab) => {
+      const button = doc.querySelector(`.kb-tab[data-tab="${tab}"]`);
+      if (button) button.dispatchEvent(new doc.defaultView.MouseEvent('click', { bubbles: true }));
+    };
+
+    const actions = {
+      voice: () => send((doc) => {
+        clickTab(doc, 'voice');
+        const input = doc.getElementById('kb-voice-input');
+        if (input) input.value = 'Tell me about the Moon!';
+        const sendBtn = doc.getElementById('kb-voice-send');
+        if (sendBtn) sendBtn.dispatchEvent(new doc.defaultView.MouseEvent('click', { bubbles: true }));
+      }),
+      comics: () => send((doc) => {
+        clickTab(doc, 'comics');
+        const theme = doc.getElementById('kb-comic-theme');
+        if (theme) theme.value = 'A shy dragon makes a friend';
+        const count = doc.getElementById('kb-comic-count');
+        if (count) count.value = '4';
+        const go = doc.getElementById('kb-comic-generate');
+        if (go) go.dispatchEvent(new doc.defaultView.MouseEvent('click', { bubbles: true }));
+      }),
+      coloring: () => send((doc) => {
+        clickTab(doc, 'coloring');
+        const scene = doc.getElementById('kb-color-scene');
+        if (scene) scene.value = 'space cat';
+        const btn = doc.getElementById('kb-color-generate');
+        if (btn) btn.dispatchEvent(new doc.defaultView.MouseEvent('click', { bubbles: true }));
+      }),
+      science: () => send((doc) => {
+        clickTab(doc, 'science');
+        const topic = doc.getElementById('kb-sci-topic');
+        if (topic) topic.value = 'buoyancy';
+        const btn = doc.getElementById('kb-sci-generate');
+        if (btn) btn.dispatchEvent(new doc.defaultView.MouseEvent('click', { bubbles: true }));
+      }),
+      reset: () => {
+        frame.src = '/widget/kidbot-fallback.html';
+        frame.addEventListener('load', updateStamp, { once: true });
+      }
+    };
+
+    document.querySelectorAll('button[data-action]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const action = btn.getAttribute('data-action');
+        if (action && actions[action]) {
+          actions[action]();
+        }
+      });
+    });
+  </script>
+</body>
+</html>

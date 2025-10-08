@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>KidBot (Fallback)</title>
+  <link rel="stylesheet" href="./kidbot-fallback.css" />
+</head>
+<body>
+  <div id="kb-app" class="kb-root">
+    <header class="kb-header">
+      <div class="kb-title">KidBot — Fallback</div>
+      <nav class="kb-tabs">
+        <button data-tab="voice" class="kb-tab kb-tab--active">Voice</button>
+        <button data-tab="comics" class="kb-tab">Comics</button>
+        <button data-tab="coloring" class="kb-tab">Coloring</button>
+        <button data-tab="science" class="kb-tab">Science</button>
+        <button id="kb-fullscreen" class="kb-tab kb-right">Fullscreen</button>
+      </nav>
+    </header>
+
+    <main class="kb-main">
+      <section id="kb-voice" class="kb-panel kb-panel--active">
+        <div class="kb-row">
+          <label>Persona</label>
+          <select id="kb-persona">
+            <option value="robot">Robot</option>
+            <option value="fairy">Fairy</option>
+            <option value="explorer">Explorer</option>
+          </select>
+        </div>
+        <div class="kb-row">
+          <label>Say something</label>
+          <input id="kb-voice-input" placeholder="Tell me a moon fact!" />
+        </div>
+        <div class="kb-row">
+          <button id="kb-voice-send">Ask</button>
+          <button id="kb-voice-speak">Speak</button>
+        </div>
+        <pre id="kb-voice-out" class="kb-out"></pre>
+      </section>
+
+      <section id="kb-comics" class="kb-panel">
+        <div class="kb-row">
+          <label>Theme</label>
+          <input id="kb-comic-theme" placeholder="A shy dragon makes a friend" />
+          <label>Panels</label>
+          <input id="kb-comic-count" type="number" min="2" max="6" value="4" />
+          <button id="kb-comic-generate">Make Story</button>
+        </div>
+        <div id="kb-comic-grid" class="kb-grid"></div>
+      </section>
+
+      <section id="kb-coloring" class="kb-panel">
+        <div class="kb-row">
+          <label>Scene</label>
+          <input id="kb-color-scene" placeholder="space cat" />
+          <label>Style</label>
+          <select id="kb-color-style">
+            <option>space</option>
+            <option>animals</option>
+            <option>underwater</option>
+          </select>
+          <button id="kb-color-generate">Outline</button>
+        </div>
+        <div class="kb-color-wrap">
+          <div id="kb-color-svg"></div>
+          <canvas id="kb-color-canvas" width="1024" height="1024"></canvas>
+        </div>
+        <div class="kb-row">
+          <input id="kb-brush" type="color" value="#ff7f50" />
+          <input id="kb-size" type="range" min="2" max="32" value="8" />
+          <button id="kb-undo">Undo</button>
+          <button id="kb-clear">Clear</button>
+          <button id="kb-save">Save PNG</button>
+        </div>
+      </section>
+
+      <section id="kb-science" class="kb-panel">
+        <div class="kb-row">
+          <label>Topic</label>
+          <select id="kb-sci-topic">
+            <option>buoyancy</option>
+            <option>magnets</option>
+            <option>shadows</option>
+            <option>plant growth</option>
+          </select>
+          <label>Age</label>
+          <select id="kb-sci-age">
+            <option>7-9</option>
+            <option>4-6</option>
+            <option>10-12</option>
+          </select>
+          <button id="kb-sci-generate">Plan</button>
+        </div>
+        <pre id="kb-sci-out" class="kb-out"></pre>
+      </section>
+    </main>
+  </div>
+  <script src="./kidbot-fallback.js"></script>
+</body>
+</html>
