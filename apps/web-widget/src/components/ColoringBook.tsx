@@ -138,6 +138,7 @@ export const ColoringBook = () => {
   const fetchOutline = async () => {
     setLoading(true);
     setError(undefined);
+    setOutline(undefined);
     try {
       const result = (await window.openai?.callTool?.('coloring_outline', { scene, style })) as ColoringResponse | undefined;
       if (!result) {
@@ -157,6 +158,7 @@ export const ColoringBook = () => {
       }
       setStrokes([]);
     } catch (err) {
+      setOutline(undefined);
       setError(err instanceof Error ? err.message : 'Something went wrong.');
     } finally {
       setLoading(false);
