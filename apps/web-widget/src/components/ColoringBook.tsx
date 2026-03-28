@@ -1,5 +1,6 @@
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
+import { sanitizeSvgOutline } from '../utils/svgSanitizer.js';
 
 type OutlineStyle = 'animals' | 'space' | 'underwater' | undefined;
 
@@ -138,7 +139,13 @@ export const ColoringBook = () => {
         setOutline(undefined);
         setError(result.message ?? 'KidBot paused this outline request.');
       } else {
-        setOutline(result.svg);
+        const sanitized = sanitizeSvgOutline(result.svg);
+        if (!sanitized) {
+          setOutline(undefined);
+          setError('KidBot removed an unsafe outline. Try a different scene.');
+        } else {
+          setOutline(sanitized);
+        }
       }
       setStrokes([]);
     } catch (err) {
