@@ -40,6 +40,10 @@ export const VoiceBar = () => {
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState<VoiceResult | undefined>();
   const [error, setError] = useState<string | undefined>();
+  const blockedMessage = response?.blocked ? response.message ?? 'KidBot paused this request.' : undefined;
+  const statusAnnouncement = loading
+    ? 'KidBot is thinking.'
+    : error ?? blockedMessage ?? (response?.text ? `${response.persona ?? 'KidBot'} reply ready.` : '');
 
   useEffect(() => {
     window.openai?.setWidgetState?.({ tab: 'voice', persona, ageBand, text });
@@ -70,8 +74,16 @@ export const VoiceBar = () => {
   };
 
   return (
-    <section className="panel voice-bar">
+    <section className="panel voice-bar" aria-busy={loading}>
       <h2>Voice Playground</h2>
+      <p
+        className="sr-only"
+        role={error || blockedMessage ? 'alert' : 'status'}
+        aria-live={error || blockedMessage ? 'assertive' : 'polite'}
+        aria-atomic="true"
+      >
+        {statusAnnouncement}
+      </p>
       <div className="control-row">
         <label htmlFor="persona">Persona</label>
         <select id="persona" value={persona} onChange={(event) => setPersona(event.target.value as Persona)}>
@@ -103,7 +115,7 @@ export const VoiceBar = () => {
       {response && (
         <div className="response">
           {response.blocked ? (
-            <p className="blocked">{response.message ?? 'KidBot paused this request.'}</p>
+            <p className="blocked">{blockedMessage}</p>
           ) : (
             <>
               <p>{response.text}</p>
