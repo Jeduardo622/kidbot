@@ -63,6 +63,7 @@ export const VoiceBar = () => {
 
     setLoading(true);
     setError(undefined);
+    setResponse(undefined);
     try {
       const result = (await window.openai?.callTool?.('voice_chat', { text, persona, ageBand })) as VoiceResult | undefined;
       if (!result) {
@@ -73,6 +74,7 @@ export const VoiceBar = () => {
         speakText(result.text);
       }
     } catch (err) {
+      setResponse(undefined);
       setError(err instanceof Error ? err.message : 'Something went wrong.');
     } finally {
       setLoading(false);
