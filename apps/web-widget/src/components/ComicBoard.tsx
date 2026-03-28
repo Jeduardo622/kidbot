@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { LiveRegion } from './LiveRegion.js';
 
 interface StoryPanel {
   title: string;
@@ -55,9 +56,7 @@ export const ComicBoard = () => {
   return (
     <section className="panel comic-board" aria-busy={loading}>
       <h2>Comic Storyboard</h2>
-      <p className="sr-only" role={error ? 'alert' : 'status'} aria-live={error ? 'assertive' : 'polite'} aria-atomic="true">
-        {statusAnnouncement}
-      </p>
+      <LiveRegion message={statusAnnouncement} isAlert={Boolean(error)} />
       <div className="control-row">
         <label htmlFor="theme">Theme</label>
         <input id="theme" value={theme} onChange={(event) => setTheme(event.target.value)} />
