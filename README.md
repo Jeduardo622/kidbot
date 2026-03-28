@@ -17,6 +17,12 @@ pnpm run dev
 
 The `dev` script runs the widget (Vite), MCP server, and agent service together. Once the services are running you can connect them to ChatGPT or other MCP clients.
 
+### Verification
+
+- Authoritative full test run: `pnpm -r --if-present run test -- --run`
+- Root wrapper: `pnpm run test` (runs full recursive tests only when pnpm and workspace dependencies are detectable)
+- If the wrapper prints a smoke-only fallback warning, package Vitest suites were not executed.
+
 ### Environment
 
 Copy `.env.example` to `.env` and provide any overrides:
@@ -65,6 +71,7 @@ When you regain installs, exit fallback:
 - `apps/mcp-server` – Model Context Protocol bridge exposing KidBot tools.
 - `apps/web-widget` – React widget rendered inside ChatGPT Apps SDK.
 - `apps/agent-service` – Express service orchestrating kid-safe content agents.
+- Contract integrity guardrail: `apps/agent-service/src/__tests__/contractIntegrity.test.ts` verifies schema parity for MCP <-> agent-service and tool-id consistency for widget <-> MCP.
 
 ## Next Steps
 
