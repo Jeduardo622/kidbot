@@ -112,6 +112,16 @@ main {
   transform: translateY(-1px);
 }
 
+.kidbot-header button:focus-visible,
+.panel button:focus-visible,
+.control-row input:focus-visible,
+.control-row select:focus-visible,
+.control-row textarea:focus-visible,
+.tools input:focus-visible {
+  outline: 3px solid #0ea5e9;
+  outline-offset: 3px;
+}
+
 textarea {
   width: 100%;
   resize: vertical;
