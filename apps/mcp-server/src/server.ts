@@ -4,7 +4,8 @@ import express from 'express';
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { registerTools } from './tools.js';
 import type { Mode } from './types.js';
 
@@ -14,9 +15,6 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
-
-const mcpServer = new McpServer({ name: 'kidbot-mcp', version: '0.1.0' });
-registerTools(mcpServer);
 
 const widgetResourceUri = 'ui://widget/kidbot.html';
 
@@ -65,24 +63,41 @@ const resolveDistHtml = (): string => {
 const widgetMode: Mode = fallbackRequested || !hasBundle ? 'fallback' : 'dist';
 const widgetHtml = widgetMode === 'fallback' ? resolveFallbackHtml() : resolveDistHtml();
 
-const resourceRegistrar = mcpServer as unknown as {
-  registerResource?: (resource: { uri: string; mimeType: string; data: string; metadata?: Record<string, unknown> }) => void;
-  resource?: (resource: { uri: string; mimeType: string; data: string; metadata?: Record<string, unknown> }) => void;
-};
+const createMcpServer = (): McpServer => {
+  const server = new McpServer({ name: 'kidbot-mcp', version: '0.1.0' });
+  registerTools(server);
 
-const registerResource = resourceRegistrar.resource ?? resourceRegistrar.registerResource;
-if (typeof registerResource === 'function') {
-  registerResource({
-    uri: widgetResourceUri,
-    mimeType: 'text/html+skybridge',
-    data: widgetHtml,
-    metadata: {
-      'openai/widgetDescription': 'KidBot — safe creative play: voice, comics, coloring, science.',
-      'openai/widgetCSP': { connect_domains: [], resource_domains: [] },
-      mode: widgetMode
-    }
-  });
-}
+  server.registerResource(
+    'kidbot_widget',
+    widgetResourceUri,
+    {
+      title: 'KidBot Widget',
+      description: 'KidBot interactive widget shell',
+      mimeType: 'text/html+skybridge',
+      _meta: {
+        'openai/widgetDescription': 'KidBot — safe creative play: voice, comics, coloring, science.',
+        'openai/widgetCSP': { connect_domains: [], resource_domains: [] },
+        mode: widgetMode
+      }
+    },
+    async () => ({
+      contents: [
+        {
+          uri: widgetResourceUri,
+          mimeType: 'text/html+skybridge',
+          text: widgetHtml,
+          _meta: {
+            'openai/widgetDescription': 'KidBot — safe creative play: voice, comics, coloring, science.',
+            'openai/widgetCSP': { connect_domains: [], resource_domains: [] },
+            mode: widgetMode
+          }
+        }
+      ]
+    })
+  );
+
+  return server;
+};
 
 const fixturesDir = path.resolve(__dirname, '../../../fixtures');
 if (existsSync(fixturesDir)) {
@@ -116,11 +131,32 @@ app.get('/diag', (_req, res) => {
 });
 
 app.post('/mcp', async (req, res) => {
+  const mcpServer = createMcpServer();
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: undefined
+  });
+
   try {
-    const response = await mcpServer.handleRequest(req.body);
-    res.json(response);
+    await mcpServer.connect(transport);
+    await transport.handleRequest(req, res, req.body);
+
+    res.on('close', () => {
+      void transport.close();
+      void mcpServer.close();
+    });
   } catch (error) {
-    res.status(500).json({ error: 'MCP Error', message: error instanceof Error ? error.message : String(error) });
+    if (!res.headersSent) {
+      res.status(500).json({
+        jsonrpc: '2.0',
+        error: {
+          code: -32603,
+          message: error instanceof Error ? error.message : 'Internal server error'
+        },
+        id: null
+      });
+    }
+    void transport.close();
+    void mcpServer.close();
   }
 });
 

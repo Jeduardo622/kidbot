@@ -1,4 +1,5 @@
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp';
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { readFileSync, existsSync } from 'fs';
 import path from 'path';
@@ -45,7 +46,7 @@ const callAgent = async <T>(path: string, payload: unknown): Promise<T> => {
 const blockedResponse = (message: string) => ({
   content: [
     {
-      type: 'text',
+      type: 'text' as const,
       text: message
     }
   ],
@@ -64,7 +65,7 @@ const handleWithModeration = async <Schema extends z.ZodTypeAny, ResponseType ex
   validator: (input: z.infer<Schema>) => string[],
   action: (input: z.infer<Schema>) => Promise<ResponseType>,
   transcript: (input: z.infer<Schema>, response: ResponseType) => string
-) => {
+): Promise<CallToolResult> => {
   const parsed = schema.parse(payload);
   const toModerate = validator(parsed).join(' ');
   const preCheck = moderate(toModerate);
@@ -86,7 +87,7 @@ const handleWithModeration = async <Schema extends z.ZodTypeAny, ResponseType ex
   return {
     content: [
       {
-        type: 'text',
+        type: 'text' as const,
         text: transcriptText
       }
     ],
@@ -141,6 +142,7 @@ const fixtureVoice = (input: z.infer<typeof voiceInputSchema>) => {
     : 'Hi friend! I can answer with a happy, simple voice. Ask me about space, animals, or stories!';
   return {
     blocked: false,
+    message: undefined as string | undefined,
     persona: input.persona,
     text: `${flair}${text.replace(/^([🤖✨🧭]\s)?/, '')}`,
     ssml: base.ssml,
@@ -157,6 +159,7 @@ const fixturePanels = (input: z.infer<typeof storyPanelsSchema>) => {
   ]);
   return {
     blocked: false,
+    message: undefined as string | undefined,
     theme: input.theme,
     panels: panels.slice(0, input.panels).map((panel) => ({
       title: panel.title,
@@ -170,6 +173,7 @@ const fixturePanels = (input: z.infer<typeof storyPanelsSchema>) => {
 
 const fixtureColoring = () => ({
   blocked: false,
+  message: undefined as string | undefined,
   svg: readFixtureText('coloring/space-cat.svg',
     '<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><g stroke="#000" fill="none" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"><circle cx="512" cy="512" r="400"/><path d="M380 450 q132 -180 264 0" /><circle cx="440" cy="500" r="30"/><circle cx="584" cy="500" r="30"/><path d="M512 540 q40 30 80 0" /><path d="M420 420 l-40 -80 l80 40 z" /><path d="M604 420 l40 -80 l-80 40 z" /><path d="M360 640 q152 120 304 0" /><circle cx="780" cy="360" r="36"/><circle cx="820" cy="320" r="18"/></g></svg>'),
   source: 'fixture' as const
@@ -192,6 +196,7 @@ const fixtureScience = (input: z.infer<typeof scienceSimSchema>) => {
   });
   return {
     blocked: false,
+    message: undefined as string | undefined,
     title: base.title,
     objective: base.objective,
     materials: base.materials,
@@ -205,19 +210,13 @@ const fixtureScience = (input: z.infer<typeof scienceSimSchema>) => {
 };
 
 export const registerTools = (server: McpServer): void => {
-  const toolsApi: { registerTool?: (config: unknown) => void; tool?: (config: unknown) => void } =
-    server as unknown as { registerTool?: (config: unknown) => void; tool?: (config: unknown) => void };
-  const register = toolsApi.tool ?? toolsApi.registerTool;
-  if (typeof register !== 'function') {
-    throw new Error('MCP server does not expose a tool registration method');
-  }
-
-  register({
+  const voiceTool = {
     name: 'voice_chat',
     description: 'Kid-friendly persona voice replies',
-    metadata: { 'openai/widgetAccessible': true },
-    inputSchema: voiceInputSchema,
-    execute: async ({ input }: { input: unknown }) =>
+    _meta: { 'openai/widgetAccessible': true },
+    inputSchema: voiceInputSchema
+  };
+  server.registerTool(voiceTool.name, voiceTool, async (input: unknown) =>
       handleWithModeration(
         voiceInputSchema,
         input,
@@ -233,15 +232,15 @@ export const registerTools = (server: McpServer): void => {
           response.blocked
             ? response.message ?? 'KidBot paused this request.'
             : `${data.persona} reply ready! ${response.text ?? ''}`
-      )
-  });
+      ));
 
-  register({
+  const storyTool = {
     name: 'story_panels',
     description: 'Plan bright story panels for comics',
-    metadata: { 'openai/widgetAccessible': true },
-    inputSchema: storyPanelsSchema,
-    execute: async ({ input }: { input: unknown }) =>
+    _meta: { 'openai/widgetAccessible': true },
+    inputSchema: storyPanelsSchema
+  };
+  server.registerTool(storyTool.name, storyTool, async (input: unknown) =>
       handleWithModeration(
         storyPanelsSchema,
         input,
@@ -257,15 +256,15 @@ export const registerTools = (server: McpServer): void => {
           response.blocked
             ? response.message ?? 'Story paused for safety.'
             : `Planned ${data.panels} panels about ${data.theme}.`
-      )
-  });
+      ));
 
-  register({
+  const coloringTool = {
     name: 'coloring_outline',
     description: 'Generate a coloring page outline',
-    metadata: { 'openai/widgetAccessible': true },
-    inputSchema: coloringOutlineSchema,
-    execute: async ({ input }: { input: unknown }) =>
+    _meta: { 'openai/widgetAccessible': true },
+    inputSchema: coloringOutlineSchema
+  };
+  server.registerTool(coloringTool.name, coloringTool, async (input: unknown) =>
       handleWithModeration(
         coloringOutlineSchema,
         input,
@@ -276,15 +275,15 @@ export const registerTools = (server: McpServer): void => {
             : callAgent<{ blocked: boolean; message?: string; svg?: string }>('/coloring-outline', data),
         (data, response) =>
           response.blocked ? response.message ?? 'Coloring outline blocked.' : `Outline ready for ${data.scene}.`
-      )
-  });
+      ));
 
-  register({
+  const scienceTool = {
     name: 'science_sim',
     description: 'Kid-safe science experiment cards',
-    metadata: { 'openai/widgetAccessible': true },
-    inputSchema: scienceSimSchema,
-    execute: async ({ input }: { input: unknown }) =>
+    _meta: { 'openai/widgetAccessible': true },
+    inputSchema: scienceSimSchema
+  };
+  server.registerTool(scienceTool.name, scienceTool, async (input: unknown) =>
       handleWithModeration(
         scienceSimSchema,
         input,
@@ -303,6 +302,5 @@ export const registerTools = (server: McpServer): void => {
           response.blocked
             ? response.message ?? 'Science sim paused.'
             : `Science lab ready for ${data.topic}.`
-      )
-  });
+      ));
 };
