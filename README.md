@@ -30,6 +30,7 @@ Copy `.env.example` to `.env` and provide any overrides:
 
 ```
 OPENAI_API_KEY=
+AGENT_SERVICE_TOKEN=
 MCP_PORT=3000
 AGENT_PORT=4505
 ```
