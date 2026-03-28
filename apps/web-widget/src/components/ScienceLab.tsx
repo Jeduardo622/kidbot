@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { LiveRegion } from './LiveRegion.js';
+import { buildAnnouncementState } from '../utils/announcementState.js';
 
 type AgeBand = '4-6' | '7-9' | '10-12';
 
@@ -25,7 +26,12 @@ export const ScienceLab = () => {
   const [loading, setLoading] = useState(false);
   const [selectedChoice, setSelectedChoice] = useState<number | undefined>();
   const [showExplanation, setShowExplanation] = useState(false);
-  const statusAnnouncement = loading ? 'KidBot is preparing your science experiment.' : error ?? (plan && !plan.blocked ? `${plan.title ?? 'Experiment'} ready.` : '');
+  const announcement = buildAnnouncementState({
+    loading,
+    loadingMessage: 'KidBot is preparing your science experiment.',
+    errorMessage: error,
+    readyMessage: plan && !plan.blocked ? `${plan.title ?? 'Experiment'} ready.` : ''
+  });
 
   useEffect(() => {
     window.openai?.setWidgetState?.({ tab: 'science', topic, ageBand });
@@ -57,7 +63,7 @@ export const ScienceLab = () => {
   return (
     <section className="panel science-lab" aria-busy={loading}>
       <h2>Science Lab</h2>
-      <LiveRegion message={statusAnnouncement} isAlert={Boolean(error)} />
+      <LiveRegion message={announcement.message} isAlert={announcement.isAlert} />
       <div className="control-row">
         <label htmlFor="topic">Topic</label>
         <select id="topic" value={topic} onChange={(event) => setTopic(event.target.value)}>

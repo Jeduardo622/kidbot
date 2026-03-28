@@ -2,6 +2,7 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { LiveRegion } from './LiveRegion.js';
 import { sanitizeSvgOutline } from '../utils/svgSanitizer.js';
+import { buildAnnouncementState } from '../utils/announcementState.js';
 
 type OutlineStyle = 'animals' | 'space' | 'underwater' | undefined;
 
@@ -48,7 +49,12 @@ export const ColoringBook = () => {
   const [brushColor, setBrushColor] = useState('#2563eb');
   const [brushSize, setBrushSize] = useState(6);
   const [strokes, setStrokes] = useState<Stroke[]>([]);
-  const statusAnnouncement = loading ? 'KidBot is drawing your coloring outline.' : error ?? (outline ? 'Coloring outline ready.' : '');
+  const announcement = buildAnnouncementState({
+    loading,
+    loadingMessage: 'KidBot is drawing your coloring outline.',
+    errorMessage: error,
+    readyMessage: outline ? 'Coloring outline ready.' : ''
+  });
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawingRef = useRef<boolean>(false);
@@ -160,7 +166,7 @@ export const ColoringBook = () => {
   return (
     <section className="panel coloring-book" aria-busy={loading}>
       <h2>Coloring Corner</h2>
-      <LiveRegion message={statusAnnouncement} isAlert={Boolean(error)} />
+      <LiveRegion message={announcement.message} isAlert={announcement.isAlert} />
       <div className="control-row">
         <label htmlFor="scene">Scene</label>
         <input id="scene" value={scene} onChange={(event) => setScene(event.target.value)} />
