@@ -40,6 +40,7 @@ export const ScienceLab = () => {
   const fetchPlan = async () => {
     setLoading(true);
     setError(undefined);
+    setPlan(undefined);
     setShowExplanation(false);
     setSelectedChoice(undefined);
     try {
@@ -54,6 +55,7 @@ export const ScienceLab = () => {
         setPlan(result);
       }
     } catch (err) {
+      setPlan(undefined);
       setError(err instanceof Error ? err.message : 'Something went wrong.');
     } finally {
       setLoading(false);
