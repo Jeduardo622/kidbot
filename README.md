@@ -19,7 +19,8 @@ The `dev` script runs the widget (Vite), MCP server, and agent service together.
 
 ### Verification
 
-- Authoritative full test run: `pnpm -r --if-present run test -- --run`
+- Authoritative recursive test run (packages with a `test` script): `pnpm -r --if-present run test -- --run`
+- MCP compatibility smoke test (not included in recursive `test`): `pnpm --filter mcp-server run test:compat`
 - Root wrapper: `pnpm run test` (runs full recursive tests only when pnpm and workspace dependencies are detectable)
 - If the wrapper prints a smoke-only fallback warning, package Vitest suites were not executed.
 
