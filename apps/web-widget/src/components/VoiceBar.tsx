@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { LiveRegion } from './LiveRegion.js';
 
 type Persona = 'robot' | 'fairy' | 'explorer';
 type AgeBand = '4-6' | '7-9' | '10-12';
@@ -76,14 +77,7 @@ export const VoiceBar = () => {
   return (
     <section className="panel voice-bar" aria-busy={loading}>
       <h2>Voice Playground</h2>
-      <p
-        className="sr-only"
-        role={error || blockedMessage ? 'alert' : 'status'}
-        aria-live={error || blockedMessage ? 'assertive' : 'polite'}
-        aria-atomic="true"
-      >
-        {statusAnnouncement}
-      </p>
+      <LiveRegion message={statusAnnouncement} isAlert={Boolean(error || blockedMessage)} />
       <div className="control-row">
         <label htmlFor="persona">Persona</label>
         <select id="persona" value={persona} onChange={(event) => setPersona(event.target.value as Persona)}>

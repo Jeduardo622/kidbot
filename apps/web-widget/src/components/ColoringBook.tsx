@@ -1,5 +1,6 @@
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
+import { LiveRegion } from './LiveRegion.js';
 import { sanitizeSvgOutline } from '../utils/svgSanitizer.js';
 
 type OutlineStyle = 'animals' | 'space' | 'underwater' | undefined;
@@ -159,9 +160,7 @@ export const ColoringBook = () => {
   return (
     <section className="panel coloring-book" aria-busy={loading}>
       <h2>Coloring Corner</h2>
-      <p className="sr-only" role={error ? 'alert' : 'status'} aria-live={error ? 'assertive' : 'polite'} aria-atomic="true">
-        {statusAnnouncement}
-      </p>
+      <LiveRegion message={statusAnnouncement} isAlert={Boolean(error)} />
       <div className="control-row">
         <label htmlFor="scene">Scene</label>
         <input id="scene" value={scene} onChange={(event) => setScene(event.target.value)} />

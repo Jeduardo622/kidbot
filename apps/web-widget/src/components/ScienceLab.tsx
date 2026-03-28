@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { LiveRegion } from './LiveRegion.js';
 
 type AgeBand = '4-6' | '7-9' | '10-12';
 
@@ -56,9 +57,7 @@ export const ScienceLab = () => {
   return (
     <section className="panel science-lab" aria-busy={loading}>
       <h2>Science Lab</h2>
-      <p className="sr-only" role={error ? 'alert' : 'status'} aria-live={error ? 'assertive' : 'polite'} aria-atomic="true">
-        {statusAnnouncement}
-      </p>
+      <LiveRegion message={statusAnnouncement} isAlert={Boolean(error)} />
       <div className="control-row">
         <label htmlFor="topic">Topic</label>
         <select id="topic" value={topic} onChange={(event) => setTopic(event.target.value)}>
