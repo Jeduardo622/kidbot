@@ -12,7 +12,8 @@
     "dev": "concurrently -c auto -n WIDGET,MCP,AGENT \"pnpm --filter web-widget dev\" \"pnpm --filter mcp-server dev\" \"pnpm --filter agent-service dev\"",
     "lint": "node ./scripts/run-lint.mjs",
     "typecheck": "node ./scripts/run-typecheck.mjs",
-    "test": "node ./scripts/run-test.mjs"
+    "test": "node ./scripts/run-test.mjs",
+    "test:all": "cross-env CI=1 pnpm -r --if-present run test && pnpm --filter mcp-server run test:compat"
   },
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^7.9.0",
