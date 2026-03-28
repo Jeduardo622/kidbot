@@ -62,7 +62,10 @@ const withValidation = <T>(
     try {
       const parsed = schema.parse(req.body);
       const data = await handler(parsed);
-      res.json({ correlationId: id, ...data });
+      if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        throw new Error('Handler must return an object payload.');
+      }
+      res.json({ correlationId: id, ...(data as Record<string, unknown>) });
     } catch (error) {
       if (error instanceof ZodError) {
         res.status(400).json({ error: 'Bad Request', details: error.errors, correlationId: id });
