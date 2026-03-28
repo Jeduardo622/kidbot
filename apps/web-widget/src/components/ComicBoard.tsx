@@ -21,6 +21,7 @@ export const ComicBoard = () => {
   const [panels, setPanels] = useState<StoryPanel[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  const statusAnnouncement = loading ? 'KidBot is planning story panels.' : error ?? (panels.length > 0 ? `Planned ${panels.length} panels.` : '');
 
   useEffect(() => {
     window.openai?.setWidgetState?.({ tab: 'comics', theme, panelCount, ageBand });
@@ -52,8 +53,11 @@ export const ComicBoard = () => {
   };
 
   return (
-    <section className="panel comic-board">
+    <section className="panel comic-board" aria-busy={loading}>
       <h2>Comic Storyboard</h2>
+      <p className="sr-only" role={error ? 'alert' : 'status'} aria-live={error ? 'assertive' : 'polite'} aria-atomic="true">
+        {statusAnnouncement}
+      </p>
       <div className="control-row">
         <label htmlFor="theme">Theme</label>
         <input id="theme" value={theme} onChange={(event) => setTheme(event.target.value)} />
