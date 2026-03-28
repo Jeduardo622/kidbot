@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { LiveRegion } from './LiveRegion.js';
+import { buildAnnouncementState } from '../utils/announcementState.js';
 
 type Persona = 'robot' | 'fairy' | 'explorer';
 type AgeBand = '4-6' | '7-9' | '10-12';
@@ -42,9 +43,13 @@ export const VoiceBar = () => {
   const [response, setResponse] = useState<VoiceResult | undefined>();
   const [error, setError] = useState<string | undefined>();
   const blockedMessage = response?.blocked ? response.message ?? 'KidBot paused this request.' : undefined;
-  const statusAnnouncement = loading
-    ? 'KidBot is thinking.'
-    : error ?? blockedMessage ?? (response?.text ? `${response.persona ?? 'KidBot'} reply ready.` : '');
+  const announcement = buildAnnouncementState({
+    loading,
+    loadingMessage: 'KidBot is thinking.',
+    errorMessage: error,
+    urgentMessage: blockedMessage,
+    readyMessage: response?.text ? `${response.persona ?? 'KidBot'} reply ready.` : ''
+  });
 
   useEffect(() => {
     window.openai?.setWidgetState?.({ tab: 'voice', persona, ageBand, text });
@@ -77,7 +82,7 @@ export const VoiceBar = () => {
   return (
     <section className="panel voice-bar" aria-busy={loading}>
       <h2>Voice Playground</h2>
-      <LiveRegion message={statusAnnouncement} isAlert={Boolean(error || blockedMessage)} />
+      <LiveRegion message={announcement.message} isAlert={announcement.isAlert} />
       <div className="control-row">
         <label htmlFor="persona">Persona</label>
         <select id="persona" value={persona} onChange={(event) => setPersona(event.target.value as Persona)}>
