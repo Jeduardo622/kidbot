@@ -1,7 +1,7 @@
 import { kidTone, moderate } from '../guardrails.js';
-import type { VoiceRequest, VoiceResponse } from '../types.js';
+import type { Persona, VoiceRequest, VoiceResponse } from '../types.js';
 
-const personaVoices: Record<string, { prefix: string; emoji: string }> = {
+const personaVoices: Record<Persona, { prefix: string; emoji: string }> = {
   robot: { prefix: 'Beep boop', emoji: '🤖' },
   fairy: { prefix: 'Sparkle', emoji: '🧚' },
   explorer: { prefix: 'Adventure', emoji: '🧭' }
@@ -9,7 +9,7 @@ const personaVoices: Record<string, { prefix: string; emoji: string }> = {
 
 const buildSpeech = (request: VoiceRequest): { text: string; ssml: string } => {
   const tone = kidTone(request.ageBand ?? '7-9');
-  const persona = personaVoices[request.persona];
+  const persona = personaVoices[request.persona] ?? personaVoices.robot;
   const summary = `${persona.prefix}! ${request.text}`;
   const text = `${persona.emoji} ${summary} (${tone.vocabulary}).`;
   const ssml = `<speak>${persona.prefix}! <break strength="medium"/>${request.text}. <break strength="short"/>${tone.sentenceLength}.</speak>`;
