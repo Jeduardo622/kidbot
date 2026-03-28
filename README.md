@@ -51,7 +51,7 @@ If installs are blocked, you can still preview the widget and flows:
   - `apps/web-widget/dist/kidbot-fallback.html` in a browser
 
 - Or run the MCP server in fallback mode (if node runs but installs are blocked):
-  - `node apps/mcp-server/src/server.js` (if ts-node isn’t available, open /diag statically)
+  - `node apps/mcp-server/dist/server.js` (if dist artifacts are unavailable, open /diag statically)
 
 - Health & Diag:
   - `/healthz`  -> shows fallback or dist mode
