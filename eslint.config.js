@@ -1,5 +1,6 @@
 import tseslint from '@typescript-eslint/eslint-plugin';
 import tsParser from '@typescript-eslint/parser';
+import importPlugin from 'eslint-plugin-import';
 import reactPlugin from 'eslint-plugin-react';
 
 export default [
@@ -16,6 +17,7 @@ export default [
     },
     plugins: {
       '@typescript-eslint': tseslint,
+      import: importPlugin,
       react: reactPlugin
     },
     rules: {
@@ -30,6 +32,19 @@ export default [
       react: {
         version: '18.0'
       }
+    }
+  },
+  {
+    files: ['apps/web-widget/src/**/*.{ts,tsx}'],
+    rules: {
+      '@typescript-eslint/no-misused-promises': [
+        'error',
+        {
+          checksVoidReturn: {
+            attributes: false
+          }
+        }
+      ]
     }
   }
 ];
