@@ -47,6 +47,7 @@ export const ColoringBook = () => {
   const [brushColor, setBrushColor] = useState('#2563eb');
   const [brushSize, setBrushSize] = useState(6);
   const [strokes, setStrokes] = useState<Stroke[]>([]);
+  const statusAnnouncement = loading ? 'KidBot is drawing your coloring outline.' : error ?? (outline ? 'Coloring outline ready.' : '');
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawingRef = useRef<boolean>(false);
@@ -156,8 +157,11 @@ export const ColoringBook = () => {
   };
 
   return (
-    <section className="panel coloring-book">
+    <section className="panel coloring-book" aria-busy={loading}>
       <h2>Coloring Corner</h2>
+      <p className="sr-only" role={error ? 'alert' : 'status'} aria-live={error ? 'assertive' : 'polite'} aria-atomic="true">
+        {statusAnnouncement}
+      </p>
       <div className="control-row">
         <label htmlFor="scene">Scene</label>
         <input id="scene" value={scene} onChange={(event) => setScene(event.target.value)} />

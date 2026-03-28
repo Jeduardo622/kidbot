@@ -24,6 +24,7 @@ export const ScienceLab = () => {
   const [loading, setLoading] = useState(false);
   const [selectedChoice, setSelectedChoice] = useState<number | undefined>();
   const [showExplanation, setShowExplanation] = useState(false);
+  const statusAnnouncement = loading ? 'KidBot is preparing your science experiment.' : error ?? (plan && !plan.blocked ? `${plan.title ?? 'Experiment'} ready.` : '');
 
   useEffect(() => {
     window.openai?.setWidgetState?.({ tab: 'science', topic, ageBand });
@@ -53,8 +54,11 @@ export const ScienceLab = () => {
   };
 
   return (
-    <section className="panel science-lab">
+    <section className="panel science-lab" aria-busy={loading}>
       <h2>Science Lab</h2>
+      <p className="sr-only" role={error ? 'alert' : 'status'} aria-live={error ? 'assertive' : 'polite'} aria-atomic="true">
+        {statusAnnouncement}
+      </p>
       <div className="control-row">
         <label htmlFor="topic">Topic</label>
         <select id="topic" value={topic} onChange={(event) => setTopic(event.target.value)}>
