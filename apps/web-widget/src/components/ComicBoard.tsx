@@ -37,6 +37,7 @@ export const ComicBoard = () => {
   const handlePlan = async () => {
     setLoading(true);
     setError(undefined);
+    setPanels([]);
     try {
       const result = (await window.openai?.callTool?.('story_panels', {
         theme,
@@ -53,6 +54,7 @@ export const ComicBoard = () => {
         setPanels(result.panels ?? []);
       }
     } catch (err) {
+      setPanels([]);
       setError(err instanceof Error ? err.message : 'Something went wrong.');
     } finally {
       setLoading(false);
