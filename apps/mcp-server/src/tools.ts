@@ -14,6 +14,12 @@ import { kidTone, moderate } from './safety.js';
 
 const agentPort = Number(process.env.AGENT_PORT ?? 4505);
 const agentBaseUrl = `http://localhost:${agentPort}`;
+const fallbackMode = process.env.FALLBACK_WIDGET === '1';
+const serviceAuthToken = process.env.AGENT_SERVICE_TOKEN;
+
+if (!fallbackMode && !serviceAuthToken) {
+  throw new Error('AGENT_SERVICE_TOKEN is required unless FALLBACK_WIDGET=1.');
+}
 const outputMeta = {
   'openai/outputTemplate': 'ui://widget/kidbot.html',
   'openai/widgetDescription': 'KidBot — safe creative play: voice, comics, coloring, science.',
@@ -24,14 +30,14 @@ const outputMeta = {
 };
 
 const callAgent = async <T>(path: string, payload: unknown): Promise<T> => {
-  if (process.env.FALLBACK_WIDGET === '1') {
+  if (fallbackMode) {
     throw new Error('Agent disabled in fallback mode');
   }
   const response = await fetch(`${agentBaseUrl}${path}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(process.env.OPENAI_API_KEY ? { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } : {})
+      Authorization: `Bearer ${serviceAuthToken ?? ''}`
     },
     body: JSON.stringify(payload)
   });
