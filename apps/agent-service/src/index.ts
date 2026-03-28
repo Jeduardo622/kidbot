@@ -25,16 +25,23 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 
-const configuredKey = process.env.OPENAI_API_KEY;
+const providerApiKey = process.env.OPENAI_API_KEY;
+const serviceAuthToken = process.env.AGENT_SERVICE_TOKEN;
+const fallbackMode = process.env.FALLBACK_WIDGET === '1';
+const requireServiceAuth = !fallbackMode;
+
+if (requireServiceAuth && !serviceAuthToken) {
+  throw new Error('AGENT_SERVICE_TOKEN is required unless FALLBACK_WIDGET=1.');
+}
 
 const authorization: RequestHandler = (req, res, next) => {
-  if (!configuredKey) {
+  if (!requireServiceAuth) {
     next();
     return;
   }
 
   const header = req.headers.authorization;
-  if (!header || header !== `Bearer ${configuredKey}`) {
+  if (!header || header !== `Bearer ${serviceAuthToken ?? ''}`) {
     res.status(401).json({ error: 'Unauthorized', correlationId: correlationId() });
     return;
   }
@@ -170,7 +177,7 @@ const stubScience = (payload: ScienceRequest) => {
   };
 };
 
-const useStub = !configuredKey || process.env.FALLBACK_WIDGET === '1';
+const useStub = !providerApiKey || fallbackMode;
 
 app.post(
   '/voice',
