@@ -39,7 +39,8 @@ before(async () => {
     env: {
       ...process.env,
       MCP_PORT: String(port),
-      FALLBACK_WIDGET: '1'
+      FALLBACK_WIDGET: '1',
+      KIDBOT_LOCAL_DEV: '1'
     },
     stdio: 'ignore'
   });

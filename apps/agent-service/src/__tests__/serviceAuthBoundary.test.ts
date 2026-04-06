@@ -1,7 +1,7 @@
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const ENV_KEYS = ['NODE_ENV', 'FALLBACK_WIDGET', 'AGENT_SERVICE_TOKEN', 'OPENAI_API_KEY'] as const;
+const ENV_KEYS = ['NODE_ENV', 'FALLBACK_WIDGET', 'KIDBOT_LOCAL_DEV', 'AGENT_SERVICE_TOKEN', 'OPENAI_API_KEY'] as const;
 
 const withEnv = async <T>(overrides: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>>, run: () => Promise<T>) => {
   const previous = new Map<string, string | undefined>();
@@ -50,6 +50,7 @@ describe('service auth boundary', () => {
       {
         NODE_ENV: 'test',
         FALLBACK_WIDGET: '0',
+        KIDBOT_LOCAL_DEV: undefined,
         AGENT_SERVICE_TOKEN: undefined,
         OPENAI_API_KEY: undefined
       },
@@ -64,6 +65,7 @@ describe('service auth boundary', () => {
       {
         NODE_ENV: 'test',
         FALLBACK_WIDGET: '0',
+        KIDBOT_LOCAL_DEV: undefined,
         AGENT_SERVICE_TOKEN: 'test-service-token',
         OPENAI_API_KEY: undefined
       },
@@ -73,6 +75,7 @@ describe('service auth boundary', () => {
           const response = await fetch(`${baseUrl}/voice`, {
             method: 'POST',
             headers: {
+              'x-kidbot-startup-posture': 'secured',
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({
@@ -94,6 +97,7 @@ describe('service auth boundary', () => {
       {
         NODE_ENV: 'test',
         FALLBACK_WIDGET: '0',
+        KIDBOT_LOCAL_DEV: undefined,
         AGENT_SERVICE_TOKEN: 'test-service-token',
         OPENAI_API_KEY: undefined
       },
@@ -104,6 +108,7 @@ describe('service auth boundary', () => {
             method: 'POST',
             headers: {
               Authorization: 'Bearer test-service-token',
+              'x-kidbot-startup-posture': 'secured',
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({
@@ -121,11 +126,27 @@ describe('service auth boundary', () => {
     );
   });
 
-  it('allows local fallback mode without service token', async () => {
+  it('fails startup when fallback mode is missing explicit local-dev intent', async () => {
     await withEnv(
       {
         NODE_ENV: 'test',
         FALLBACK_WIDGET: '1',
+        KIDBOT_LOCAL_DEV: undefined,
+        AGENT_SERVICE_TOKEN: undefined,
+        OPENAI_API_KEY: undefined
+      },
+      async () => {
+        await expect(import('../index.js')).rejects.toThrow(/KIDBOT_LOCAL_DEV=1/i);
+      }
+    );
+  });
+
+  it('allows local fallback mode only with explicit local-dev intent', async () => {
+    await withEnv(
+      {
+        NODE_ENV: 'test',
+        FALLBACK_WIDGET: '1',
+        KIDBOT_LOCAL_DEV: '1',
         AGENT_SERVICE_TOKEN: undefined,
         OPENAI_API_KEY: undefined
       },
@@ -144,6 +165,73 @@ describe('service auth boundary', () => {
             })
           });
           expect(response.status).toBe(200);
+        });
+      }
+    );
+  });
+
+  it('rejects secured requests with missing startup posture header', async () => {
+    await withEnv(
+      {
+        NODE_ENV: 'test',
+        FALLBACK_WIDGET: '0',
+        KIDBOT_LOCAL_DEV: undefined,
+        AGENT_SERVICE_TOKEN: 'test-service-token',
+        OPENAI_API_KEY: undefined
+      },
+      async () => {
+        const mod = await import('../index.js');
+        await withServer(mod.app, async (baseUrl) => {
+          const response = await fetch(`${baseUrl}/voice`, {
+            method: 'POST',
+            headers: {
+              Authorization: 'Bearer test-service-token',
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              text: 'Tell me a cheerful moon fact.',
+              persona: 'robot',
+              ageBand: '7-9'
+            })
+          });
+          const body = (await response.json()) as { error?: string; details?: string };
+          expect(response.status).toBe(409);
+          expect(body.error).toBe('Startup posture mismatch');
+          expect(body.details).toMatch(/x-kidbot-startup-posture=secured/i);
+        });
+      }
+    );
+  });
+
+  it('rejects posture mismatch when secured caller claims local-fallback', async () => {
+    await withEnv(
+      {
+        NODE_ENV: 'test',
+        FALLBACK_WIDGET: '0',
+        KIDBOT_LOCAL_DEV: undefined,
+        AGENT_SERVICE_TOKEN: 'test-service-token',
+        OPENAI_API_KEY: undefined
+      },
+      async () => {
+        const mod = await import('../index.js');
+        await withServer(mod.app, async (baseUrl) => {
+          const response = await fetch(`${baseUrl}/voice`, {
+            method: 'POST',
+            headers: {
+              Authorization: 'Bearer test-service-token',
+              'x-kidbot-startup-posture': 'local-fallback',
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              text: 'Tell me a cheerful moon fact.',
+              persona: 'robot',
+              ageBand: '7-9'
+            })
+          });
+          const body = (await response.json()) as { error?: string; details?: string };
+          expect(response.status).toBe(409);
+          expect(body.error).toBe('Startup posture mismatch');
+          expect(body.details).toMatch(/service posture "secured"/i);
         });
       }
     );

@@ -15,7 +15,13 @@ import { kidTone, moderate } from './safety.js';
 const agentPort = Number(process.env.AGENT_PORT ?? 4505);
 const agentBaseUrl = `http://localhost:${agentPort}`;
 const fallbackMode = process.env.FALLBACK_WIDGET === '1';
-const serviceAuthToken = process.env.AGENT_SERVICE_TOKEN;
+const localDevIntent = process.env.KIDBOT_LOCAL_DEV === '1';
+const serviceAuthToken = process.env.AGENT_SERVICE_TOKEN?.trim();
+const startupPosture = fallbackMode ? 'local-fallback' : 'secured';
+
+if (fallbackMode && !localDevIntent) {
+  throw new Error('FALLBACK_WIDGET=1 requires KIDBOT_LOCAL_DEV=1 for explicit local fallback posture.');
+}
 
 if (!fallbackMode && !serviceAuthToken) {
   throw new Error('AGENT_SERVICE_TOKEN is required unless FALLBACK_WIDGET=1.');
@@ -37,6 +43,7 @@ const callAgent = async <T>(path: string, payload: unknown): Promise<T> => {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      'x-kidbot-startup-posture': startupPosture,
       Authorization: `Bearer ${serviceAuthToken ?? ''}`
     },
     body: JSON.stringify(payload)
@@ -228,7 +235,7 @@ export const registerTools = (server: McpServer): void => {
         input,
         (data) => [data.text ?? ''],
         async (data) =>
-          process.env.FALLBACK_WIDGET === '1'
+          fallbackMode
             ? Promise.resolve(fixtureVoice(data))
             : callAgent<{ blocked: boolean; message?: string; persona?: string; text?: string; ssml?: string }>(
                 '/voice',
@@ -252,7 +259,7 @@ export const registerTools = (server: McpServer): void => {
         input,
         (data) => [data.theme ?? ''],
         async (data) =>
-          process.env.FALLBACK_WIDGET === '1'
+          fallbackMode
             ? Promise.resolve(fixturePanels(data))
             : callAgent<{ blocked: boolean; message?: string; theme?: string; panels?: unknown[] }>(
                 '/story-panels',
@@ -276,7 +283,7 @@ export const registerTools = (server: McpServer): void => {
         input,
         (data) => [data.scene ?? ''],
         async (data) =>
-          process.env.FALLBACK_WIDGET === '1'
+          fallbackMode
             ? Promise.resolve(fixtureColoring())
             : callAgent<{ blocked: boolean; message?: string; svg?: string }>('/coloring-outline', data),
         (data, response) =>
@@ -295,7 +302,7 @@ export const registerTools = (server: McpServer): void => {
         input,
         (data) => [data.topic ?? '', kidTone((data.ageBand ?? '7-9') as '4-6' | '7-9' | '10-12')],
         async (data) =>
-          process.env.FALLBACK_WIDGET === '1'
+          fallbackMode
             ? Promise.resolve(fixtureScience(data))
             : callAgent<{
                 blocked: boolean;

@@ -28,12 +28,15 @@ The `dev` script runs the widget (Vite), MCP server, and agent service together.
 
 Copy `.env.example` to `.env` and provide any overrides:
 
-```
+```env
 OPENAI_API_KEY=
 AGENT_SERVICE_TOKEN=
 MCP_PORT=3000
 AGENT_PORT=4505
+KIDBOT_LOCAL_DEV=0
 ```
+
+When `FALLBACK_WIDGET` is not `1` (secured posture), direct calls to `agent-service` must include both `Authorization: Bearer <AGENT_SERVICE_TOKEN>` and `x-kidbot-startup-posture: secured`. The MCP server sets this header automatically.
 
 ### Ngrok (optional)
 
@@ -53,7 +56,8 @@ If installs are blocked, you can still preview the widget and flows:
   - `apps/web-widget/dist/kidbot-fallback.html` in a browser
 
 - Or run the MCP server in fallback mode (if node runs but installs are blocked):
-  - `node apps/mcp-server/dist/server.js` (if dist artifacts are unavailable, open /diag statically)
+  - set `FALLBACK_WIDGET=1` and `KIDBOT_LOCAL_DEV=1`, then run `node apps/mcp-server/dist/server.js`
+  - (if dist artifacts are unavailable, open /diag statically)
 
 - Health & Diag:
   - `/healthz`  -> shows fallback or dist mode
