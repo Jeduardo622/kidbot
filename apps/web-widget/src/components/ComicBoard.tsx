@@ -25,7 +25,7 @@ export const ComicBoard = () => {
   const [error, setError] = useState<string | undefined>();
   const announcement = buildAnnouncementState({
     loading,
-    loadingMessage: 'KidBot is planning story panels.',
+    loadingMessage: 'Kidbot is planning story panels.',
     errorMessage: error,
     readyMessage: panels.length > 0 ? `Planned ${panels.length} panels.` : ''
   });
@@ -49,7 +49,7 @@ export const ComicBoard = () => {
       }
       if (result.blocked) {
         setPanels([]);
-        setError(result.message ?? 'KidBot paused this story idea.');
+        setError(result.message ?? 'Kidbot paused this story idea.');
       } else {
         setPanels(result.panels ?? []);
       }

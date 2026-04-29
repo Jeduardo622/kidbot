@@ -6,7 +6,8 @@ describe('image agent', () => {
     const response = generateColoringOutline({ scene: 'Happy turtle parade' });
     expect(response.blocked).toBe(false);
     expect(response.svg).toContain('<svg');
-    expect(response.svg).toContain('Happy turtle parade'.toUpperCase());
+    expect(response.svg).toContain('viewBox="0 0 1024 1024"');
+    expect(response.svg).toContain('fill="none"');
   });
 
   it('blocks unsafe scenes', () => {

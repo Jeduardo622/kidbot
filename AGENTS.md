@@ -1,4 +1,4 @@
-KidBot Agent Service (Agents SDK)
+Kidbot Agent Service (Agents SDK)
 
 Stable, kid-safe orchestration layer for Voice Chat + Persona, Story Panels, Coloring Outlines, and Science Sims.
 
@@ -44,6 +44,11 @@ OPENAI_API_KEY=sk-...
 PORT=4505
 LOG_LEVEL=info
 DEFAULT_AGE_BAND=7-9   # one of: 4-6, 7-9, 10-12
+RATE_LIMIT_STORE=memory
+REDIS_URL=
+PROVIDER_FAILURE_POLICY=503
+PROVIDER_TIMEOUT_MS=15000
+PROVIDER_RETRIES=1
 
 Install & Run
 pnpm i
@@ -232,6 +237,16 @@ Simple token bucket (per IP) suggested defaults:
 /science-sim: 20 req/min
 
 Return 429 with Retry-After.
+
+Use RATE_LIMIT_STORE=redis with REDIS_URL for shared buckets across Node replicas. The memory store remains the local/test fallback.
+
+Provider Failure Policy
+
+Provider failures are classified before route-level handling:
+
+moderation_failure, generation_timeout, malformed_output, unsafe_output, provider_unavailable.
+
+PROVIDER_FAILURE_POLICY=503 returns a degraded-service 503. Use PROVIDER_FAILURE_POLICY=fallback only when deterministic stub content with providerFallback=true and fallbackReason is acceptable.
 
 Logging & Tracing
 

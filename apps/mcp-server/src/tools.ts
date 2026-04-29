@@ -28,7 +28,7 @@ if (!fallbackMode && !serviceAuthToken) {
 }
 const outputMeta = {
   'openai/outputTemplate': 'ui://widget/kidbot.html',
-  'openai/widgetDescription': 'KidBot — safe creative play: voice, comics, coloring, science.',
+  'openai/widgetDescription': 'Kidbot — safe creative play: voice, comics, coloring, science.',
   'openai/widgetCSP': {
     connect_domains: [] as string[],
     resource_domains: [] as string[]
@@ -243,7 +243,7 @@ export const registerTools = (server: McpServer): void => {
               ),
         (data, response) =>
           response.blocked
-            ? response.message ?? 'KidBot paused this request.'
+            ? response.message ?? 'Kidbot paused this request.'
             : `${data.persona} reply ready! ${response.text ?? ''}`
       ));
 

@@ -97,3 +97,32 @@ test('/mcp streamable response includes expected tool ids', async () => {
     assert.match(body, new RegExp(`"${toolId}"`));
   }
 });
+
+test('/mcp tool call returns structuredContent for widget contract', async () => {
+  const response = await fetch(`${baseUrl}/mcp`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/event-stream'
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 3,
+      method: 'tools/call',
+      params: {
+        name: 'story_panels',
+        arguments: {
+          theme: 'A dragon learns kindness',
+          panels: 2,
+          ageBand: '7-9'
+        }
+      }
+    })
+  });
+
+  const body = await response.text();
+  assert.equal(response.status, 200);
+  assert.match(body, /"structuredContent":\{/);
+  assert.match(body, /"blocked":false/);
+  assert.match(body, /"panels":\[/);
+});

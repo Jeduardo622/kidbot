@@ -28,7 +28,7 @@ export const ScienceLab = () => {
   const [showExplanation, setShowExplanation] = useState(false);
   const announcement = buildAnnouncementState({
     loading,
-    loadingMessage: 'KidBot is preparing your science experiment.',
+    loadingMessage: 'Kidbot is preparing your science experiment.',
     errorMessage: error,
     readyMessage: plan && !plan.blocked ? `${plan.title ?? 'Experiment'} ready.` : ''
   });
@@ -50,7 +50,7 @@ export const ScienceLab = () => {
       }
       if (result.blocked) {
         setPlan(undefined);
-        setError(result.message ?? 'KidBot paused this experiment.');
+        setError(result.message ?? 'Kidbot paused this experiment.');
       } else {
         setPlan(result);
       }

@@ -50,7 +50,7 @@ describe('moderation regression coverage', () => {
       const response = generateColoringOutline({ scene: 'Friendly space cat adventure' });
       expect(response.blocked).toBe(false);
       expect(response.svg).toContain('<svg');
-      expect(response.svg).toContain('FRIENDLY SPACE CAT ADVENTURE');
+      expect(response.svg).toContain('viewBox="0 0 1024 1024"');
     });
   });
 

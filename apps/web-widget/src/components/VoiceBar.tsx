@@ -42,13 +42,13 @@ export const VoiceBar = () => {
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState<VoiceResult | undefined>();
   const [error, setError] = useState<string | undefined>();
-  const blockedMessage = response?.blocked ? response.message ?? 'KidBot paused this request.' : undefined;
+  const blockedMessage = response?.blocked ? response.message ?? 'Kidbot paused this request.' : undefined;
   const announcement = buildAnnouncementState({
     loading,
-    loadingMessage: 'KidBot is thinking.',
+    loadingMessage: 'Kidbot is thinking.',
     errorMessage: error,
     urgentMessage: blockedMessage,
-    readyMessage: response?.text ? `${response.persona ?? 'KidBot'} reply ready.` : ''
+    readyMessage: response?.text ? `${response.persona ?? 'Kidbot'} reply ready.` : ''
   });
 
   useEffect(() => {
