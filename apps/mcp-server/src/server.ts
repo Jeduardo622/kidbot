@@ -57,25 +57,25 @@ const resolveDistHtml = (): string => {
   const jsContent = jsFile ? readFileSync(path.join(assetsDir, jsFile), 'utf-8') : '';
   const cssContent = cssFile ? readFileSync(path.join(assetsDir, cssFile), 'utf-8') : '';
 
-  return `<!doctype html><html><head><meta charset="utf-8"/><title>KidBot Widget</title><style>${cssContent}</style></head><body><div id="kidbot-root"></div><script type="module">${jsContent}</script></body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"/><title>Kidbot Widget</title><style>${cssContent}</style></head><body><div id="kidbot-root"></div><script type="module">${jsContent}</script></body></html>`;
 };
 
 const widgetMode: Mode = fallbackRequested || !hasBundle ? 'fallback' : 'dist';
 const widgetHtml = widgetMode === 'fallback' ? resolveFallbackHtml() : resolveDistHtml();
 
 const createMcpServer = (): McpServer => {
-  const server = new McpServer({ name: 'kidbot-mcp', version: '0.1.0' });
+  const server = new McpServer({ name: 'Kidbot-mcp', version: '0.1.0' });
   registerTools(server);
 
   server.registerResource(
     'kidbot_widget',
     widgetResourceUri,
     {
-      title: 'KidBot Widget',
-      description: 'KidBot interactive widget shell',
+      title: 'Kidbot Widget',
+      description: 'Kidbot interactive widget shell',
       mimeType: 'text/html+skybridge',
       _meta: {
-        'openai/widgetDescription': 'KidBot — safe creative play: voice, comics, coloring, science.',
+        'openai/widgetDescription': 'Kidbot — safe creative play: voice, comics, coloring, science.',
         'openai/widgetCSP': { connect_domains: [], resource_domains: [] },
         mode: widgetMode
       }
@@ -87,7 +87,7 @@ const createMcpServer = (): McpServer => {
           mimeType: 'text/html+skybridge',
           text: widgetHtml,
           _meta: {
-            'openai/widgetDescription': 'KidBot — safe creative play: voice, comics, coloring, science.',
+            'openai/widgetDescription': 'Kidbot — safe creative play: voice, comics, coloring, science.',
             'openai/widgetCSP': { connect_domains: [], resource_domains: [] },
             mode: widgetMode
           }
@@ -127,7 +127,7 @@ app.get('/diag', (_req, res) => {
   }
   links.push('<li><a href="/healthz">Health JSON</a></li>');
 
-  res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"/><title>KidBot Diagnostics</title><style>body{font-family:system-ui;margin:32px;color:#111;} a{color:#0066cc;} .tag{display:inline-block;padding:4px 8px;border-radius:999px;background:#eef;border:1px solid #ccd;margin-left:8px;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;}</style></head><body><h1>KidBot Diagnostics <span class="tag">${widgetMode}</span></h1><p>Server port: ${Number(process.env.MCP_PORT ?? 3000)}</p><ul>${links.join('')}</ul><p>Fixtures served from: ${existsSync(fixturesDir) ? '/fixtures' : 'not available'}</p></body></html>`);
+  res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"/><title>Kidbot Diagnostics</title><style>body{font-family:system-ui;margin:32px;color:#111;} a{color:#0066cc;} .tag{display:inline-block;padding:4px 8px;border-radius:999px;background:#eef;border:1px solid #ccd;margin-left:8px;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;}</style></head><body><h1>Kidbot Diagnostics <span class="tag">${widgetMode}</span></h1><p>Server port: ${Number(process.env.MCP_PORT ?? 3000)}</p><ul>${links.join('')}</ul><p>Fixtures served from: ${existsSync(fixturesDir) ? '/fixtures' : 'not available'}</p></body></html>`);
 });
 
 app.post('/mcp', async (req, res) => {
@@ -164,5 +164,5 @@ const port = Number(process.env.MCP_PORT ?? 3000);
 
 app.listen(port, () => {
   // eslint-disable-next-line no-console
-  console.log(`KidBot MCP server listening on http://localhost:${port}`);
+  console.log(`Kidbot MCP server listening on http://localhost:${port}`);
 });

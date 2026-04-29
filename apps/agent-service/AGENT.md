@@ -1,4 +1,4 @@
-KidBot Agent Service (Agents SDK)
+Kidbot Agent Service (Agents SDK)
 
 Stable, kid-safe orchestration layer for Voice Chat + Persona, Story Panels, Coloring Outlines, and Science Sims.
 

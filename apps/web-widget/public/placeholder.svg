@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 180" role="img" aria-labelledby="title desc">
-  <title id="title">KidBot story placeholder</title>
+  <title id="title">Kidbot story placeholder</title>
   <desc id="desc">A friendly robot waving inside a dashed frame.</desc>
   <rect x="4" y="4" width="232" height="172" rx="16" ry="16" fill="#f8fafc" stroke="#cbd5f5" stroke-width="4" stroke-dasharray="14 10" />
   <g fill="none" stroke="#64748b" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">

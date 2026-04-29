@@ -51,7 +51,7 @@ export const ColoringBook = () => {
   const [strokes, setStrokes] = useState<Stroke[]>([]);
   const announcement = buildAnnouncementState({
     loading,
-    loadingMessage: 'KidBot is drawing your coloring outline.',
+    loadingMessage: 'Kidbot is drawing your coloring outline.',
     errorMessage: error,
     readyMessage: outline ? 'Coloring outline ready.' : ''
   });
@@ -146,12 +146,12 @@ export const ColoringBook = () => {
       }
       if (result.blocked) {
         setOutline(undefined);
-        setError(result.message ?? 'KidBot paused this outline request.');
+        setError(result.message ?? 'Kidbot paused this outline request.');
       } else {
         const sanitized = sanitizeSvgOutline(result.svg);
         if (!sanitized) {
           setOutline(undefined);
-          setError('KidBot removed an unsafe outline. Try a different scene.');
+          setError('Kidbot removed an unsafe outline. Try a different scene.');
         } else {
           setOutline(sanitized);
         }

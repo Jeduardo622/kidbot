@@ -1,10 +1,10 @@
-# KidBot Executive Specification
+# Kidbot Executive Specification
 
 ## Vision
-**KidBot** is a creative, safe, and voice-driven AI playground for children ages **4–12**.  
+**Kidbot** is a creative, safe, and voice-driven AI playground for children ages **4–12**.  
 It helps kids explore curiosity through stories, science experiments, and artistic expression — all guided by a friendly voice persona they can talk to.
 
-KidBot combines **OpenAI’s Apps SDK** (for in-ChatGPT UI & interaction) and **Agents SDK + Realtime API** (for voice orchestration and creative reasoning).
+Kidbot combines **OpenAI’s Apps SDK** (for in-ChatGPT UI & interaction) and **Agents SDK + Realtime API** (for voice orchestration and creative reasoning).
 
 ---
 
@@ -37,7 +37,7 @@ Empower kids to *learn through play* by interacting with a trusted digital frien
 - **COPPA** / **GDPR-K** aligned: no data collection beyond necessary app function.  
 - **Guardrails:** AI moderation layer filters harmful, scary, or adult content.  
 - **Privacy:** No persistent identity or open-ended chat logs.  
-- **Transparency:** Clear disclosure “KidBot is an AI friend that helps you learn and play.”  
+- **Transparency:** Clear disclosure “Kidbot is an AI friend that helps you learn and play.”  
 - **Parent Supervision:** Configurable via parental PIN (v0.4+).
 
 ---
@@ -100,5 +100,5 @@ Empower kids to *learn through play* by interacting with a trusted digital frien
 ---
 
 ## Summary
-KidBot blends learning, storytelling, and play inside ChatGPT safely and responsibly.  
+Kidbot blends learning, storytelling, and play inside ChatGPT safely and responsibly.  
 Its modular SDK architecture ensures **extensibility**, **compliance**, and **trustworthiness** for families.

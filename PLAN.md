@@ -1,4 +1,4 @@
-# KidBot Engineering Plan (v1.0 Milestone Roadmap)
+# Kidbot Engineering Plan (v1.0 Milestone Roadmap)
 
 ## Team
 | Role | Name / Placeholder | Notes |
@@ -19,7 +19,7 @@
 | Task | Assigned To | Deliverable |
 |------|--------------|-------------|
 | Create monorepo, packages, build scripts | CTO | Working repo & CI |
-| Build MCP server scaffold w/ fallback widget | Frontend Engineer | `/mcp` endpoint + `kidbot.html` resource |
+| Build MCP server scaffold w/ fallback widget | Frontend Engineer | `/mcp` endpoint + `Kidbot.html` resource |
 | Implement agent service w/ stubbed endpoints | AI Engineer | `/voice`, `/story-panels`, `/coloring-outline`, `/science-sim` |
 | Implement UI Tabs (Voice, Comics, Coloring, Science) | Frontend Engineer | Component renders & state sync |
 | Add local moderation + safety layer | Safety Engineer | `moderate()` in both server & agent |
@@ -118,7 +118,7 @@
 ---
 
 ## Appendix: Definitions
-- **MCP Server:** Connects ChatGPT host to KidBot’s component & tools.
+- **MCP Server:** Connects ChatGPT host to Kidbot’s component & tools.
 - **Agent Service:** Backend orchestrator for creative and reasoning logic.
 - **Realtime API:** Manages live speech synthesis and recognition.
 - **Widget:** The Apps SDK UI displayed inside ChatGPT.

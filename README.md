@@ -1,6 +1,6 @@
-# KidBot Monorepo
+# Kidbot Monorepo
 
-KidBot is a safety-first creative playground for kids. This monorepo hosts the MCP bridge, the KidBot web widget, and the kid-safe agent service.
+Kidbot is a safety-first creative playground for kids. This monorepo hosts the MCP bridge, the Kidbot web widget, and the kid-safe agent service.
 
 ## Prerequisites
 
@@ -34,9 +34,16 @@ AGENT_SERVICE_TOKEN=
 MCP_PORT=3000
 AGENT_PORT=4505
 KIDBOT_LOCAL_DEV=0
+RATE_LIMIT_STORE=memory
+REDIS_URL=
+PROVIDER_FAILURE_POLICY=503
+PROVIDER_TIMEOUT_MS=15000
+PROVIDER_RETRIES=1
 ```
 
 When `FALLBACK_WIDGET` is not `1` (secured posture), direct calls to `agent-service` must include both `Authorization: Bearer <AGENT_SERVICE_TOKEN>` and `x-kidbot-startup-posture: secured`. The MCP server sets this header automatically.
+
+`RATE_LIMIT_STORE=redis` requires `REDIS_URL` and shares route buckets across service replicas. `PROVIDER_FAILURE_POLICY=503` makes model-backed failures visible as degraded service responses; set it to `fallback` only when deterministic stub substitution is acceptable.
 
 ### Ngrok (optional)
 
@@ -74,7 +81,7 @@ When you regain installs, exit fallback:
 
 ## Repository Layout
 
-- `apps/mcp-server` – Model Context Protocol bridge exposing KidBot tools.
+- `apps/mcp-server` – Model Context Protocol bridge exposing Kidbot tools.
 - `apps/web-widget` – React widget rendered inside ChatGPT Apps SDK.
 - `apps/agent-service` – Express service orchestrating kid-safe content agents.
 - Contract integrity guardrail: `apps/agent-service/src/__tests__/contractIntegrity.test.ts` verifies schema parity for MCP <-> agent-service and tool-id consistency for widget <-> MCP.

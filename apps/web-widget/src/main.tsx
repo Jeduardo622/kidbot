@@ -44,7 +44,7 @@ const App = () => {
   return (
     <div className="kidbot-app">
       <header className="kidbot-header">
-        <h1>KidBot Play Studio</h1>
+        <h1>Kidbot Play Studio</h1>
         <nav>
           {tabs.map((tab) => (
             <button
