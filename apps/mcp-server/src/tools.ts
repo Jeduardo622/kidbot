@@ -10,23 +10,11 @@ import {
   storyPanelsSchema,
   voiceInputSchema
 } from './schema.js';
+import { mcpConfig } from './config.js';
 import { kidTone, moderate } from './safety.js';
 
-const agentPort = Number(process.env.AGENT_PORT ?? 4505);
-const agentBaseUrl = `http://localhost:${agentPort}`;
-const fallbackMode = process.env.FALLBACK_WIDGET === '1';
-const localDevIntent = process.env.KIDBOT_LOCAL_DEV === '1';
-const serviceAuthToken = process.env.AGENT_SERVICE_TOKEN?.trim();
-const startupPosture = fallbackMode ? 'local-fallback' : 'secured';
+const { agentBaseUrl, fallbackMode, serviceAuthToken, startupPosture } = mcpConfig;
 const degradedServiceMessage = 'Kidbot is having trouble reaching its idea engine right now. Please try again in a moment.';
-
-if (fallbackMode && !localDevIntent) {
-  throw new Error('FALLBACK_WIDGET=1 requires KIDBOT_LOCAL_DEV=1 for explicit local fallback posture.');
-}
-
-if (!fallbackMode && !serviceAuthToken) {
-  throw new Error('AGENT_SERVICE_TOKEN is required unless FALLBACK_WIDGET=1.');
-}
 const outputMeta = {
   'openai/outputTemplate': 'ui://widget/kidbot.html',
   'openai/widgetDescription': 'Kidbot — safe creative play: voice, comics, coloring, science.',

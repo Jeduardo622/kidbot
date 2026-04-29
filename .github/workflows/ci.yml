@@ -68,5 +68,8 @@ jobs:
       - name: Run MCP compatibility tests
         run: pnpm --filter @kidbot/mcp-server run test:compat
 
+      - name: Run secured deploy posture smoke
+        run: pnpm run smoke:secured-posture
+
       - name: Run MCP auth/startup matrix
         run: pnpm --filter @kidbot/mcp-server run test:auth-matrix

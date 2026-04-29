@@ -40,6 +40,7 @@ Idempotent, stateless endpoints (session state in UI/MCP).
 
 Env (apps/agent-service/.env)
 OPENAI_API_KEY=sk-...
+AGENT_SERVICE_TOKEN=<generate with: openssl rand -base64 48>
 PORT=4505
 LOG_LEVEL=info
 DEFAULT_AGE_BAND=7-9
@@ -61,6 +62,8 @@ Zod schemas per route; on error 400.
 Errors & Rate Limits
 
 400/401/429/500 with correlationId.
+
+Secured mode requires Authorization: Bearer <AGENT_SERVICE_TOKEN> and x-kidbot-startup-posture: secured.
 
 Suggested limits: voice 60/m, story 20/m, coloring 15/m, science 20/m.
 

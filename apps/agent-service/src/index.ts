@@ -9,6 +9,7 @@ import { craftVoiceReply } from './agents/voiceAgent.js';
 import { generateColoringOutline } from './agents/imageAgent.js';
 import { planStory } from './agents/storyAgent.js';
 import { planExperiment } from './agents/experimentAgent.js';
+import { parseAgentServiceConfig } from './config.js';
 import { correlationId, moderate } from './guardrails.js';
 import {
   ProviderError,
@@ -35,23 +36,16 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 
-const providerApiKey = process.env.OPENAI_API_KEY;
-const serviceAuthToken = process.env.AGENT_SERVICE_TOKEN?.trim();
-const fallbackMode = process.env.FALLBACK_WIDGET === '1';
-const localDevIntent = process.env.KIDBOT_LOCAL_DEV === '1';
-const requireServiceAuth = !fallbackMode;
-const startupPosture = fallbackMode ? 'local-fallback' : 'secured';
+const config = parseAgentServiceConfig();
+const {
+  providerApiKey,
+  serviceAuthToken,
+  fallbackMode,
+  requireServiceAuth,
+  startupPosture,
+  port,
+} = config;
 const providerFailurePolicy = parseProviderFailurePolicy(process.env);
-
-if (fallbackMode && !localDevIntent) {
-  throw new Error(
-    'FALLBACK_WIDGET=1 requires KIDBOT_LOCAL_DEV=1 for explicit local fallback posture.',
-  );
-}
-
-if (requireServiceAuth && !serviceAuthToken) {
-  throw new Error('AGENT_SERVICE_TOKEN is required unless FALLBACK_WIDGET=1.');
-}
 
 const authorization: RequestHandler = (req, res, next) => {
   const postureHeaderRaw = req.headers['x-kidbot-startup-posture'];
@@ -443,8 +437,6 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   console.warn(JSON.stringify({ route: 'unhandled', error: safeProviderErrorSummary(err) }));
   res.status(500).json({ error: 'Internal Error', correlationId: correlationId() });
 });
-
-const port = Number(process.env.PORT ?? process.env.AGENT_PORT ?? 4505);
 
 export const start = () =>
   app.listen(port, () => {

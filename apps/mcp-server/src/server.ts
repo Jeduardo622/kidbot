@@ -6,6 +6,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { mcpConfig } from './config.js';
 import { registerTools } from './tools.js';
 import type { Mode } from './types.js';
 
@@ -25,7 +26,7 @@ const fallbackCssPath = path.join(distDir, 'kidbot-fallback.css');
 const fallbackJsPath = path.join(distDir, 'kidbot-fallback.js');
 
 const hasBundle = existsSync(distDir) && existsSync(assetsDir) && readdirSync(assetsDir).some((file) => file.endsWith('.js'));
-const fallbackRequested = process.env.FALLBACK_WIDGET === '1';
+const fallbackRequested = mcpConfig.fallbackMode;
 const fallbackAvailable = existsSync(fallbackHtmlPath);
 
 const resolveFallbackHtml = (): string => {
@@ -127,7 +128,7 @@ app.get('/diag', (_req, res) => {
   }
   links.push('<li><a href="/healthz">Health JSON</a></li>');
 
-  res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"/><title>Kidbot Diagnostics</title><style>body{font-family:system-ui;margin:32px;color:#111;} a{color:#0066cc;} .tag{display:inline-block;padding:4px 8px;border-radius:999px;background:#eef;border:1px solid #ccd;margin-left:8px;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;}</style></head><body><h1>Kidbot Diagnostics <span class="tag">${widgetMode}</span></h1><p>Server port: ${Number(process.env.MCP_PORT ?? 3000)}</p><ul>${links.join('')}</ul><p>Fixtures served from: ${existsSync(fixturesDir) ? '/fixtures' : 'not available'}</p></body></html>`);
+  res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"/><title>Kidbot Diagnostics</title><style>body{font-family:system-ui;margin:32px;color:#111;} a{color:#0066cc;} .tag{display:inline-block;padding:4px 8px;border-radius:999px;background:#eef;border:1px solid #ccd;margin-left:8px;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;}</style></head><body><h1>Kidbot Diagnostics <span class="tag">${widgetMode}</span></h1><p>Server port: ${mcpConfig.mcpPort}</p><ul>${links.join('')}</ul><p>Fixtures served from: ${existsSync(fixturesDir) ? '/fixtures' : 'not available'}</p></body></html>`);
 });
 
 app.post('/mcp', async (req, res) => {
@@ -160,7 +161,7 @@ app.post('/mcp', async (req, res) => {
   }
 });
 
-const port = Number(process.env.MCP_PORT ?? 3000);
+const port = mcpConfig.mcpPort;
 
 app.listen(port, () => {
   // eslint-disable-next-line no-console

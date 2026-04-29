@@ -110,6 +110,28 @@ describe('service auth boundary', () => {
     );
   });
 
+  it('fails production secured startup when token is too short without leaking it', async () => {
+    await withEnv(
+      {
+        NODE_ENV: 'production',
+        FALLBACK_WIDGET: '0',
+        KIDBOT_LOCAL_DEV: undefined,
+        AGENT_SERVICE_TOKEN: 'short-token-secret',
+        OPENAI_API_KEY: undefined,
+      },
+      async () => {
+        await expect(import('../index.js')).rejects.toThrow(/at least 32 characters/i);
+        try {
+          await import('../index.js');
+        } catch (error) {
+          expect(error instanceof Error ? error.message : String(error)).not.toContain(
+            'short-token-secret',
+          );
+        }
+      },
+    );
+  });
+
   it('accepts authorized service requests with the configured token', async () => {
     await withEnv(
       {

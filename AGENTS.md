@@ -41,6 +41,7 @@ Idempotent, stateless endpoints (session state kept in the UI or MCP).
 Setup
 Env Vars (apps/agent-service/.env)
 OPENAI_API_KEY=sk-...
+AGENT_SERVICE_TOKEN=<generate with: openssl rand -base64 48>
 PORT=4505
 LOG_LEVEL=info
 DEFAULT_AGE_BAND=7-9   # one of: 4-6, 7-9, 10-12
@@ -80,7 +81,7 @@ Science steps: ≤ 6 simple steps + 1 MCQ.
 API
 
 All endpoints: application/json.
-Auth: Authorization: Bearer <OPENAI_API_KEY> (reuse platform key for now; swap to service token later).
+Auth: Authorization: Bearer <AGENT_SERVICE_TOKEN> plus x-kidbot-startup-posture: secured.
 
 1) POST /voice
 
@@ -260,7 +261,8 @@ Testing (Manual)
 
 Voice:
 
-curl -H "Authorization: Bearer $OPENAI_API_KEY" \
+curl -H "Authorization: Bearer $AGENT_SERVICE_TOKEN" \
+  -H "x-kidbot-startup-posture: secured" \
   -H "Content-Type: application/json" \
   -d '{"text":"Tell me a Moon fact","persona":"robot","ageBand":"7-9"}' \
   http://localhost:4505/voice
@@ -270,7 +272,8 @@ Expect ≤ 100 words, cheerful, no scary bits.
 
 Story Panels:
 
-curl -H "Authorization: Bearer $OPENAI_API_KEY" \
+curl -H "Authorization: Bearer $AGENT_SERVICE_TOKEN" \
+  -H "x-kidbot-startup-posture: secured" \
   -H "Content-Type: application/json" \
   -d '{"theme":"A shy dragon makes a friend","panels":4,"ageBand":"7-9"}' \
   http://localhost:4505/story-panels
@@ -278,7 +281,8 @@ curl -H "Authorization: Bearer $OPENAI_API_KEY" \
 
 Coloring Outline:
 
-curl -H "Authorization: Bearer $OPENAI_API_KEY" \
+curl -H "Authorization: Bearer $AGENT_SERVICE_TOKEN" \
+  -H "x-kidbot-startup-posture: secured" \
   -H "Content-Type: application/json" \
   -d '{"scene":"space cat"}' \
   http://localhost:4505/coloring-outline
@@ -286,7 +290,8 @@ curl -H "Authorization: Bearer $OPENAI_API_KEY" \
 
 Science Sim:
 
-curl -H "Authorization: Bearer $OPENAI_API_KEY" \
+curl -H "Authorization: Bearer $AGENT_SERVICE_TOKEN" \
+  -H "x-kidbot-startup-posture: secured" \
   -H "Content-Type: application/json" \
   -d '{"topic":"buoyancy","ageBand":"7-9"}' \
   http://localhost:4505/science-sim
