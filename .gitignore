@@ -10,4 +10,5 @@ coverage/
 .vscode/
 .idea/
 *.log
+*.tsbuildinfo
 pnpm-lock.yaml

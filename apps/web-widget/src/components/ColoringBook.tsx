@@ -29,10 +29,14 @@ const renderStrokes = (canvas: HTMLCanvasElement, strokes: Stroke[]) => {
     if (stroke.points.length === 0) {
       continue;
     }
+    const start = stroke.points[0];
+    if (!start) {
+      continue;
+    }
     ctx.strokeStyle = stroke.color;
     ctx.lineWidth = stroke.size;
     ctx.beginPath();
-    ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+    ctx.moveTo(start.x, start.y);
     for (const point of stroke.points.slice(1)) {
       ctx.lineTo(point.x, point.y);
     }
@@ -53,7 +57,7 @@ export const ColoringBook = () => {
     loading,
     loadingMessage: 'Kidbot is drawing your coloring outline.',
     errorMessage: error,
-    readyMessage: outline ? 'Coloring outline ready.' : ''
+    readyMessage: outline ? 'Coloring outline ready.' : '',
   });
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -78,7 +82,7 @@ export const ColoringBook = () => {
     const rect = canvas.getBoundingClientRect();
     return {
       x: ((event.clientX - rect.left) / rect.width) * CANVAS_SIZE,
-      y: ((event.clientY - rect.top) / rect.height) * CANVAS_SIZE
+      y: ((event.clientY - rect.top) / rect.height) * CANVAS_SIZE,
     };
   };
 
@@ -140,7 +144,9 @@ export const ColoringBook = () => {
     setError(undefined);
     setOutline(undefined);
     try {
-      const result = (await window.openai?.callTool?.('coloring_outline', { scene, style })) as ColoringResponse | undefined;
+      const result = (await window.openai?.callTool?.('coloring_outline', { scene, style })) as
+        | ColoringResponse
+        | undefined;
       if (!result) {
         throw new Error('Widget bridge unavailable.');
       }
@@ -173,7 +179,13 @@ export const ColoringBook = () => {
         <label htmlFor="scene">Scene</label>
         <input id="scene" value={scene} onChange={(event) => setScene(event.target.value)} />
         <label htmlFor="style">Style</label>
-        <select id="style" value={style ?? ''} onChange={(event) => setStyle(event.target.value ? (event.target.value as OutlineStyle) : undefined)}>
+        <select
+          id="style"
+          value={style ?? ''}
+          onChange={(event) =>
+            setStyle(event.target.value ? (event.target.value as OutlineStyle) : undefined)
+          }
+        >
           <option value="">Any</option>
           <option value="animals">Animals</option>
           <option value="space">Space</option>
@@ -199,7 +211,12 @@ export const ColoringBook = () => {
         </div>
         <aside className="tools">
           <label htmlFor="color">Color</label>
-          <input id="color" type="color" value={brushColor} onChange={(event) => setBrushColor(event.target.value)} />
+          <input
+            id="color"
+            type="color"
+            value={brushColor}
+            onChange={(event) => setBrushColor(event.target.value)}
+          />
           <label htmlFor="brush">Brush</label>
           <input
             id="brush"
