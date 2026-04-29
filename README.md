@@ -34,8 +34,8 @@ AGENT_SERVICE_TOKEN=
 MCP_PORT=3000
 AGENT_PORT=4505
 KIDBOT_LOCAL_DEV=0
-RATE_LIMIT_STORE=memory
-REDIS_URL=
+RATE_LIMIT_STORE=redis
+REDIS_URL=redis://localhost:6379
 PROVIDER_FAILURE_POLICY=503
 PROVIDER_TIMEOUT_MS=15000
 PROVIDER_RETRIES=1
@@ -43,7 +43,13 @@ PROVIDER_RETRIES=1
 
 When `FALLBACK_WIDGET` is not `1` (secured posture), direct calls to `agent-service` must include both `Authorization: Bearer <AGENT_SERVICE_TOKEN>` and `x-kidbot-startup-posture: secured`. The MCP server sets this header automatically.
 
-`RATE_LIMIT_STORE=redis` requires `REDIS_URL` and shares route buckets across service replicas. `PROVIDER_FAILURE_POLICY=503` makes model-backed failures visible as degraded service responses; set it to `fallback` only when deterministic stub substitution is acceptable.
+Start self-hosted Redis locally with:
+
+```bash
+docker compose -f docker-compose.redis.yml up -d
+```
+
+`RATE_LIMIT_STORE=redis` requires `REDIS_URL` and shares route buckets across service replicas. The agent service `/healthz` endpoint reports limiter readiness. `PROVIDER_FAILURE_POLICY=503` makes model-backed failures visible as degraded service responses; set it to `fallback` only when deterministic stub substitution is acceptable.
 
 ### Ngrok (optional)
 
