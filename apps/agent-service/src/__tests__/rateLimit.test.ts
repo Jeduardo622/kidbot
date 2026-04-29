@@ -103,3 +103,36 @@ describe('rate limit stores', () => {
     await expect(store.readiness()).resolves.toEqual({ mode: 'memory', ready: true });
   });
 });
+
+describe('redis rate limit store smoke', () => {
+  const redisUrl = process.env.REDIS_URL?.trim();
+  const itWithRedis = redisUrl ? it : it.skip;
+
+  itWithRedis('shares counts, ttl, reset, and readiness through Redis', async () => {
+    const store = createRateLimitStoreFromEnv({
+      RATE_LIMIT_STORE: 'redis',
+      REDIS_URL: redisUrl,
+    });
+    const key = `test:rate-limit:${Date.now()}:${Math.random()}`;
+
+    try {
+      await expect(store.readiness()).resolves.toMatchObject({
+        mode: 'redis',
+        ready: true,
+      });
+      await expect(store.increment(key, 5_000)).resolves.toMatchObject({
+        count: 1,
+      });
+      await expect(store.increment(key, 5_000)).resolves.toMatchObject({
+        count: 2,
+      });
+      await expect(store.ttl?.(key)).resolves.toBeGreaterThan(0);
+
+      await store.reset?.(key);
+      await expect(store.ttl?.(key)).resolves.toBe(-2);
+    } finally {
+      await store.reset?.(key);
+      await store.close?.();
+    }
+  });
+});

@@ -16,7 +16,7 @@ const isShim = hasLocalTsc
   : false;
 
 if (hasLocalTsc && !isShim) {
-  const result = spawnSync(tscBin, ['--noEmit'], { stdio: 'inherit' });
+  const result = spawnSync(tscBin, ['-b', '--noEmit'], { stdio: 'inherit' });
   process.exit(result.status ?? 0);
 }
 

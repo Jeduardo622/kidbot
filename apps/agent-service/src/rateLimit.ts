@@ -25,6 +25,7 @@ export interface RateLimitStore {
   reset?(key: string): Promise<void>;
   ttl?(key: string): Promise<number>;
   readiness(): Promise<RateLimitStoreReadiness>;
+  close?(): Promise<void>;
 }
 
 export interface RateLimitStoreReadiness {
@@ -67,6 +68,9 @@ export const createMemoryRateLimitStore = (
     async readiness() {
       return { mode: 'memory', ready: true };
     },
+    async close() {
+      // Nothing to close for the in-process fallback.
+    },
   };
 };
 
@@ -107,6 +111,9 @@ export const createRedisRateLimitStore = (redisUrl: string): RateLimitStore => {
         const details = error instanceof Error ? error.message : 'Unknown Redis readiness error';
         return { mode: 'redis', ready: false, details: details.slice(0, 160) };
       }
+    },
+    async close() {
+      client.disconnect();
     },
   };
 };

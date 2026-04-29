@@ -14,7 +14,7 @@ const ALLOWED_TAGS = new Set([
   'clipPath',
   'mask',
   'title',
-  'desc'
+  'desc',
 ]);
 
 const ALLOWED_ATTRS = new Set([
@@ -52,7 +52,7 @@ const ALLOWED_ATTRS = new Set([
   'role',
   'aria-hidden',
   'clip-path',
-  'mask'
+  'mask',
 ]);
 
 const DISALLOWED_PATTERN =
@@ -82,10 +82,10 @@ export const sanitizeSvgOutline = (value: string | undefined): string | undefine
   let match: RegExpExecArray | null = tagRegex.exec(trimmed);
   while (match) {
     const isClosing = match[1] === '/';
-    const tagName = match[2].toLowerCase();
+    const tagName = match[2]?.toLowerCase();
     const attrs = match[3] ?? '';
 
-    if (!ALLOWED_TAGS.has(tagName)) {
+    if (!tagName || !ALLOWED_TAGS.has(tagName)) {
       return undefined;
     }
 
@@ -93,11 +93,11 @@ export const sanitizeSvgOutline = (value: string | undefined): string | undefine
       const attrRegex = /([a-zA-Z_:][\w:.-]*)\s*=\s*(".*?"|'.*?'|[^\s"'>]+)/g;
       let attrMatch: RegExpExecArray | null = attrRegex.exec(attrs);
       while (attrMatch) {
-        const attrName = attrMatch[1].toLowerCase();
+        const attrName = attrMatch[1]?.toLowerCase();
         const attrValueRaw = attrMatch[2] ?? '';
         const attrValue = attrValueRaw.replace(/^['"]|['"]$/g, '').trim();
 
-        if (!ALLOWED_ATTRS.has(attrName)) {
+        if (!attrName || !ALLOWED_ATTRS.has(attrName)) {
           return undefined;
         }
 
