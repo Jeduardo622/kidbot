@@ -24,6 +24,28 @@ if (!existsSync(agentEntry)) {
 
 const toolIds = ['voice_chat', 'story_panels', 'coloring_outline', 'science_sim'];
 
+const getFreePort = () =>
+  new Promise((resolve, reject) => {
+    const server = createServer();
+    server.unref();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      const port = typeof address === 'object' && address ? address.port : null;
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        if (!port) {
+          reject(new Error('Failed to allocate a free port.'));
+          return;
+        }
+        resolve(port);
+      });
+    });
+  });
+
 const spawnProcess = (entry, env) =>
   spawn(process.execPath, [entry], {
     cwd: process.cwd(),
@@ -50,7 +72,12 @@ const waitForMcpHealth = async (baseUrl) => {
   throw new Error(`mcp-server did not become healthy on ${baseUrl}`);
 };
 
-const waitForAgentVoice = async (baseUrl, token, postureHeader = 'secured') => {
+const waitForAgentVoice = async (
+  baseUrl,
+  token,
+  postureHeader = 'secured',
+  diagnostics = () => '',
+) => {
   let lastStatus = null;
   let lastBody = '';
   for (let i = 0; i < 40; i += 1) {
@@ -84,7 +111,7 @@ const waitForAgentVoice = async (baseUrl, token, postureHeader = 'secured') => {
   }
 
   throw new Error(
-    `agent-service did not become ready on ${baseUrl}; lastStatus=${lastStatus}; lastBody=${lastBody}`,
+    `agent-service did not become ready on ${baseUrl}; lastStatus=${lastStatus}; lastBody=${lastBody}; ${diagnostics()}`,
   );
 };
 
@@ -137,7 +164,7 @@ const closeServer = (server) =>
   });
 
 test('non-fallback mode without AGENT_SERVICE_TOKEN fails closed at mcp startup', async () => {
-  const mcpPort = randomInt(4200, 4699);
+  const mcpPort = await getFreePort();
   const mcp = spawnProcess(mcpEntry, {
     FALLBACK_WIDGET: '0',
     MCP_PORT: String(mcpPort),
@@ -159,8 +186,8 @@ test('non-fallback mode without AGENT_SERVICE_TOKEN fails closed at mcp startup'
 
 test('non-fallback mode with AGENT_SERVICE_TOKEN allows mcp to call agent-service', async () => {
   const token = `matrix-token-${randomInt(1000, 9999)}`;
-  const agentPort = randomInt(4700, 5199);
-  const mcpPort = randomInt(5200, 5699);
+  const agentPort = await getFreePort();
+  const mcpPort = await getFreePort();
   const agentBaseUrl = `http://localhost:${agentPort}`;
   const mcpBaseUrl = `http://localhost:${mcpPort}`;
 
@@ -178,8 +205,23 @@ test('non-fallback mode with AGENT_SERVICE_TOKEN allows mcp to call agent-servic
     MCP_PORT: String(mcpPort),
   });
 
+  let agentStdout = '';
+  let agentStderr = '';
+  agent.stdout.on('data', (chunk) => {
+    agentStdout += chunk.toString();
+  });
+  agent.stderr.on('data', (chunk) => {
+    agentStderr += chunk.toString();
+  });
+
   try {
-    await waitForAgentVoice(agentBaseUrl, token);
+    await waitForAgentVoice(
+      agentBaseUrl,
+      token,
+      'secured',
+      () =>
+        `agent stdout=${agentStdout.slice(-500)}; agent stderr=${agentStderr.slice(-500)}`,
+    );
     await waitForMcpHealth(mcpBaseUrl);
 
     const response = await callMcp(mcpBaseUrl, {
@@ -206,7 +248,7 @@ test('non-fallback mode with AGENT_SERVICE_TOKEN allows mcp to call agent-servic
 });
 
 test('fallback mode remains explicit bypass path without AGENT_SERVICE_TOKEN', async () => {
-  const mcpPort = randomInt(5700, 6199);
+  const mcpPort = await getFreePort();
   const mcpBaseUrl = `http://localhost:${mcpPort}`;
   const mcp = spawnProcess(mcpEntry, {
     FALLBACK_WIDGET: '1',
@@ -234,7 +276,7 @@ test('fallback mode remains explicit bypass path without AGENT_SERVICE_TOKEN', a
 });
 
 test('fallback mode without KIDBOT_LOCAL_DEV fails closed at mcp startup', async () => {
-  const mcpPort = randomInt(6200, 6699);
+  const mcpPort = await getFreePort();
   const mcp = spawnProcess(mcpEntry, {
     FALLBACK_WIDGET: '1',
     MCP_PORT: String(mcpPort),
@@ -256,8 +298,8 @@ test('fallback mode without KIDBOT_LOCAL_DEV fails closed at mcp startup', async
 
 test('mcp secured posture fails loudly when agent runs local fallback posture', async () => {
   const token = `matrix-token-${randomInt(1000, 9999)}`;
-  const agentPort = randomInt(6700, 7199);
-  const mcpPort = randomInt(7200, 7699);
+  const agentPort = await getFreePort();
+  const mcpPort = await getFreePort();
   const agentBaseUrl = `http://localhost:${agentPort}`;
   const mcpBaseUrl = `http://localhost:${mcpPort}`;
 
@@ -303,8 +345,8 @@ test('mcp secured posture fails loudly when agent runs local fallback posture', 
 
 test('mcp surfaces provider 503 as degraded content instead of a safety block', async () => {
   const token = `matrix-token-${randomInt(1000, 9999)}`;
-  const agentPort = randomInt(7700, 8199);
-  const mcpPort = randomInt(8200, 8699);
+  const agentPort = await getFreePort();
+  const mcpPort = await getFreePort();
   const mcpBaseUrl = `http://localhost:${mcpPort}`;
 
   const fakeAgent = createServer((req, res) => {
