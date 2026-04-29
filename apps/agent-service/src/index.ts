@@ -26,15 +26,32 @@ app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 
 const providerApiKey = process.env.OPENAI_API_KEY;
-const serviceAuthToken = process.env.AGENT_SERVICE_TOKEN;
+const serviceAuthToken = process.env.AGENT_SERVICE_TOKEN?.trim();
 const fallbackMode = process.env.FALLBACK_WIDGET === '1';
+const localDevIntent = process.env.KIDBOT_LOCAL_DEV === '1';
 const requireServiceAuth = !fallbackMode;
+const startupPosture = fallbackMode ? 'local-fallback' : 'secured';
+
+if (fallbackMode && !localDevIntent) {
+  throw new Error('FALLBACK_WIDGET=1 requires KIDBOT_LOCAL_DEV=1 for explicit local fallback posture.');
+}
 
 if (requireServiceAuth && !serviceAuthToken) {
   throw new Error('AGENT_SERVICE_TOKEN is required unless FALLBACK_WIDGET=1.');
 }
 
 const authorization: RequestHandler = (req, res, next) => {
+  const postureHeaderRaw = req.headers['x-kidbot-startup-posture'];
+  const postureHeader = Array.isArray(postureHeaderRaw) ? postureHeaderRaw[0] : postureHeaderRaw;
+  if (postureHeader && postureHeader !== startupPosture) {
+    res.status(409).json({
+      error: 'Startup posture mismatch',
+      details: `Request posture "${postureHeader}" does not match service posture "${startupPosture}".`,
+      correlationId: correlationId()
+    });
+    return;
+  }
+
   if (!requireServiceAuth) {
     next();
     return;
@@ -43,6 +60,15 @@ const authorization: RequestHandler = (req, res, next) => {
   const header = req.headers.authorization;
   if (!header || header !== `Bearer ${serviceAuthToken ?? ''}`) {
     res.status(401).json({ error: 'Unauthorized', correlationId: correlationId() });
+    return;
+  }
+
+  if (postureHeader !== 'secured') {
+    res.status(409).json({
+      error: 'Startup posture mismatch',
+      details: 'Secured posture requests must include x-kidbot-startup-posture=secured.',
+      correlationId: correlationId()
+    });
     return;
   }
 

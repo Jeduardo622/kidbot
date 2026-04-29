@@ -45,15 +45,21 @@ const waitForMcpHealth = async (baseUrl) => {
   throw new Error(`mcp-server did not become healthy on ${baseUrl}`);
 };
 
-const waitForAgentVoice = async (baseUrl, token) => {
+const waitForAgentVoice = async (baseUrl, token, postureHeader = 'secured') => {
+  let lastStatus = null;
+  let lastBody = '';
   for (let i = 0; i < 40; i += 1) {
     try {
+      const headers = {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      };
+      if (postureHeader) {
+        headers['x-kidbot-startup-posture'] = postureHeader;
+      }
       const response = await fetch(`${baseUrl}/voice`, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
+        headers,
         body: JSON.stringify({
           text: 'Tell me a moon fact',
           persona: 'robot',
@@ -61,6 +67,8 @@ const waitForAgentVoice = async (baseUrl, token) => {
         })
       });
 
+      lastStatus = response.status;
+      lastBody = await response.text();
       if (response.ok) {
         return;
       }
@@ -70,7 +78,7 @@ const waitForAgentVoice = async (baseUrl, token) => {
     await delay(150);
   }
 
-  throw new Error(`agent-service did not become ready on ${baseUrl}`);
+  throw new Error(`agent-service did not become ready on ${baseUrl}; lastStatus=${lastStatus}; lastBody=${lastBody}`);
 };
 
 const stopProcess = (child) => {
@@ -179,6 +187,7 @@ test('fallback mode remains explicit bypass path without AGENT_SERVICE_TOKEN', a
   const mcpBaseUrl = `http://localhost:${mcpPort}`;
   const mcp = spawnProcess(mcpEntry, {
     FALLBACK_WIDGET: '1',
+    KIDBOT_LOCAL_DEV: '1',
     MCP_PORT: String(mcpPort)
   });
 
@@ -198,5 +207,73 @@ test('fallback mode remains explicit bypass path without AGENT_SERVICE_TOKEN', a
     }
   } finally {
     stopProcess(mcp);
+  }
+});
+
+test('fallback mode without KIDBOT_LOCAL_DEV fails closed at mcp startup', async () => {
+  const mcpPort = randomInt(6200, 6699);
+  const mcp = spawnProcess(mcpEntry, {
+    FALLBACK_WIDGET: '1',
+    MCP_PORT: String(mcpPort)
+  });
+
+  let stderr = '';
+  mcp.stderr.on('data', (chunk) => {
+    stderr += chunk.toString();
+  });
+
+  try {
+    const exit = await readExit(mcp, 3500);
+    assert.notEqual(exit.code, 0);
+    assert.match(stderr, /KIDBOT_LOCAL_DEV=1/i);
+  } finally {
+    stopProcess(mcp);
+  }
+});
+
+test('mcp secured posture fails loudly when agent runs local fallback posture', async () => {
+  const token = `matrix-token-${randomInt(1000, 9999)}`;
+  const agentPort = randomInt(6700, 7199);
+  const mcpPort = randomInt(7200, 7699);
+  const agentBaseUrl = `http://localhost:${agentPort}`;
+  const mcpBaseUrl = `http://localhost:${mcpPort}`;
+
+  const agent = spawnProcess(agentEntry, {
+    FALLBACK_WIDGET: '1',
+    KIDBOT_LOCAL_DEV: '1',
+    OPENAI_API_KEY: '',
+    PORT: String(agentPort)
+  });
+
+  const mcp = spawnProcess(mcpEntry, {
+    AGENT_PORT: String(agentPort),
+    AGENT_SERVICE_TOKEN: token,
+    FALLBACK_WIDGET: '0',
+    MCP_PORT: String(mcpPort)
+  });
+
+  try {
+    await waitForAgentVoice(agentBaseUrl, token, null);
+    await waitForMcpHealth(mcpBaseUrl);
+
+    const response = await callMcp(mcpBaseUrl, {
+      jsonrpc: '2.0',
+      id: 103,
+      method: 'tools/call',
+      params: {
+        name: 'voice_chat',
+        arguments: {
+          text: 'Tell me a moon fact',
+          persona: 'robot',
+          ageBand: '7-9'
+        }
+      }
+    });
+
+    assert.equal(response.status, 200);
+    assert.match(response.body, /status 409/i);
+  } finally {
+    stopProcess(mcp);
+    stopProcess(agent);
   }
 });
