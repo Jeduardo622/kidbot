@@ -9,7 +9,7 @@ describe('VoiceBar stale-state handling', () => {
     callTool.mockReset();
     (window as { openai?: unknown }).openai = {
       callTool,
-      setWidgetState: vi.fn()
+      setWidgetState: vi.fn(),
     };
   });
 
@@ -22,7 +22,7 @@ describe('VoiceBar stale-state handling', () => {
     callTool.mockResolvedValueOnce({
       blocked: false,
       persona: 'robot',
-      text: 'Space fact ready!'
+      text: 'Space fact ready!',
     });
     callTool.mockRejectedValueOnce(new Error('Unauthorized'));
 
@@ -47,11 +47,11 @@ describe('VoiceBar stale-state handling', () => {
     callTool.mockResolvedValueOnce({
       blocked: false,
       persona: 'robot',
-      text: 'A happy moon fact.'
+      text: 'A happy moon fact.',
     });
     callTool.mockResolvedValueOnce({
       blocked: true,
-      message: 'KidBot paused this request.'
+      message: 'KidBot paused this request.',
     });
 
     render(<VoiceBar />);
@@ -68,5 +68,45 @@ describe('VoiceBar stale-state handling', () => {
       expect(screen.queryByText('A happy moon fact.')).toBeNull();
       expect(screen.queryByRole('button', { name: 'Replay' })).toBeNull();
     });
+  });
+
+  it('shows provider degradation as unavailable instead of a safety block', async () => {
+    callTool.mockResolvedValueOnce({
+      blocked: false,
+      degraded: true,
+      message:
+        'Kidbot is having trouble reaching its idea engine right now. Please try again in a moment.',
+    });
+
+    render(<VoiceBar />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Speak' }));
+
+    await waitFor(() => {
+      expect(
+        screen.getAllByText(
+          'Kidbot is having trouble reaching its idea engine right now. Please try again in a moment.',
+        ).length,
+      ).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText('Kidbot paused this request.')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Replay' })).toBeNull();
+  });
+
+  it('maps rejected 503 provider failures to the unavailable state', async () => {
+    callTool.mockRejectedValueOnce(new Error('Agent request failed with status 503'));
+
+    render(<VoiceBar />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Speak' }));
+
+    await waitFor(() => {
+      expect(
+        screen.getAllByText(
+          'Kidbot is having trouble reaching its idea engine right now. Please try again in a moment.',
+        ).length,
+      ).toBeGreaterThan(0);
+    });
+    expect(screen.queryByText('Agent request failed with status 503')).toBeNull();
   });
 });

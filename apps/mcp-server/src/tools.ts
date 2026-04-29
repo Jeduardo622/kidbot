@@ -18,6 +18,7 @@ const fallbackMode = process.env.FALLBACK_WIDGET === '1';
 const localDevIntent = process.env.KIDBOT_LOCAL_DEV === '1';
 const serviceAuthToken = process.env.AGENT_SERVICE_TOKEN?.trim();
 const startupPosture = fallbackMode ? 'local-fallback' : 'secured';
+const degradedServiceMessage = 'Kidbot is having trouble reaching its idea engine right now. Please try again in a moment.';
 
 if (fallbackMode && !localDevIntent) {
   throw new Error('FALLBACK_WIDGET=1 requires KIDBOT_LOCAL_DEV=1 for explicit local fallback posture.');
@@ -35,7 +36,18 @@ const outputMeta = {
   }
 };
 
-const callAgent = async <T>(path: string, payload: unknown): Promise<T> => {
+interface AgentDegradedResponse {
+  blocked: false;
+  degraded: true;
+  message: string;
+  fallbackReason?: string;
+  correlationId?: string;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const callAgent = async <T>(path: string, payload: unknown): Promise<T | AgentDegradedResponse> => {
   if (fallbackMode) {
     throw new Error('Agent disabled in fallback mode');
   }
@@ -49,11 +61,28 @@ const callAgent = async <T>(path: string, payload: unknown): Promise<T> => {
     body: JSON.stringify(payload)
   });
 
+  const responseBody = (await response.json().catch(() => undefined)) as unknown;
+
   if (!response.ok) {
+    if (response.status === 503) {
+      const fallbackReason = isRecord(responseBody) && typeof responseBody.fallbackReason === 'string'
+        ? responseBody.fallbackReason
+        : undefined;
+      const correlationId = isRecord(responseBody) && typeof responseBody.correlationId === 'string'
+        ? responseBody.correlationId
+        : undefined;
+      return {
+        blocked: false,
+        degraded: true,
+        message: degradedServiceMessage,
+        fallbackReason,
+        correlationId
+      };
+    }
     throw new Error(`Agent request failed with status ${response.status}`);
   }
 
-  return (await response.json()) as T;
+  return responseBody as T;
 };
 
 const blockedResponse = (message: string) => ({
@@ -72,7 +101,24 @@ const blockedResponse = (message: string) => ({
   }
 });
 
-const handleWithModeration = async <Schema extends z.ZodTypeAny, ResponseType extends { blocked: boolean; message?: string }>(
+const isDegradedResponse = (response: { degraded?: boolean }): response is AgentDegradedResponse =>
+  response.degraded === true;
+
+const degradedResponse = (response: AgentDegradedResponse) => ({
+  content: [
+    {
+      type: 'text' as const,
+      text: response.message
+    }
+  ],
+  structuredContent: response as unknown as Record<string, unknown>,
+  _meta: {
+    ...outputMeta,
+    'openai/widgetAccessible': true
+  }
+});
+
+const handleWithModeration = async <Schema extends z.ZodTypeAny, ResponseType extends { blocked: boolean; message?: string; degraded?: boolean }>(
   schema: Schema,
   payload: unknown,
   validator: (input: z.infer<Schema>) => string[],
@@ -87,6 +133,10 @@ const handleWithModeration = async <Schema extends z.ZodTypeAny, ResponseType ex
   }
 
   const agentResponse = await action(parsed);
+  if (isDegradedResponse(agentResponse)) {
+    return degradedResponse(agentResponse);
+  }
+
   if (agentResponse.blocked) {
     return blockedResponse(agentResponse.message ?? 'Let\'s pick another playful request.');
   }
@@ -244,7 +294,7 @@ export const registerTools = (server: McpServer): void => {
         (data, response) =>
           response.blocked
             ? response.message ?? 'Kidbot paused this request.'
-            : `${data.persona} reply ready! ${response.text ?? ''}`
+            : `${data.persona} reply ready! ${'text' in response ? response.text ?? '' : ''}`
       ));
 
   const storyTool = {

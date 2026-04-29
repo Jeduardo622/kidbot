@@ -46,7 +46,9 @@ body {
   color: #1e3a8a;
   font-weight: 600;
   cursor: pointer;
-  transition: transform 0.15s ease, background 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    background 0.15s ease;
 }
 
 .kidbot-header button.active,
@@ -100,7 +102,9 @@ main {
   border-radius: 999px;
   padding: 0.6rem 1.3rem;
   cursor: pointer;
-  transition: opacity 0.15s ease, transform 0.15s ease;
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease;
 }
 
 .panel button:disabled {
@@ -147,6 +151,16 @@ textarea {
 .blocked {
   color: #ea580c;
   font-weight: 600;
+}
+
+.degraded {
+  color: #075985;
+  background: #e0f2fe;
+  border: 2px solid #7dd3fc;
+  border-radius: 16px;
+  font-weight: 700;
+  margin: 0;
+  padding: 0.85rem 1rem;
 }
 
 .response {
