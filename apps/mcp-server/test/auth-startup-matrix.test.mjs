@@ -23,6 +23,7 @@ if (!existsSync(agentEntry)) {
 }
 
 const toolIds = ['voice_chat', 'story_panels', 'coloring_outline', 'science_sim'];
+const strongToken = () => `matrix-token-${randomInt(1000, 9999)}-abcdefghijklmnopqrstuvwxyz0123456789`;
 
 const getFreePort = () =>
   new Promise((resolve, reject) => {
@@ -184,8 +185,32 @@ test('non-fallback mode without AGENT_SERVICE_TOKEN fails closed at mcp startup'
   }
 });
 
+test('non-fallback production mode with short AGENT_SERVICE_TOKEN fails closed at mcp startup', async () => {
+  const mcpPort = await getFreePort();
+  const mcp = spawnProcess(mcpEntry, {
+    AGENT_SERVICE_TOKEN: 'short-token-secret',
+    FALLBACK_WIDGET: '0',
+    MCP_PORT: String(mcpPort),
+    NODE_ENV: 'production',
+  });
+
+  let stderr = '';
+  mcp.stderr.on('data', (chunk) => {
+    stderr += chunk.toString();
+  });
+
+  try {
+    const exit = await readExit(mcp, 3500);
+    assert.notEqual(exit.code, 0);
+    assert.match(stderr, /at least 32 characters/i);
+    assert.doesNotMatch(stderr, /short-token-secret/i);
+  } finally {
+    stopProcess(mcp);
+  }
+});
+
 test('non-fallback mode with AGENT_SERVICE_TOKEN allows mcp to call agent-service', async () => {
-  const token = `matrix-token-${randomInt(1000, 9999)}`;
+  const token = strongToken();
   const agentPort = await getFreePort();
   const mcpPort = await getFreePort();
   const agentBaseUrl = `http://localhost:${agentPort}`;
@@ -297,7 +322,7 @@ test('fallback mode without KIDBOT_LOCAL_DEV fails closed at mcp startup', async
 });
 
 test('mcp secured posture fails loudly when agent runs local fallback posture', async () => {
-  const token = `matrix-token-${randomInt(1000, 9999)}`;
+  const token = strongToken();
   const agentPort = await getFreePort();
   const mcpPort = await getFreePort();
   const agentBaseUrl = `http://localhost:${agentPort}`;
@@ -344,7 +369,7 @@ test('mcp secured posture fails loudly when agent runs local fallback posture', 
 });
 
 test('mcp surfaces provider 503 as degraded content instead of a safety block', async () => {
-  const token = `matrix-token-${randomInt(1000, 9999)}`;
+  const token = strongToken();
   const agentPort = await getFreePort();
   const mcpPort = await getFreePort();
   const mcpBaseUrl = `http://localhost:${mcpPort}`;

@@ -33,6 +33,7 @@ OPENAI_API_KEY=
 AGENT_SERVICE_TOKEN=
 MCP_PORT=3000
 AGENT_PORT=4505
+FALLBACK_WIDGET=0
 KIDBOT_LOCAL_DEV=0
 RATE_LIMIT_STORE=redis
 REDIS_URL=redis://localhost:6379
@@ -41,7 +42,13 @@ PROVIDER_TIMEOUT_MS=15000
 PROVIDER_RETRIES=1
 ```
 
-When `FALLBACK_WIDGET` is not `1` (secured posture), direct calls to `agent-service` must include both `Authorization: Bearer <AGENT_SERVICE_TOKEN>` and `x-kidbot-startup-posture: secured`. The MCP server sets this header automatically.
+Production secured posture requires a dedicated `AGENT_SERVICE_TOKEN`; do not reuse `OPENAI_API_KEY` as service auth. Generate a high-entropy token with:
+
+```bash
+openssl rand -base64 48
+```
+
+When `FALLBACK_WIDGET` is not `1` (secured posture), both `agent-service` and `mcp-server` must receive the same `AGENT_SERVICE_TOKEN`. Direct calls to `agent-service` must include both `Authorization: Bearer <AGENT_SERVICE_TOKEN>` and `x-kidbot-startup-posture: secured`. The MCP server sets both automatically for tool calls. Outside `NODE_ENV=test`, secured startup fails if the token is missing or shorter than 32 characters.
 
 Start self-hosted Redis locally with:
 
@@ -50,6 +57,16 @@ docker compose -f docker-compose.redis.yml up -d
 ```
 
 `RATE_LIMIT_STORE=redis` requires `REDIS_URL` and shares route buckets across service replicas. The agent service `/healthz` endpoint reports limiter readiness. `PROVIDER_FAILURE_POLICY=503` makes model-backed failures visible as degraded service responses; set it to `fallback` only when deterministic stub substitution is acceptable.
+
+Before deploying, build both services and run the secured posture smoke check:
+
+```bash
+pnpm --filter @kidbot/agent-service run build
+pnpm --filter @kidbot/mcp-server run build
+pnpm run smoke:secured-posture
+```
+
+The smoke check starts local built services on ephemeral ports, verifies MCP can call agent-service with the shared token, and verifies unauthenticated, wrong-posture, and wrong-token calls fail.
 
 ### Ngrok (optional)
 
@@ -69,7 +86,7 @@ If installs are blocked, you can still preview the widget and flows:
   - `apps/web-widget/dist/kidbot-fallback.html` in a browser
 
 - Or run the MCP server in fallback mode (if node runs but installs are blocked):
-  - set `FALLBACK_WIDGET=1` and `KIDBOT_LOCAL_DEV=1`, then run `node apps/mcp-server/dist/server.js`
+  - set both `FALLBACK_WIDGET=1` and `KIDBOT_LOCAL_DEV=1`, then run `node apps/mcp-server/dist/server.js`
   - (if dist artifacts are unavailable, open /diag statically)
 
 - Health & Diag:
