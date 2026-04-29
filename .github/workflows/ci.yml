@@ -25,6 +25,7 @@ jobs:
 
     env:
       CI: '1'
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
       REDIS_URL: redis://localhost:6379
 
     steps:
