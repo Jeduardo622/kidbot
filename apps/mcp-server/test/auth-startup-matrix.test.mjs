@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomInt } from 'node:crypto';
+import { createServer } from 'node:http';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -10,11 +11,15 @@ const mcpEntry = join(process.cwd(), 'dist', 'server.js');
 const agentEntry = join(process.cwd(), '../agent-service/dist/index.js');
 
 if (!existsSync(mcpEntry)) {
-  throw new Error('Missing apps/mcp-server/dist/server.js. Run `pnpm --filter mcp-server build` before startup matrix test.');
+  throw new Error(
+    'Missing apps/mcp-server/dist/server.js. Run `pnpm --filter mcp-server build` before startup matrix test.',
+  );
 }
 
 if (!existsSync(agentEntry)) {
-  throw new Error('Missing apps/agent-service/dist/index.js. Run `pnpm --filter agent-service build` before startup matrix test.');
+  throw new Error(
+    'Missing apps/agent-service/dist/index.js. Run `pnpm --filter agent-service build` before startup matrix test.',
+  );
 }
 
 const toolIds = ['voice_chat', 'story_panels', 'coloring_outline', 'science_sim'];
@@ -24,9 +29,9 @@ const spawnProcess = (entry, env) =>
     cwd: process.cwd(),
     env: {
       ...process.env,
-      ...env
+      ...env,
     },
-    stdio: ['ignore', 'pipe', 'pipe']
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
 
 const waitForMcpHealth = async (baseUrl) => {
@@ -52,7 +57,7 @@ const waitForAgentVoice = async (baseUrl, token, postureHeader = 'secured') => {
     try {
       const headers = {
         Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
       };
       if (postureHeader) {
         headers['x-kidbot-startup-posture'] = postureHeader;
@@ -63,8 +68,8 @@ const waitForAgentVoice = async (baseUrl, token, postureHeader = 'secured') => {
         body: JSON.stringify({
           text: 'Tell me a moon fact',
           persona: 'robot',
-          ageBand: '7-9'
-        })
+          ageBand: '7-9',
+        }),
       });
 
       lastStatus = response.status;
@@ -78,7 +83,9 @@ const waitForAgentVoice = async (baseUrl, token, postureHeader = 'secured') => {
     await delay(150);
   }
 
-  throw new Error(`agent-service did not become ready on ${baseUrl}; lastStatus=${lastStatus}; lastBody=${lastBody}`);
+  throw new Error(
+    `agent-service did not become ready on ${baseUrl}; lastStatus=${lastStatus}; lastBody=${lastBody}`,
+  );
 };
 
 const stopProcess = (child) => {
@@ -92,9 +99,9 @@ const readExit = async (child, timeoutMs = 3000) =>
     new Promise((resolve) =>
       child.on('exit', (code, signal) => {
         resolve({ code, signal });
-      })
+      }),
     ),
-    delay(timeoutMs).then(() => ({ code: null, signal: 'timeout' }))
+    delay(timeoutMs).then(() => ({ code: null, signal: 'timeout' })),
   ]);
 
 const callMcp = async (baseUrl, payload) => {
@@ -102,22 +109,38 @@ const callMcp = async (baseUrl, payload) => {
     method: 'POST',
     headers: {
       Accept: 'application/json, text/event-stream',
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
   });
 
   return {
     status: response.status,
-    body: await response.text()
+    body: await response.text(),
   };
 };
+
+const listen = (server, port) =>
+  new Promise((resolve) => {
+    server.listen(port, resolve);
+  });
+
+const closeServer = (server) =>
+  new Promise((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
 
 test('non-fallback mode without AGENT_SERVICE_TOKEN fails closed at mcp startup', async () => {
   const mcpPort = randomInt(4200, 4699);
   const mcp = spawnProcess(mcpEntry, {
     FALLBACK_WIDGET: '0',
-    MCP_PORT: String(mcpPort)
+    MCP_PORT: String(mcpPort),
   });
 
   let stderr = '';
@@ -145,14 +168,14 @@ test('non-fallback mode with AGENT_SERVICE_TOKEN allows mcp to call agent-servic
     AGENT_SERVICE_TOKEN: token,
     FALLBACK_WIDGET: '0',
     OPENAI_API_KEY: '',
-    PORT: String(agentPort)
+    PORT: String(agentPort),
   });
 
   const mcp = spawnProcess(mcpEntry, {
     AGENT_PORT: String(agentPort),
     AGENT_SERVICE_TOKEN: token,
     FALLBACK_WIDGET: '0',
-    MCP_PORT: String(mcpPort)
+    MCP_PORT: String(mcpPort),
   });
 
   try {
@@ -168,9 +191,9 @@ test('non-fallback mode with AGENT_SERVICE_TOKEN allows mcp to call agent-servic
         arguments: {
           text: 'Tell me a moon fact',
           persona: 'robot',
-          ageBand: '7-9'
-        }
-      }
+          ageBand: '7-9',
+        },
+      },
     });
 
     assert.equal(response.status, 200);
@@ -188,7 +211,7 @@ test('fallback mode remains explicit bypass path without AGENT_SERVICE_TOKEN', a
   const mcp = spawnProcess(mcpEntry, {
     FALLBACK_WIDGET: '1',
     KIDBOT_LOCAL_DEV: '1',
-    MCP_PORT: String(mcpPort)
+    MCP_PORT: String(mcpPort),
   });
 
   try {
@@ -198,7 +221,7 @@ test('fallback mode remains explicit bypass path without AGENT_SERVICE_TOKEN', a
       jsonrpc: '2.0',
       id: 102,
       method: 'tools/list',
-      params: {}
+      params: {},
     });
 
     assert.equal(response.status, 200);
@@ -214,7 +237,7 @@ test('fallback mode without KIDBOT_LOCAL_DEV fails closed at mcp startup', async
   const mcpPort = randomInt(6200, 6699);
   const mcp = spawnProcess(mcpEntry, {
     FALLBACK_WIDGET: '1',
-    MCP_PORT: String(mcpPort)
+    MCP_PORT: String(mcpPort),
   });
 
   let stderr = '';
@@ -242,14 +265,14 @@ test('mcp secured posture fails loudly when agent runs local fallback posture', 
     FALLBACK_WIDGET: '1',
     KIDBOT_LOCAL_DEV: '1',
     OPENAI_API_KEY: '',
-    PORT: String(agentPort)
+    PORT: String(agentPort),
   });
 
   const mcp = spawnProcess(mcpEntry, {
     AGENT_PORT: String(agentPort),
     AGENT_SERVICE_TOKEN: token,
     FALLBACK_WIDGET: '0',
-    MCP_PORT: String(mcpPort)
+    MCP_PORT: String(mcpPort),
   });
 
   try {
@@ -265,9 +288,9 @@ test('mcp secured posture fails loudly when agent runs local fallback posture', 
         arguments: {
           text: 'Tell me a moon fact',
           persona: 'robot',
-          ageBand: '7-9'
-        }
-      }
+          ageBand: '7-9',
+        },
+      },
     });
 
     assert.equal(response.status, 200);
@@ -275,5 +298,65 @@ test('mcp secured posture fails loudly when agent runs local fallback posture', 
   } finally {
     stopProcess(mcp);
     stopProcess(agent);
+  }
+});
+
+test('mcp surfaces provider 503 as degraded content instead of a safety block', async () => {
+  const token = `matrix-token-${randomInt(1000, 9999)}`;
+  const agentPort = randomInt(7700, 8199);
+  const mcpPort = randomInt(8200, 8699);
+  const mcpBaseUrl = `http://localhost:${mcpPort}`;
+
+  const fakeAgent = createServer((req, res) => {
+    if (req.method === 'POST' && req.url === '/voice') {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          error: 'Service temporarily degraded',
+          fallbackReason: 'generation_timeout',
+          correlationId: 'kb_test_degraded',
+        }),
+      );
+      return;
+    }
+
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Not found' }));
+  });
+
+  await listen(fakeAgent, agentPort);
+
+  const mcp = spawnProcess(mcpEntry, {
+    AGENT_PORT: String(agentPort),
+    AGENT_SERVICE_TOKEN: token,
+    FALLBACK_WIDGET: '0',
+    MCP_PORT: String(mcpPort),
+  });
+
+  try {
+    await waitForMcpHealth(mcpBaseUrl);
+
+    const response = await callMcp(mcpBaseUrl, {
+      jsonrpc: '2.0',
+      id: 104,
+      method: 'tools/call',
+      params: {
+        name: 'voice_chat',
+        arguments: {
+          text: 'Tell me a moon fact',
+          persona: 'robot',
+          ageBand: '7-9',
+        },
+      },
+    });
+
+    assert.equal(response.status, 200);
+    assert.match(response.body, /"blocked":false/);
+    assert.match(response.body, /"degraded":true/);
+    assert.match(response.body, /"fallbackReason":"generation_timeout"/);
+    assert.match(response.body, /idea engine right now/i);
+  } finally {
+    stopProcess(mcp);
+    await closeServer(fakeAgent);
   }
 });

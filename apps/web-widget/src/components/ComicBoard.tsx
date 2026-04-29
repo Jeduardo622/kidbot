@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react';
 import { LiveRegion } from './LiveRegion.js';
 import { buildAnnouncementState } from '../utils/announcementState.js';
+import {
+  degradedMessage,
+  errorMessage,
+  unavailableMessageFromError,
+} from '../utils/degradation.js';
 
 interface StoryPanel {
   title: string;
@@ -11,6 +16,7 @@ interface StoryPanel {
 
 interface StoryResponse {
   blocked: boolean;
+  degraded?: boolean;
   message?: string;
   theme?: string;
   panels?: StoryPanel[];
@@ -23,11 +29,13 @@ export const ComicBoard = () => {
   const [panels, setPanels] = useState<StoryPanel[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  const [unavailable, setUnavailable] = useState<string | undefined>();
   const announcement = buildAnnouncementState({
     loading,
     loadingMessage: 'Kidbot is planning story panels.',
     errorMessage: error,
-    readyMessage: panels.length > 0 ? `Planned ${panels.length} panels.` : ''
+    urgentMessage: unavailable,
+    readyMessage: panels.length > 0 ? `Planned ${panels.length} panels.` : '',
   });
 
   useEffect(() => {
@@ -37,17 +45,21 @@ export const ComicBoard = () => {
   const handlePlan = async () => {
     setLoading(true);
     setError(undefined);
+    setUnavailable(undefined);
     setPanels([]);
     try {
       const result = (await window.openai?.callTool?.('story_panels', {
         theme,
         panels: panelCount,
-        ageBand
+        ageBand,
       })) as StoryResponse | undefined;
       if (!result) {
         throw new Error('Widget bridge unavailable.');
       }
-      if (result.blocked) {
+      const unavailableMessage = degradedMessage(result);
+      if (unavailableMessage) {
+        setUnavailable(unavailableMessage);
+      } else if (result.blocked) {
         setPanels([]);
         setError(result.message ?? 'Kidbot paused this story idea.');
       } else {
@@ -55,7 +67,12 @@ export const ComicBoard = () => {
       }
     } catch (err) {
       setPanels([]);
-      setError(err instanceof Error ? err.message : 'Something went wrong.');
+      const unavailableMessage = unavailableMessageFromError(err);
+      if (unavailableMessage) {
+        setUnavailable(unavailableMessage);
+      } else {
+        setError(errorMessage(err));
+      }
     } finally {
       setLoading(false);
     }
@@ -78,7 +95,11 @@ export const ComicBoard = () => {
           onChange={(event) => setPanelCount(Number(event.target.value))}
         />
         <label htmlFor="panel-age">Age</label>
-        <select id="panel-age" value={ageBand} onChange={(event) => setAgeBand(event.target.value as '4-6' | '7-9' | '10-12')}>
+        <select
+          id="panel-age"
+          value={ageBand}
+          onChange={(event) => setAgeBand(event.target.value as '4-6' | '7-9' | '10-12')}
+        >
           <option value="4-6">Ages 4-6</option>
           <option value="7-9">Ages 7-9</option>
           <option value="10-12">Ages 10-12</option>
@@ -88,6 +109,7 @@ export const ComicBoard = () => {
         </button>
       </div>
       {error && <p className="error">{error}</p>}
+      {unavailable && <p className="degraded">{unavailable}</p>}
       <div className="panel-grid">
         {panels.map((panel) => (
           <article key={panel.title} className="panel-card">

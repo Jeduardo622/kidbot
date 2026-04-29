@@ -1,11 +1,17 @@
 import { useEffect, useState } from 'react';
 import { LiveRegion } from './LiveRegion.js';
 import { buildAnnouncementState } from '../utils/announcementState.js';
+import {
+  degradedMessage,
+  errorMessage,
+  unavailableMessageFromError,
+} from '../utils/degradation.js';
 
 type AgeBand = '4-6' | '7-9' | '10-12';
 
 interface ScienceResponse {
   blocked: boolean;
+  degraded?: boolean;
   message?: string;
   title?: string;
   objective?: string;
@@ -23,6 +29,7 @@ export const ScienceLab = () => {
   const [ageBand, setAgeBand] = useState<AgeBand>('7-9');
   const [plan, setPlan] = useState<ScienceResponse | undefined>();
   const [error, setError] = useState<string | undefined>();
+  const [unavailable, setUnavailable] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
   const [selectedChoice, setSelectedChoice] = useState<number | undefined>();
   const [showExplanation, setShowExplanation] = useState(false);
@@ -30,7 +37,8 @@ export const ScienceLab = () => {
     loading,
     loadingMessage: 'Kidbot is preparing your science experiment.',
     errorMessage: error,
-    readyMessage: plan && !plan.blocked ? `${plan.title ?? 'Experiment'} ready.` : ''
+    urgentMessage: unavailable,
+    readyMessage: plan && !plan.blocked ? `${plan.title ?? 'Experiment'} ready.` : '',
   });
 
   useEffect(() => {
@@ -40,15 +48,21 @@ export const ScienceLab = () => {
   const fetchPlan = async () => {
     setLoading(true);
     setError(undefined);
+    setUnavailable(undefined);
     setPlan(undefined);
     setShowExplanation(false);
     setSelectedChoice(undefined);
     try {
-      const result = (await window.openai?.callTool?.('science_sim', { topic, ageBand })) as ScienceResponse | undefined;
+      const result = (await window.openai?.callTool?.('science_sim', { topic, ageBand })) as
+        | ScienceResponse
+        | undefined;
       if (!result) {
         throw new Error('Widget bridge unavailable.');
       }
-      if (result.blocked) {
+      const unavailableMessage = degradedMessage(result);
+      if (unavailableMessage) {
+        setUnavailable(unavailableMessage);
+      } else if (result.blocked) {
         setPlan(undefined);
         setError(result.message ?? 'Kidbot paused this experiment.');
       } else {
@@ -56,7 +70,12 @@ export const ScienceLab = () => {
       }
     } catch (err) {
       setPlan(undefined);
-      setError(err instanceof Error ? err.message : 'Something went wrong.');
+      const unavailableMessage = unavailableMessageFromError(err);
+      if (unavailableMessage) {
+        setUnavailable(unavailableMessage);
+      } else {
+        setError(errorMessage(err));
+      }
     } finally {
       setLoading(false);
     }
@@ -76,7 +95,11 @@ export const ScienceLab = () => {
           ))}
         </select>
         <label htmlFor="science-age">Age</label>
-        <select id="science-age" value={ageBand} onChange={(event) => setAgeBand(event.target.value as AgeBand)}>
+        <select
+          id="science-age"
+          value={ageBand}
+          onChange={(event) => setAgeBand(event.target.value as AgeBand)}
+        >
           <option value="4-6">Ages 4-6</option>
           <option value="7-9">Ages 7-9</option>
           <option value="10-12">Ages 10-12</option>
@@ -86,6 +109,7 @@ export const ScienceLab = () => {
         </button>
       </div>
       {error && <p className="error">{error}</p>}
+      {unavailable && <p className="degraded">{unavailable}</p>}
       {plan && !plan.blocked && (
         <article className="experiment-card">
           <h3>{plan.title}</h3>
@@ -131,7 +155,10 @@ export const ScienceLab = () => {
               </button>
               {showExplanation && plan.explanation && (
                 <p className="explanation">
-                  {plan.explanation} {selectedChoice === plan.prediction.answerIndex ? '✅ Great prediction!' : 'Let\'s explore why!'}
+                  {plan.explanation}{' '}
+                  {selectedChoice === plan.prediction.answerIndex
+                    ? '✅ Great prediction!'
+                    : "Let's explore why!"}
                 </p>
               )}
             </div>

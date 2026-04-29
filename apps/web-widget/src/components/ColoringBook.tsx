@@ -3,11 +3,17 @@ import { useEffect, useRef, useState } from 'react';
 import { LiveRegion } from './LiveRegion.js';
 import { sanitizeSvgOutline } from '../utils/svgSanitizer.js';
 import { buildAnnouncementState } from '../utils/announcementState.js';
+import {
+  degradedMessage,
+  errorMessage,
+  unavailableMessageFromError,
+} from '../utils/degradation.js';
 
 type OutlineStyle = 'animals' | 'space' | 'underwater' | undefined;
 
 interface ColoringResponse {
   blocked: boolean;
+  degraded?: boolean;
   message?: string;
   svg?: string;
 }
@@ -50,6 +56,7 @@ export const ColoringBook = () => {
   const [outline, setOutline] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  const [unavailable, setUnavailable] = useState<string | undefined>();
   const [brushColor, setBrushColor] = useState('#2563eb');
   const [brushSize, setBrushSize] = useState(6);
   const [strokes, setStrokes] = useState<Stroke[]>([]);
@@ -57,6 +64,7 @@ export const ColoringBook = () => {
     loading,
     loadingMessage: 'Kidbot is drawing your coloring outline.',
     errorMessage: error,
+    urgentMessage: unavailable,
     readyMessage: outline ? 'Coloring outline ready.' : '',
   });
 
@@ -142,6 +150,7 @@ export const ColoringBook = () => {
   const fetchOutline = async () => {
     setLoading(true);
     setError(undefined);
+    setUnavailable(undefined);
     setOutline(undefined);
     try {
       const result = (await window.openai?.callTool?.('coloring_outline', { scene, style })) as
@@ -150,7 +159,11 @@ export const ColoringBook = () => {
       if (!result) {
         throw new Error('Widget bridge unavailable.');
       }
-      if (result.blocked) {
+      const unavailableMessage = degradedMessage(result);
+      if (unavailableMessage) {
+        setOutline(undefined);
+        setUnavailable(unavailableMessage);
+      } else if (result.blocked) {
         setOutline(undefined);
         setError(result.message ?? 'Kidbot paused this outline request.');
       } else {
@@ -165,7 +178,12 @@ export const ColoringBook = () => {
       setStrokes([]);
     } catch (err) {
       setOutline(undefined);
-      setError(err instanceof Error ? err.message : 'Something went wrong.');
+      const unavailableMessage = unavailableMessageFromError(err);
+      if (unavailableMessage) {
+        setUnavailable(unavailableMessage);
+      } else {
+        setError(errorMessage(err));
+      }
     } finally {
       setLoading(false);
     }
@@ -196,6 +214,7 @@ export const ColoringBook = () => {
         </button>
       </div>
       {error && <p className="error">{error}</p>}
+      {unavailable && <p className="degraded">{unavailable}</p>}
       <div className="coloring-stage">
         <div className="canvas-wrapper">
           <canvas

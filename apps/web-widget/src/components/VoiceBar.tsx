@@ -1,12 +1,18 @@
 import { useEffect, useState } from 'react';
 import { LiveRegion } from './LiveRegion.js';
 import { buildAnnouncementState } from '../utils/announcementState.js';
+import {
+  degradedMessage,
+  errorMessage,
+  unavailableMessageFromError,
+} from '../utils/degradation.js';
 
 type Persona = 'robot' | 'fairy' | 'explorer';
 type AgeBand = '4-6' | '7-9' | '10-12';
 
 interface VoiceResult {
   blocked: boolean;
+  degraded?: boolean;
   message?: string;
   persona?: Persona;
   text?: string;
@@ -16,13 +22,13 @@ interface VoiceResult {
 const personas: Array<{ key: Persona; label: string }> = [
   { key: 'robot', label: 'Robot Buddy' },
   { key: 'fairy', label: 'Fairy Friend' },
-  { key: 'explorer', label: 'Explorer Pal' }
+  { key: 'explorer', label: 'Explorer Pal' },
 ];
 
 const ageBands: Array<{ key: AgeBand; label: string }> = [
   { key: '4-6', label: 'Ages 4-6' },
   { key: '7-9', label: 'Ages 7-9' },
-  { key: '10-12', label: 'Ages 10-12' }
+  { key: '10-12', label: 'Ages 10-12' },
 ];
 
 const speakText = (text: string) => {
@@ -42,13 +48,16 @@ export const VoiceBar = () => {
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState<VoiceResult | undefined>();
   const [error, setError] = useState<string | undefined>();
-  const blockedMessage = response?.blocked ? response.message ?? 'Kidbot paused this request.' : undefined;
+  const [unavailable, setUnavailable] = useState<string | undefined>();
+  const blockedMessage = response?.blocked
+    ? (response.message ?? 'Kidbot paused this request.')
+    : undefined;
   const announcement = buildAnnouncementState({
     loading,
     loadingMessage: 'Kidbot is thinking.',
     errorMessage: error,
-    urgentMessage: blockedMessage,
-    readyMessage: response?.text ? `${response.persona ?? 'Kidbot'} reply ready.` : ''
+    urgentMessage: unavailable ?? blockedMessage,
+    readyMessage: response?.text ? `${response.persona ?? 'Kidbot'} reply ready.` : '',
   });
 
   useEffect(() => {
@@ -63,11 +72,19 @@ export const VoiceBar = () => {
 
     setLoading(true);
     setError(undefined);
+    setUnavailable(undefined);
     setResponse(undefined);
     try {
-      const result = (await window.openai?.callTool?.('voice_chat', { text, persona, ageBand })) as VoiceResult | undefined;
+      const result = (await window.openai?.callTool?.('voice_chat', { text, persona, ageBand })) as
+        | VoiceResult
+        | undefined;
       if (!result) {
         throw new Error('Widget bridge unavailable.');
+      }
+      const unavailableMessage = degradedMessage(result);
+      if (unavailableMessage) {
+        setUnavailable(unavailableMessage);
+        return;
       }
       setResponse(result);
       if (!result.blocked && result.text) {
@@ -75,7 +92,12 @@ export const VoiceBar = () => {
       }
     } catch (err) {
       setResponse(undefined);
-      setError(err instanceof Error ? err.message : 'Something went wrong.');
+      const unavailableMessage = unavailableMessageFromError(err);
+      if (unavailableMessage) {
+        setUnavailable(unavailableMessage);
+      } else {
+        setError(errorMessage(err));
+      }
     } finally {
       setLoading(false);
     }
@@ -87,7 +109,11 @@ export const VoiceBar = () => {
       <LiveRegion message={announcement.message} isAlert={announcement.isAlert} />
       <div className="control-row">
         <label htmlFor="persona">Persona</label>
-        <select id="persona" value={persona} onChange={(event) => setPersona(event.target.value as Persona)}>
+        <select
+          id="persona"
+          value={persona}
+          onChange={(event) => setPersona(event.target.value as Persona)}
+        >
           {personas.map((option) => (
             <option key={option.key} value={option.key}>
               {option.label}
@@ -95,7 +121,11 @@ export const VoiceBar = () => {
           ))}
         </select>
         <label htmlFor="ageBand">Age</label>
-        <select id="ageBand" value={ageBand} onChange={(event) => setAgeBand(event.target.value as AgeBand)}>
+        <select
+          id="ageBand"
+          value={ageBand}
+          onChange={(event) => setAgeBand(event.target.value as AgeBand)}
+        >
           {ageBands.map((option) => (
             <option key={option.key} value={option.key}>
               {option.label}
@@ -113,6 +143,7 @@ export const VoiceBar = () => {
         {loading ? 'Thinking...' : 'Speak'}
       </button>
       {error && <p className="error">{error}</p>}
+      {unavailable && <p className="degraded">{unavailable}</p>}
       {response && (
         <div className="response">
           {response.blocked ? (
