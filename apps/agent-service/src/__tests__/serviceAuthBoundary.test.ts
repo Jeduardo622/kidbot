@@ -9,6 +9,8 @@ const ENV_KEYS = [
   'KIDBOT_LOCAL_DEV',
   'AGENT_SERVICE_TOKEN',
   'OPENAI_API_KEY',
+  'RATE_LIMIT_STORE',
+  'REDIS_URL',
 ] as const;
 
 const withEnv = async <T>(
@@ -317,6 +319,36 @@ describe('service auth boundary', () => {
           expect(response.status).toBe(409);
           expect(body.error).toBe('Startup posture mismatch');
           expect(body.details).toMatch(/service posture "secured"/i);
+        });
+      },
+    );
+  });
+
+  it('reports limiter readiness without service auth', async () => {
+    await withEnv(
+      {
+        NODE_ENV: 'test',
+        FALLBACK_WIDGET: '0',
+        KIDBOT_LOCAL_DEV: undefined,
+        AGENT_SERVICE_TOKEN: 'test-service-token',
+        OPENAI_API_KEY: undefined,
+      },
+      async () => {
+        const mod = await import('../index.js');
+        await withServer(mod.app, async (baseUrl) => {
+          const response = await fetch(`${baseUrl}/healthz`);
+          const body = (await response.json()) as {
+            ok?: boolean;
+            service?: string;
+            startupPosture?: string;
+            rateLimitStore?: { mode?: string; ready?: boolean };
+          };
+
+          expect(response.status).toBe(200);
+          expect(body.ok).toBe(true);
+          expect(body.service).toBe('agent-service');
+          expect(body.startupPosture).toBe('secured');
+          expect(body.rateLimitStore).toEqual({ mode: 'memory', ready: true });
         });
       },
     );

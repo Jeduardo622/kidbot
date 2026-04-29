@@ -44,8 +44,8 @@ OPENAI_API_KEY=sk-...
 PORT=4505
 LOG_LEVEL=info
 DEFAULT_AGE_BAND=7-9   # one of: 4-6, 7-9, 10-12
-RATE_LIMIT_STORE=memory
-REDIS_URL=
+RATE_LIMIT_STORE=redis
+REDIS_URL=redis://localhost:6379
 PROVIDER_FAILURE_POLICY=503
 PROVIDER_TIMEOUT_MS=15000
 PROVIDER_RETRIES=1
@@ -238,7 +238,7 @@ Simple token bucket (per IP) suggested defaults:
 
 Return 429 with Retry-After.
 
-Use RATE_LIMIT_STORE=redis with REDIS_URL for shared buckets across Node replicas. The memory store remains the local/test fallback.
+Use RATE_LIMIT_STORE=redis with REDIS_URL for shared buckets across Node replicas. The memory store remains the test fallback. Self-hosted local Redis is defined in docker-compose.redis.yml, and agent-service /healthz reports limiter readiness.
 
 Provider Failure Policy
 

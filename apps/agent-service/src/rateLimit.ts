@@ -20,9 +20,17 @@ export interface RateLimitIncrement {
 }
 
 export interface RateLimitStore {
+  mode: 'memory' | 'redis';
   increment(key: string, windowMs: number): Promise<RateLimitIncrement>;
   reset?(key: string): Promise<void>;
   ttl?(key: string): Promise<number>;
+  readiness(): Promise<RateLimitStoreReadiness>;
+}
+
+export interface RateLimitStoreReadiness {
+  mode: 'memory' | 'redis';
+  ready: boolean;
+  details?: string;
 }
 
 interface Bucket {
@@ -36,6 +44,7 @@ export const createMemoryRateLimitStore = (
   const buckets = new Map<string, Bucket>();
 
   return {
+    mode: 'memory',
     async increment(key, windowMs) {
       const now = clock.now();
       const existing = buckets.get(key);
@@ -55,6 +64,9 @@ export const createMemoryRateLimitStore = (
       }
       return Math.max(0, bucket.resetAt - clock.now());
     },
+    async readiness() {
+      return { mode: 'memory', ready: true };
+    },
   };
 };
 
@@ -69,6 +81,7 @@ export const createRedisRateLimitStore = (redisUrl: string): RateLimitStore => {
   });
 
   return {
+    mode: 'redis',
     async increment(key, windowMs) {
       const count = await client.incr(key);
       if (count === 1) {
@@ -85,6 +98,15 @@ export const createRedisRateLimitStore = (redisUrl: string): RateLimitStore => {
     },
     async ttl(key) {
       return client.pttl(key);
+    },
+    async readiness() {
+      try {
+        const response = await client.ping();
+        return { mode: 'redis', ready: response === 'PONG', details: response };
+      } catch (error) {
+        const details = error instanceof Error ? error.message : 'Unknown Redis readiness error';
+        return { mode: 'redis', ready: false, details: details.slice(0, 160) };
+      }
     },
   };
 };

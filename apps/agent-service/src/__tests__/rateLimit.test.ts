@@ -54,9 +54,13 @@ describe('rate limit stores', () => {
   it('uses the injected store so counts can be shared across limiter instances', async () => {
     let count = 0;
     const sharedStore: RateLimitStore = {
+      mode: 'memory',
       async increment() {
         count += 1;
         return { count, resetAt: Date.now() + 60_000 };
+      },
+      async readiness() {
+        return { mode: 'memory', ready: true };
       },
     };
     const first = createRateLimiter({
@@ -92,5 +96,10 @@ describe('rate limit stores', () => {
     expect(() =>
       createRateLimitStoreFromEnv({ RATE_LIMIT_STORE: 'sqlite', REDIS_URL: undefined }),
     ).toThrow(/RATE_LIMIT_STORE/i);
+  });
+
+  it('reports memory store readiness', async () => {
+    const store = createMemoryRateLimitStore();
+    await expect(store.readiness()).resolves.toEqual({ mode: 'memory', ready: true });
   });
 });
