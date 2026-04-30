@@ -427,3 +427,81 @@ test('mcp surfaces provider 503 as degraded content instead of a safety block', 
     await closeServer(fakeAgent);
   }
 });
+
+test('mcp forwards session metadata to agent-service', async () => {
+  const token = strongToken();
+  const agentPort = await getFreePort();
+  const mcpPort = await getFreePort();
+  const mcpBaseUrl = `http://localhost:${mcpPort}`;
+  let forwardedBody;
+
+  const fakeAgent = createServer((req, res) => {
+    if (req.method === 'POST' && req.url === '/voice') {
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk.toString();
+      });
+      req.on('end', () => {
+        forwardedBody = JSON.parse(body);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            blocked: false,
+            persona: 'robot',
+            text: 'Forwarding check ready.',
+          }),
+        );
+      });
+      return;
+    }
+
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Not found' }));
+  });
+
+  await listen(fakeAgent, agentPort);
+
+  const mcp = spawnProcess(mcpEntry, {
+    AGENT_PORT: String(agentPort),
+    AGENT_SERVICE_TOKEN: token,
+    FALLBACK_WIDGET: '0',
+    MCP_PORT: String(mcpPort),
+  });
+
+  try {
+    await waitForMcpHealth(mcpBaseUrl);
+
+    const response = await callMcp(mcpBaseUrl, {
+      jsonrpc: '2.0',
+      id: 105,
+      method: 'tools/call',
+      params: {
+        name: 'voice_chat',
+        arguments: {
+          text: 'Tell me a moon fact',
+          persona: 'robot',
+          ageBand: '4-6',
+          profileId: 'local-default',
+          sessionId: 'kb_session_forward123',
+        },
+      },
+    });
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(
+      {
+        ageBand: forwardedBody.ageBand,
+        profileId: forwardedBody.profileId,
+        sessionId: forwardedBody.sessionId,
+      },
+      {
+        ageBand: '4-6',
+        profileId: 'local-default',
+        sessionId: 'kb_session_forward123',
+      },
+    );
+  } finally {
+    stopProcess(mcp);
+    await closeServer(fakeAgent);
+  }
+});

@@ -6,33 +6,38 @@ export type AgeBand = (typeof ageBandValues)[number];
 export const personaValues = ['robot', 'fairy', 'explorer'] as const;
 export type Persona = (typeof personaValues)[number];
 
+export const defaultAgeBand: AgeBand = '7-9';
+
+const sessionMetadataSchema = z.object({
+  sessionId: z.string().regex(/^kb_session_[A-Za-z0-9_-]{8,80}$/).optional(),
+  profileId: z.string().regex(/^[A-Za-z0-9_-]{3,64}$/).optional(),
+  ageBand: z.enum(ageBandValues).optional()
+});
+
 export const voiceRequestSchema = z.object({
   text: z.string().min(1).max(280),
   persona: z.enum(personaValues),
-  ageBand: z.enum(ageBandValues).optional()
-});
+}).merge(sessionMetadataSchema);
 
 export type VoiceRequest = z.infer<typeof voiceRequestSchema>;
 
 export const storyRequestSchema = z.object({
   theme: z.string().min(3).max(120),
   panels: z.number().int().min(2).max(8),
-  ageBand: z.enum(ageBandValues).optional()
-});
+}).merge(sessionMetadataSchema);
 
 export type StoryRequest = z.infer<typeof storyRequestSchema>;
 
 export const coloringRequestSchema = z.object({
   scene: z.string().min(3).max(120),
   style: z.enum(['animals', 'space', 'underwater']).optional()
-});
+}).merge(sessionMetadataSchema);
 
 export type ColoringRequest = z.infer<typeof coloringRequestSchema>;
 
 export const scienceRequestSchema = z.object({
   topic: z.string().min(3).max(120),
-  ageBand: z.enum(ageBandValues).optional()
-});
+}).merge(sessionMetadataSchema);
 
 export type ScienceRequest = z.infer<typeof scienceRequestSchema>;
 

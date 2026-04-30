@@ -375,4 +375,50 @@ describe('service auth boundary', () => {
       },
     );
   });
+
+  it('logs safe session audit metadata without PIN values', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await withEnv(
+        {
+          NODE_ENV: 'test',
+          FALLBACK_WIDGET: '0',
+          KIDBOT_LOCAL_DEV: undefined,
+          AGENT_SERVICE_TOKEN: 'test-service-token',
+          OPENAI_API_KEY: undefined,
+        },
+        async () => {
+          const mod = await import('../index.js');
+          await withServer(mod.app, async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/voice`, {
+              method: 'POST',
+              headers: {
+                Authorization: 'Bearer test-service-token',
+                'x-kidbot-startup-posture': 'secured',
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                text: 'Tell me a cheerful moon fact.',
+                persona: 'robot',
+                ageBand: '4-6',
+                profileId: 'local-default',
+                sessionId: 'kb_session_audit123',
+                parentPin: '1234',
+              }),
+            });
+
+            expect(response.status).toBe(200);
+          });
+        },
+      );
+
+      const logs = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
+      expect(logs).toContain('"sessionId":"kb_session_audit123"');
+      expect(logs).toContain('"profileId":"local-default"');
+      expect(logs).toContain('"ageBand":"4-6"');
+      expect(logs).not.toContain('1234');
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
 });

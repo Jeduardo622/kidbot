@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { LiveRegion } from './LiveRegion.js';
 import { buildAnnouncementState } from '../utils/announcementState.js';
 import {
@@ -6,8 +6,7 @@ import {
   errorMessage,
   unavailableMessageFromError,
 } from '../utils/degradation.js';
-
-type AgeBand = '4-6' | '7-9' | '10-12';
+import { defaultSessionContext, type SessionContext } from '../utils/sessionContext.js';
 
 interface ScienceResponse {
   blocked: boolean;
@@ -24,9 +23,12 @@ interface ScienceResponse {
 
 const topics = ['Buoyancy', 'Magnetism', 'Rainbows', 'Plant Growth'];
 
-export const ScienceLab = () => {
+interface ScienceLabProps {
+  sessionContext?: SessionContext;
+}
+
+export const ScienceLab = ({ sessionContext = defaultSessionContext }: ScienceLabProps) => {
   const [topic, setTopic] = useState('Buoyancy');
-  const [ageBand, setAgeBand] = useState<AgeBand>('7-9');
   const [plan, setPlan] = useState<ScienceResponse | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [unavailable, setUnavailable] = useState<string | undefined>();
@@ -41,10 +43,6 @@ export const ScienceLab = () => {
     readyMessage: plan && !plan.blocked ? `${plan.title ?? 'Experiment'} ready.` : '',
   });
 
-  useEffect(() => {
-    window.openai?.setWidgetState?.({ tab: 'science', topic, ageBand });
-  }, [topic, ageBand]);
-
   const fetchPlan = async () => {
     setLoading(true);
     setError(undefined);
@@ -53,9 +51,10 @@ export const ScienceLab = () => {
     setShowExplanation(false);
     setSelectedChoice(undefined);
     try {
-      const result = (await window.openai?.callTool?.('science_sim', { topic, ageBand })) as
-        | ScienceResponse
-        | undefined;
+      const result = (await window.openai?.callTool?.('science_sim', {
+        ...sessionContext,
+        topic,
+      })) as ScienceResponse | undefined;
       if (!result) {
         throw new Error('Widget bridge unavailable.');
       }
@@ -94,16 +93,7 @@ export const ScienceLab = () => {
             </option>
           ))}
         </select>
-        <label htmlFor="science-age">Age</label>
-        <select
-          id="science-age"
-          value={ageBand}
-          onChange={(event) => setAgeBand(event.target.value as AgeBand)}
-        >
-          <option value="4-6">Ages 4-6</option>
-          <option value="7-9">Ages 7-9</option>
-          <option value="10-12">Ages 10-12</option>
-        </select>
+        <span className="locked-age">Age: {sessionContext.ageBand}</span>
         <button type="button" onClick={fetchPlan} disabled={loading}>
           {loading ? 'Mixing...' : 'Generate Experiment'}
         </button>

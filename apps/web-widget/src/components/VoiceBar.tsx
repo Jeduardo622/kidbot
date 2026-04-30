@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { LiveRegion } from './LiveRegion.js';
 import { buildAnnouncementState } from '../utils/announcementState.js';
 import {
@@ -6,9 +6,9 @@ import {
   errorMessage,
   unavailableMessageFromError,
 } from '../utils/degradation.js';
+import { defaultSessionContext, type SessionContext } from '../utils/sessionContext.js';
 
 type Persona = 'robot' | 'fairy' | 'explorer';
-type AgeBand = '4-6' | '7-9' | '10-12';
 
 interface VoiceResult {
   blocked: boolean;
@@ -25,12 +25,6 @@ const personas: Array<{ key: Persona; label: string }> = [
   { key: 'explorer', label: 'Explorer Pal' },
 ];
 
-const ageBands: Array<{ key: AgeBand; label: string }> = [
-  { key: '4-6', label: 'Ages 4-6' },
-  { key: '7-9', label: 'Ages 7-9' },
-  { key: '10-12', label: 'Ages 10-12' },
-];
-
 const speakText = (text: string) => {
   if (typeof window === 'undefined' || typeof window.speechSynthesis === 'undefined') {
     return;
@@ -41,9 +35,12 @@ const speakText = (text: string) => {
   window.speechSynthesis.speak(utterance);
 };
 
-export const VoiceBar = () => {
+interface VoiceBarProps {
+  sessionContext?: SessionContext;
+}
+
+export const VoiceBar = ({ sessionContext = defaultSessionContext }: VoiceBarProps) => {
   const [persona, setPersona] = useState<Persona>('robot');
-  const [ageBand, setAgeBand] = useState<AgeBand>('7-9');
   const [text, setText] = useState('Tell me a cheerful space fact!');
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState<VoiceResult | undefined>();
@@ -60,10 +57,6 @@ export const VoiceBar = () => {
     readyMessage: response?.text ? `${response.persona ?? 'Kidbot'} reply ready.` : '',
   });
 
-  useEffect(() => {
-    window.openai?.setWidgetState?.({ tab: 'voice', persona, ageBand, text });
-  }, [persona, ageBand, text]);
-
   const handleSpeak = async () => {
     if (!text.trim()) {
       setError('Please share what you would like to talk about.');
@@ -75,9 +68,11 @@ export const VoiceBar = () => {
     setUnavailable(undefined);
     setResponse(undefined);
     try {
-      const result = (await window.openai?.callTool?.('voice_chat', { text, persona, ageBand })) as
-        | VoiceResult
-        | undefined;
+      const result = (await window.openai?.callTool?.('voice_chat', {
+        ...sessionContext,
+        text,
+        persona,
+      })) as VoiceResult | undefined;
       if (!result) {
         throw new Error('Widget bridge unavailable.');
       }
@@ -120,18 +115,7 @@ export const VoiceBar = () => {
             </option>
           ))}
         </select>
-        <label htmlFor="ageBand">Age</label>
-        <select
-          id="ageBand"
-          value={ageBand}
-          onChange={(event) => setAgeBand(event.target.value as AgeBand)}
-        >
-          {ageBands.map((option) => (
-            <option key={option.key} value={option.key}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+        <span className="locked-age">Age: {sessionContext.ageBand}</span>
       </div>
       <textarea
         value={text}
