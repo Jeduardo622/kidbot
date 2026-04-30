@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomInt } from 'node:crypto';
 import { createServer } from 'node:http';
+import { createConnection } from 'node:net';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -22,7 +23,15 @@ if (!existsSync(agentEntry)) {
   );
 }
 
-const toolIds = ['voice_chat', 'story_panels', 'coloring_outline', 'science_sim'];
+const toolIds = [
+  'voice_chat',
+  'story_panels',
+  'coloring_outline',
+  'science_sim',
+  'parent_profile_create',
+  'parent_profile_update',
+  'parent_history_list',
+];
 const strongToken = () => `matrix-token-${randomInt(1000, 9999)}-abcdefghijklmnopqrstuvwxyz0123456789`;
 
 const getFreePort = () =>
@@ -148,6 +157,16 @@ const callMcp = async (baseUrl, payload) => {
   };
 };
 
+const parseMcpResponse = (body) => {
+  const dataLine = body
+    .split(/\r?\n/)
+    .find((line) => line.startsWith('data:'));
+  if (!dataLine) {
+    throw new Error(`Missing MCP data line in response body: ${body}`);
+  }
+  return JSON.parse(dataLine.slice('data:'.length).trim());
+};
+
 const listen = (server, port) =>
   new Promise((resolve) => {
     server.listen(port, resolve);
@@ -162,6 +181,27 @@ const closeServer = (server) =>
       }
       resolve();
     });
+  });
+
+const redisAvailable = (redisUrl) =>
+  new Promise((resolve) => {
+    try {
+      const parsed = new URL(redisUrl);
+      const socket = createConnection({
+        host: parsed.hostname,
+        port: Number(parsed.port || 6379),
+      });
+      const done = (available) => {
+        socket.destroy();
+        resolve(available);
+      };
+      socket.setTimeout(500);
+      socket.once('connect', () => done(true));
+      socket.once('error', () => done(false));
+      socket.once('timeout', () => done(false));
+    } catch {
+      resolve(false);
+    }
   });
 
 test('non-fallback mode without AGENT_SERVICE_TOKEN fails closed at mcp startup', async () => {
@@ -500,6 +540,164 @@ test('mcp forwards session metadata to agent-service', async () => {
         sessionId: 'kb_session_forward123',
       },
     );
+  } finally {
+    stopProcess(mcp);
+    await closeServer(fakeAgent);
+  }
+});
+
+test('mcp strips parent token and saves metadata history with valid parent auth', async (t) => {
+  const redisUrl = process.env.REDIS_URL?.trim();
+  if (!redisUrl || !(await redisAvailable(redisUrl))) {
+    t.skip('Redis is not available');
+    return;
+  }
+
+  const token = strongToken();
+  const agentPort = await getFreePort();
+  const mcpPort = await getFreePort();
+  const mcpBaseUrl = `http://localhost:${mcpPort}`;
+  const sessionId = `kb_session_history${Date.now()}`;
+  let forwardedBody;
+
+  const fakeAgent = createServer((req, res) => {
+    if (req.method === 'POST' && req.url === '/voice') {
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk.toString();
+      });
+      req.on('end', () => {
+        forwardedBody = JSON.parse(body);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            blocked: false,
+            correlationId: 'kb_agent_history123',
+            persona: 'robot',
+            text: 'History check ready.',
+          }),
+        );
+      });
+      return;
+    }
+
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Not found' }));
+  });
+
+  await listen(fakeAgent, agentPort);
+
+  const mcp = spawnProcess(mcpEntry, {
+    AGENT_PORT: String(agentPort),
+    AGENT_SERVICE_TOKEN: token,
+    FALLBACK_WIDGET: '0',
+    MCP_PORT: String(mcpPort),
+    PARENT_AUTH_SECRET: 'parent-secret-abcdefghijklmnopqrstuvwxyz0123456789',
+    PARENT_HISTORY_MAX_EVENTS: '5',
+    PARENT_PROFILE_STORE: 'redis',
+    REDIS_URL: redisUrl,
+  });
+
+  try {
+    await waitForMcpHealth(mcpBaseUrl);
+
+    const createResponse = await callMcp(mcpBaseUrl, {
+      jsonrpc: '2.0',
+      id: 106,
+      method: 'tools/call',
+      params: {
+        name: 'parent_profile_create',
+        arguments: {
+          ageBand: '4-6',
+          sessionId,
+        },
+      },
+    });
+    assert.equal(createResponse.status, 200);
+    const createJson = parseMcpResponse(createResponse.body);
+    const profile = createJson.result.structuredContent;
+    assert.match(profile.profileId, /^kb_profile_/);
+    assert.match(profile.parentAccessToken, /^kb_parent_/);
+
+    const wrongTokenSessionId = `${sessionId}wrong`;
+    const wrongTokenResponse = await callMcp(mcpBaseUrl, {
+      jsonrpc: '2.0',
+      id: 107,
+      method: 'tools/call',
+      params: {
+        name: 'voice_chat',
+        arguments: {
+          text: 'Tell me a moon fact',
+          persona: 'robot',
+          ageBand: '4-6',
+          profileId: profile.profileId,
+          sessionId: wrongTokenSessionId,
+          parentAccessToken: 'bad',
+        },
+      },
+    });
+    assert.equal(wrongTokenResponse.status, 200);
+
+    const voiceResponse = await callMcp(mcpBaseUrl, {
+      jsonrpc: '2.0',
+      id: 108,
+      method: 'tools/call',
+      params: {
+        name: 'voice_chat',
+        arguments: {
+          text: 'Tell me a moon fact',
+          persona: 'robot',
+          ageBand: '4-6',
+          profileId: profile.profileId,
+          sessionId,
+          parentAccessToken: profile.parentAccessToken,
+        },
+      },
+    });
+
+    assert.equal(voiceResponse.status, 200);
+    assert.equal(forwardedBody.parentAccessToken, undefined);
+    assert.equal(forwardedBody.profileId, profile.profileId);
+
+    const historyResponse = await callMcp(mcpBaseUrl, {
+      jsonrpc: '2.0',
+      id: 109,
+      method: 'tools/call',
+      params: {
+        name: 'parent_history_list',
+        arguments: {
+          profileId: profile.profileId,
+          parentAccessToken: profile.parentAccessToken,
+          sessionId,
+        },
+      },
+    });
+
+    assert.equal(historyResponse.status, 200);
+    const historyJson = parseMcpResponse(historyResponse.body);
+    const events = historyJson.result.structuredContent.events;
+    assert.equal(events.length, 1);
+    assert.equal(events[0].tool, 'voice_chat');
+    assert.equal(events[0].correlationId, 'kb_agent_history123');
+    assert.equal(JSON.stringify(events).includes('moon fact'), false);
+    assert.equal(JSON.stringify(events).includes(profile.parentAccessToken), false);
+
+    const wrongTokenHistoryResponse = await callMcp(mcpBaseUrl, {
+      jsonrpc: '2.0',
+      id: 110,
+      method: 'tools/call',
+      params: {
+        name: 'parent_history_list',
+        arguments: {
+          profileId: profile.profileId,
+          parentAccessToken: profile.parentAccessToken,
+          sessionId: wrongTokenSessionId,
+        },
+      },
+    });
+    assert.equal(wrongTokenHistoryResponse.status, 200);
+    const wrongTokenHistoryJson = parseMcpResponse(wrongTokenHistoryResponse.body);
+    assert.equal(wrongTokenHistoryJson.result.structuredContent.events.length, 0);
   } finally {
     stopProcess(mcp);
     await closeServer(fakeAgent);

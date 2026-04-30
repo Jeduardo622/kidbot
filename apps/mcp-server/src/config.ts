@@ -6,6 +6,10 @@ export interface McpServerConfig {
   localDevIntent: boolean;
   serviceAuthToken: string | undefined;
   startupPosture: 'secured' | 'local-fallback';
+  parentProfileStore: 'disabled' | 'redis';
+  parentAuthSecret: string | undefined;
+  parentHistoryRetentionDays: number;
+  parentHistoryMaxEvents: number;
 }
 
 type McpServerEnv = Partial<
@@ -15,7 +19,11 @@ type McpServerEnv = Partial<
     | 'FALLBACK_WIDGET'
     | 'KIDBOT_LOCAL_DEV'
     | 'MCP_PORT'
-    | 'NODE_ENV',
+    | 'NODE_ENV'
+    | 'PARENT_AUTH_SECRET'
+    | 'PARENT_HISTORY_MAX_EVENTS'
+    | 'PARENT_HISTORY_RETENTION_DAYS'
+    | 'PARENT_PROFILE_STORE',
     string
   >
 >;
@@ -33,6 +41,14 @@ const parsePort = (name: string, value: string | undefined, fallback: number): n
     throw new Error(`${name} must be an integer between 1 and 65535.`);
   }
   return port;
+};
+
+const parsePositiveInteger = (name: string, value: string | undefined, fallback: number): number => {
+  const parsed = Number(value ?? fallback);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`${name} must be a positive integer.`);
+  }
+  return parsed;
 };
 
 const validateServiceToken = ({
@@ -67,6 +83,12 @@ export const parseMcpServerConfig = (env: McpServerEnv = process.env): McpServer
   const localDevIntent = env.KIDBOT_LOCAL_DEV === '1';
   const serviceAuthToken = trimOptional(env.AGENT_SERVICE_TOKEN);
   const startupPosture = fallbackMode ? 'local-fallback' : 'secured';
+  const parentProfileStoreRaw = env.PARENT_PROFILE_STORE?.trim().toLowerCase() || 'disabled';
+  if (parentProfileStoreRaw !== 'disabled' && parentProfileStoreRaw !== 'redis') {
+    throw new Error('PARENT_PROFILE_STORE must be disabled or redis.');
+  }
+  const parentProfileStore = parentProfileStoreRaw;
+  const parentAuthSecret = trimOptional(env.PARENT_AUTH_SECRET);
 
   if (fallbackMode && !localDevIntent) {
     throw new Error('FALLBACK_WIDGET=1 requires KIDBOT_LOCAL_DEV=1 for explicit local fallback posture.');
@@ -78,6 +100,17 @@ export const parseMcpServerConfig = (env: McpServerEnv = process.env): McpServer
     nodeEnv: env.NODE_ENV,
   });
 
+  if (parentProfileStore === 'redis') {
+    if (!parentAuthSecret) {
+      throw new Error('PARENT_AUTH_SECRET is required when PARENT_PROFILE_STORE=redis.');
+    }
+    if (env.NODE_ENV !== 'test' && parentAuthSecret.length < minProductionTokenLength) {
+      throw new Error(
+        `PARENT_AUTH_SECRET must be at least ${minProductionTokenLength} characters when parent profile storage is enabled.`,
+      );
+    }
+  }
+
   return {
     agentPort,
     agentBaseUrl: `http://localhost:${agentPort}`,
@@ -86,6 +119,18 @@ export const parseMcpServerConfig = (env: McpServerEnv = process.env): McpServer
     localDevIntent,
     serviceAuthToken,
     startupPosture,
+    parentProfileStore,
+    parentAuthSecret,
+    parentHistoryRetentionDays: parsePositiveInteger(
+      'PARENT_HISTORY_RETENTION_DAYS',
+      env.PARENT_HISTORY_RETENTION_DAYS,
+      30,
+    ),
+    parentHistoryMaxEvents: parsePositiveInteger(
+      'PARENT_HISTORY_MAX_EVENTS',
+      env.PARENT_HISTORY_MAX_EVENTS,
+      200,
+    ),
   };
 };
 

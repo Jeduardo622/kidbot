@@ -2,6 +2,7 @@ export type AgeBand = '4-6' | '7-9' | '10-12';
 
 export interface SessionContext {
   ageBand: AgeBand;
+  parentAccessToken?: string;
   profileId: string;
   sessionId: string;
 }

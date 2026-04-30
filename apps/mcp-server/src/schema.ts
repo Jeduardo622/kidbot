@@ -6,7 +6,8 @@ export const personaSchema = z.enum(['robot', 'fairy', 'explorer']);
 const sessionMetadataSchema = z.object({
   sessionId: z.string().regex(/^kb_session_[A-Za-z0-9_-]{8,80}$/).optional(),
   profileId: z.string().regex(/^[A-Za-z0-9_-]{3,64}$/).optional(),
-  ageBand: ageBandSchema.optional()
+  ageBand: ageBandSchema.optional(),
+  parentAccessToken: z.string().max(256).optional()
 });
 
 export const voiceInputSchema = z.object({
@@ -27,3 +28,22 @@ export const coloringOutlineSchema = z.object({
 export const scienceSimSchema = z.object({
   topic: z.string().min(3).max(120),
 }).merge(sessionMetadataSchema);
+
+export const parentProfileCreateSchema = z.object({
+  sessionId: z.string().regex(/^kb_session_[A-Za-z0-9_-]{8,80}$/),
+  ageBand: ageBandSchema
+});
+
+export const parentProfileUpdateSchema = z.object({
+  profileId: z.string().regex(/^kb_profile_[A-Za-z0-9_-]{8,80}$/),
+  parentAccessToken: z.string().min(24).max(256),
+  ageBand: ageBandSchema.optional(),
+  historyEnabled: z.boolean().optional()
+});
+
+export const parentHistoryListSchema = z.object({
+  profileId: z.string().regex(/^kb_profile_[A-Za-z0-9_-]{8,80}$/),
+  parentAccessToken: z.string().min(24).max(256),
+  sessionId: z.string().regex(/^kb_session_[A-Za-z0-9_-]{8,80}$/).optional(),
+  limit: z.number().int().min(1).max(100).optional()
+});
