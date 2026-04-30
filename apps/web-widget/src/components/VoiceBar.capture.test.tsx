@@ -41,6 +41,11 @@ const finalTranscriptEvent = (transcript: string): MockSpeechRecognitionResultEv
   },
 });
 
+const permissionBlockedMessage =
+  'Microphone access is blocked. You can still type your question.';
+const retryVoiceInputMessage =
+  'Voice input stopped. You can try again or type your question.';
+
 describe('VoiceBar voice capture', () => {
   const callTool = vi.fn();
 
@@ -88,6 +93,7 @@ describe('VoiceBar voice capture', () => {
     expect(recognition?.lang).toBe('en-US');
     expect(recognition?.start).toHaveBeenCalledTimes(1);
     await screen.findByRole('button', { name: 'Stop Voice Input' });
+    expect(screen.getAllByText('Listening...').length).toBeGreaterThan(0);
   });
 
   it('writes captured transcript into the textarea without submitting', async () => {
@@ -118,6 +124,55 @@ describe('VoiceBar voice capture', () => {
 
     expect(recognition?.stop).toHaveBeenCalledTimes(1);
     await screen.findByRole('button', { name: 'Start Voice Input' });
+  });
+
+  it('shows a microphone-blocked message and returns to idle after permission denial', async () => {
+    installVoiceCapture();
+
+    render(<VoiceBar />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start Voice Input' }));
+    MockSpeechRecognition.instances[0]?.onerror?.({ error: 'not-allowed' });
+
+    expect((await screen.findAllByText(permissionBlockedMessage)).length).toBeGreaterThan(0);
+    await screen.findByRole('button', { name: 'Start Voice Input' });
+  });
+
+  it('shows a retry-safe message and returns to idle when speech is not captured', async () => {
+    installVoiceCapture();
+
+    render(<VoiceBar />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start Voice Input' }));
+    MockSpeechRecognition.instances[0]?.onerror?.({ error: 'no-speech' });
+
+    expect((await screen.findAllByText(retryVoiceInputMessage)).length).toBeGreaterThan(0);
+    await screen.findByRole('button', { name: 'Start Voice Input' });
+  });
+
+  it('keeps typed input and Speak working after a capture error', async () => {
+    installVoiceCapture();
+    callTool.mockResolvedValue({
+      blocked: false,
+      persona: 'robot',
+      text: 'Beep! Jupiter is the biggest planet.',
+    });
+
+    render(<VoiceBar />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start Voice Input' }));
+    MockSpeechRecognition.instances[0]?.onerror?.({ error: 'aborted' });
+    fireEvent.change(screen.getByPlaceholderText('Ask a question or share a topic'), {
+      target: { value: 'Tell me about Jupiter' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Speak' }));
+
+    await waitFor(() => {
+      expect(callTool).toHaveBeenCalledWith(
+        'voice_chat',
+        expect.objectContaining({ text: 'Tell me about Jupiter' }),
+      );
+    });
   });
 
   it('stops active capture on unmount', async () => {

@@ -17,6 +17,15 @@ import { speakText } from '../utils/voicePlayback.js';
 type Persona = 'robot' | 'fairy' | 'explorer';
 type CaptureState = 'idle' | 'listening' | 'unsupported';
 
+const permissionBlockedMessage =
+  'Microphone access is blocked. You can still type your question.';
+const retryVoiceInputMessage =
+  'Voice input stopped. You can try again or type your question.';
+const permissionErrorPattern = /not-allowed|permission|service-not-allowed/i;
+
+const voiceCaptureErrorMessage = (message: string): string =>
+  permissionErrorPattern.test(message) ? permissionBlockedMessage : retryVoiceInputMessage;
+
 interface VoiceResult {
   blocked: boolean;
   degraded?: boolean;
@@ -45,6 +54,7 @@ export const VoiceBar = ({ sessionContext = defaultSessionContext }: VoiceBarPro
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState<VoiceResult | undefined>();
   const [error, setError] = useState<string | undefined>();
+  const [captureMessage, setCaptureMessage] = useState<string | undefined>();
   const [unavailable, setUnavailable] = useState<string | undefined>();
   const captureSessionRef = useRef<VoiceCaptureSession | undefined>();
   const blockedMessage = response?.blocked
@@ -55,7 +65,12 @@ export const VoiceBar = ({ sessionContext = defaultSessionContext }: VoiceBarPro
     loadingMessage: 'Kidbot is thinking.',
     errorMessage: error,
     urgentMessage: unavailable ?? blockedMessage,
-    readyMessage: response?.text ? `${response.persona ?? 'Kidbot'} reply ready.` : '',
+    readyMessage:
+      captureState === 'listening'
+        ? 'Listening...'
+        : response?.text
+          ? `${response.persona ?? 'Kidbot'} reply ready.`
+          : '',
   });
 
   useEffect(
@@ -71,27 +86,47 @@ export const VoiceBar = ({ sessionContext = defaultSessionContext }: VoiceBarPro
     }
     if (captureState === 'listening') {
       captureSessionRef.current?.stop();
+      captureSessionRef.current = undefined;
       setCaptureState('idle');
       return;
     }
 
     const session = createVoiceCapture({
-      onEnd: () => setCaptureState('idle'),
-      onError: (message) => {
-        setError(message);
+      onEnd: () => {
+        captureSessionRef.current = undefined;
         setCaptureState('idle');
       },
-      onStart: () => setCaptureState('listening'),
-      onText: (transcript) => setText(transcript),
+      onError: (message) => {
+        setError(voiceCaptureErrorMessage(message));
+        setCaptureMessage(undefined);
+        setCaptureState('idle');
+      },
+      onStart: () => {
+        setCaptureMessage('Listening...');
+        setCaptureState('listening');
+      },
+      onText: (transcript) => {
+        setText(transcript);
+        setCaptureMessage(undefined);
+      },
     });
     if (!session) {
       setCaptureState('unsupported');
+      setCaptureMessage(undefined);
       return;
     }
 
     setError(undefined);
+    setCaptureMessage(undefined);
     captureSessionRef.current = session;
-    session.start();
+    try {
+      session.start();
+    } catch (err) {
+      captureSessionRef.current = undefined;
+      setCaptureState('idle');
+      setCaptureMessage(undefined);
+      setError(voiceCaptureErrorMessage(errorMessage(err)));
+    }
   };
 
   const voiceInputLabel =
@@ -177,6 +212,7 @@ export const VoiceBar = ({ sessionContext = defaultSessionContext }: VoiceBarPro
       <button type="button" onClick={handleSpeak} disabled={loading}>
         {loading ? 'Thinking...' : 'Speak'}
       </button>
+      {captureMessage && <p className="capture-status">{captureMessage}</p>}
       {error && <p className="error">{error}</p>}
       {unavailable && <p className="degraded">{unavailable}</p>}
       {response && (

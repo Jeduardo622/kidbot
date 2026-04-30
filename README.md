@@ -114,6 +114,7 @@ GitHub Actions also includes the manual `Production Parent Store Smoke` workflow
 
 The widget currently uses browser `speechSynthesis` for local voice playback. Realtime STT/TTS should be integrated behind the widget voice playback boundary so the existing `voice_chat` tool contract and child-safety flow remain unchanged.
 Voice input currently uses browser speech recognition where available and writes captured text into the existing prompt box. Future Realtime STT/TTS should replace the internals behind the voice capture/playback utilities, not the `voice_chat` contract.
+Browser speech recognition may ask for microphone permission; unsupported browsers continue to use typed input.
 
 ### Railway Production Deploy
 

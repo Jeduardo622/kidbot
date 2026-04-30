@@ -183,6 +183,12 @@ textarea {
   font-weight: 600;
 }
 
+.capture-status {
+  color: #166534;
+  font-weight: 600;
+  margin: 0;
+}
+
 .blocked {
   color: #ea580c;
   font-weight: 600;
