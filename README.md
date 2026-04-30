@@ -110,6 +110,10 @@ The remote smoke uses only the deployed MCP URL. It never reads, sends, or logs 
 
 GitHub Actions also includes the manual `Production Parent Store Smoke` workflow. Store `KIDBOT_REMOTE_MCP_URL` as a protected production environment secret before running it.
 
+### Voice Playback Boundary
+
+The widget currently uses browser `speechSynthesis` for local voice playback. Realtime STT/TTS should be integrated behind the widget voice playback boundary so the existing `voice_chat` tool contract and child-safety flow remain unchanged.
+
 ### Railway Production Deploy
 
 Railway is the first recommended production host for Kidbot because the repo currently runs long-lived Node/Express services plus Redis.

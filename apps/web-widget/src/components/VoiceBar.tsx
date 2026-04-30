@@ -7,6 +7,7 @@ import {
   unavailableMessageFromError,
 } from '../utils/degradation.js';
 import { defaultSessionContext, type SessionContext } from '../utils/sessionContext.js';
+import { speakText } from '../utils/voicePlayback.js';
 
 type Persona = 'robot' | 'fairy' | 'explorer';
 
@@ -24,16 +25,6 @@ const personas: Array<{ key: Persona; label: string }> = [
   { key: 'fairy', label: 'Fairy Friend' },
   { key: 'explorer', label: 'Explorer Pal' },
 ];
-
-const speakText = (text: string) => {
-  if (typeof window === 'undefined' || typeof window.speechSynthesis === 'undefined') {
-    return;
-  }
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.rate = 1.05;
-  window.speechSynthesis.cancel();
-  window.speechSynthesis.speak(utterance);
-};
 
 interface VoiceBarProps {
   sessionContext?: SessionContext;
