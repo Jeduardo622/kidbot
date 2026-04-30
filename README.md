@@ -44,6 +44,7 @@ PARENT_PROFILE_STORE=disabled
 PARENT_AUTH_SECRET=
 PARENT_HISTORY_RETENTION_DAYS=30
 PARENT_HISTORY_MAX_EVENTS=200
+KIDBOT_REMOTE_MCP_URL=
 ```
 
 Production secured posture requires a dedicated `AGENT_SERVICE_TOKEN`; do not reuse `OPENAI_API_KEY` as service auth. Generate a high-entropy token with:
@@ -79,6 +80,32 @@ The widget creates a local `sessionId`, uses the non-PII `profileId` value `loca
 All child-facing tools use the locked widget age band. MCP and agent-service accept optional `sessionId`, `profileId`, and `ageBand` metadata for safe audit logs, default omitted `ageBand` to `7-9` behaviorally, and do not store profile or session data.
 
 To enable persistent parent profiles and metadata-only session history, set `PARENT_PROFILE_STORE=redis`, provide the same `REDIS_URL`, and set a high-entropy `PARENT_AUTH_SECRET`. MCP issues a server-side parent access token after the widget parent PIN flow and stores only an HMAC hash of that token. This token gates saved profile settings and history reads/writes, but it is still not account identity. Saved history excludes prompts, responses, PINs, service tokens, and generated artifacts. MCP `/healthz` reports parent profile store readiness without exposing secrets or history.
+
+Generate the parent auth secret with:
+
+```bash
+openssl rand -base64 48
+```
+
+Before deploying Redis-backed parent storage, build the services and run the local Redis smoke:
+
+```bash
+pnpm --filter @kidbot/agent-service run build
+pnpm --filter @kidbot/mcp-server run build
+REDIS_URL=redis://localhost:6379 pnpm run smoke:parent-store-redis
+```
+
+The local smoke requires real Redis readiness, verifies `PARENT_AUTH_SECRET` fail-fast startup behavior, checks MCP `/healthz` reports `parentProfileStore.mode: "redis"` and `ready: true`, then creates, updates, and reads a disposable parent profile without storing prompts, responses, PINs, service tokens, generated artifacts, or parent access tokens in history.
+
+After deployment, set `KIDBOT_REMOTE_MCP_URL` to the deployed MCP origin, without `/mcp`, and run:
+
+```bash
+pnpm run smoke:parent-store-remote
+```
+
+The remote smoke uses only the deployed MCP URL. It never reads, sends, or logs `PARENT_AUTH_SECRET`; it proves secret-backed startup indirectly through Redis health plus successful parent profile create/update/history behavior. A degraded child-tool response is acceptable if it is recorded as safe metadata rather than treated as a safety block.
+
+GitHub Actions also includes the manual `Production Parent Store Smoke` workflow. Store `KIDBOT_REMOTE_MCP_URL` as a protected production environment secret before running it.
 
 ### Ngrok (optional)
 

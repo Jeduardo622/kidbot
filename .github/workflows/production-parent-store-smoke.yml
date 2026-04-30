@@ -1,0 +1,41 @@
+name: Production Parent Store Smoke
+
+on:
+  workflow_dispatch:
+
+jobs:
+  parent-store-remote:
+    name: Remote Parent Store Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+
+    env:
+      KIDBOT_REMOTE_MCP_URL: ${{ secrets.KIDBOT_REMOTE_MCP_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: 8.15.8
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Build MCP server
+        run: pnpm --filter @kidbot/mcp-server run build
+
+      - name: Run remote parent store smoke
+        run: pnpm run smoke:parent-store-remote

@@ -11,6 +11,8 @@
     "dev:agent": "pnpm --filter agent-service dev",
     "dev": "concurrently -c auto -n WIDGET,MCP,AGENT \"pnpm --filter web-widget dev\" \"pnpm --filter mcp-server dev\" \"pnpm --filter agent-service dev\"",
     "lint": "node ./scripts/run-lint.mjs",
+    "smoke:parent-store-redis": "node ./scripts/smoke-parent-store.mjs local",
+    "smoke:parent-store-remote": "node ./scripts/smoke-parent-store.mjs remote",
     "smoke:secured-posture": "node ./scripts/smoke-secured-posture.mjs",
     "typecheck": "node ./scripts/run-typecheck.mjs",
     "test": "node ./scripts/run-test.mjs",
