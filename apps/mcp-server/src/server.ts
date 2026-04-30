@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { mcpConfig } from './config.js';
-import { registerTools } from './tools.js';
+import { parentProfileStore, registerTools } from './tools.js';
 import type { Mode } from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -114,8 +114,14 @@ if (existsSync(publicDir)) {
   app.use('/public', express.static(publicDir));
 }
 
-app.get('/healthz', (_req, res) => {
-  res.json({ ok: true, mode: widgetMode, time: new Date().toISOString() });
+app.get('/healthz', async (_req, res) => {
+  const parentStore = await parentProfileStore.readiness();
+  res.status(parentStore.ready ? 200 : 503).json({
+    ok: parentStore.ready,
+    mode: widgetMode,
+    parentProfileStore: parentStore,
+    time: new Date().toISOString()
+  });
 });
 
 app.get('/diag', (_req, res) => {

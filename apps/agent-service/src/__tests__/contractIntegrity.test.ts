@@ -154,6 +154,7 @@ describe('contract integrity', () => {
   it('keeps widget tool ids consistent with MCP tool registrations', () => {
     const mcpToolsSource = readFileSync(path.join(repoRoot, 'apps/mcp-server/src/tools.ts'), 'utf-8');
     const widgetSources = [
+      readFileSync(path.join(repoRoot, 'apps/web-widget/src/main.tsx'), 'utf-8'),
       readFileSync(path.join(repoRoot, 'apps/web-widget/src/components/VoiceBar.tsx'), 'utf-8'),
       readFileSync(path.join(repoRoot, 'apps/web-widget/src/components/ComicBoard.tsx'), 'utf-8'),
       readFileSync(path.join(repoRoot, 'apps/web-widget/src/components/ColoringBook.tsx'), 'utf-8'),
@@ -162,9 +163,19 @@ describe('contract integrity', () => {
 
     const mcpToolIds = [...mcpToolsSource.matchAll(/name:\s*'([^']+)'/g)].map((match) => match[1]).sort();
     const widgetToolIds = [...widgetSources.matchAll(/callTool\?\.\('([^']+)'/g)].map((match) => match[1]).sort();
+    const expectedMcpToolIds = [
+      'coloring_outline',
+      'parent_history_list',
+      'parent_profile_create',
+      'parent_profile_update',
+      'science_sim',
+      'story_panels',
+      'voice_chat',
+    ];
+    const expectedWidgetToolIds = expectedMcpToolIds.filter((toolId) => toolId !== 'parent_history_list');
 
-    expect(widgetToolIds).toEqual(['coloring_outline', 'science_sim', 'story_panels', 'voice_chat']);
-    expect(mcpToolIds).toEqual(['coloring_outline', 'science_sim', 'story_panels', 'voice_chat']);
-    expect(widgetToolIds).toEqual(mcpToolIds);
+    expect(widgetToolIds).toEqual(expectedWidgetToolIds);
+    expect(mcpToolIds).toEqual(expectedMcpToolIds);
+    expect(widgetToolIds.every((toolId) => mcpToolIds.includes(toolId))).toBe(true);
   });
 });

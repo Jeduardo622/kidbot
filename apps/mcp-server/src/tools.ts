@@ -6,14 +6,19 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import {
   coloringOutlineSchema,
+  parentHistoryListSchema,
+  parentProfileCreateSchema,
+  parentProfileUpdateSchema,
   scienceSimSchema,
   storyPanelsSchema,
   voiceInputSchema
 } from './schema.js';
 import { mcpConfig } from './config.js';
+import { createParentProfileStoreFromConfig, type AgeBand, type ParentHistoryEvent } from './parentStore.js';
 import { kidTone, moderate } from './safety.js';
 
 const { agentBaseUrl, fallbackMode, serviceAuthToken, startupPosture } = mcpConfig;
+export const parentProfileStore = createParentProfileStoreFromConfig(mcpConfig);
 const degradedServiceMessage = 'Kidbot is having trouble reaching its idea engine right now. Please try again in a moment.';
 const outputMeta = {
   'openai/outputTemplate': 'ui://widget/kidbot.html',
@@ -32,8 +37,20 @@ interface AgentDegradedResponse {
   correlationId?: string;
 }
 
+interface SessionPayload {
+  ageBand?: AgeBand;
+  parentAccessToken?: string;
+  profileId?: string;
+  sessionId?: string;
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const stripParentAccessToken = <T extends Record<string, unknown>>(input: T) => {
+  const { parentAccessToken: _parentAccessToken, ...agentPayload } = input;
+  return agentPayload;
+};
 
 const callAgent = async <T>(path: string, payload: unknown): Promise<T | AgentDegradedResponse> => {
   if (fallbackMode) {
@@ -106,9 +123,68 @@ const degradedResponse = (response: AgentDegradedResponse) => ({
   }
 });
 
+const createHistoryEvent = ({
+  input,
+  outputLength,
+  response,
+  tool,
+}: {
+  input: SessionPayload;
+  outputLength: number;
+  response: { blocked?: boolean; degraded?: boolean; providerFallback?: boolean; fallbackReason?: string; correlationId?: string };
+  tool: string;
+}): ParentHistoryEvent | undefined => {
+  if (!input.sessionId || !input.profileId || input.profileId === 'local-default') {
+    return undefined;
+  }
+  const ageBand = input.ageBand ?? '7-9';
+  const degraded = response.degraded === true;
+  const blocked = response.blocked === true;
+  return {
+    id: `kb_event_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`,
+    timestamp: new Date().toISOString(),
+    tool,
+    sessionId: input.sessionId,
+    profileId: input.profileId,
+    ageBand,
+    status: degraded ? 'degraded' : blocked ? 'blocked' : 'ok',
+    blocked,
+    degraded,
+    providerFallback: response.providerFallback,
+    fallbackReason: response.fallbackReason,
+    correlationId: response.correlationId,
+    inputLength: JSON.stringify(stripParentAccessToken(input as unknown as Record<string, unknown>)).length,
+    outputLength,
+  };
+};
+
+const recordHistoryIfAuthorized = async (
+  input: SessionPayload,
+  tool: string,
+  response: Record<string, unknown>,
+) => {
+  const event = createHistoryEvent({
+    input,
+    outputLength: JSON.stringify(response).length,
+    response: response as {
+      blocked?: boolean;
+      degraded?: boolean;
+      providerFallback?: boolean;
+      fallbackReason?: string;
+      correlationId?: string;
+    },
+    tool,
+  });
+  if (!event) {
+    return;
+  }
+  await parentProfileStore.recordEvent(event, input.parentAccessToken);
+};
+
 const handleWithModeration = async <Schema extends z.ZodTypeAny, ResponseType extends { blocked: boolean; message?: string; degraded?: boolean }>(
   schema: Schema,
   payload: unknown,
+  tool: string,
   validator: (input: z.infer<Schema>) => string[],
   action: (input: z.infer<Schema>) => Promise<ResponseType>,
   transcript: (input: z.infer<Schema>, response: ResponseType) => string
@@ -122,10 +198,12 @@ const handleWithModeration = async <Schema extends z.ZodTypeAny, ResponseType ex
 
   const agentResponse = await action(parsed);
   if (isDegradedResponse(agentResponse)) {
+    await recordHistoryIfAuthorized(parsed as SessionPayload, tool, agentResponse as unknown as Record<string, unknown>);
     return degradedResponse(agentResponse);
   }
 
   if (agentResponse.blocked) {
+    await recordHistoryIfAuthorized(parsed as SessionPayload, tool, agentResponse as unknown as Record<string, unknown>);
     return blockedResponse(agentResponse.message ?? 'Let\'s pick another playful request.');
   }
 
@@ -134,6 +212,8 @@ const handleWithModeration = async <Schema extends z.ZodTypeAny, ResponseType ex
   if (postCheck.blocked) {
     return blockedResponse(postCheck.message ?? 'Let\'s stick with cheerful topics.');
   }
+
+  await recordHistoryIfAuthorized(parsed as SessionPayload, tool, agentResponse as unknown as Record<string, unknown>);
 
   return {
     content: [
@@ -261,6 +341,78 @@ const fixtureScience = (input: z.infer<typeof scienceSimSchema>) => {
 };
 
 export const registerTools = (server: McpServer): void => {
+  const parentCreateTool = {
+    name: 'parent_profile_create',
+    description: 'Create a parent-gated Kidbot profile for saved metadata history',
+    _meta: { 'openai/widgetAccessible': true },
+    inputSchema: parentProfileCreateSchema
+  };
+  server.registerTool(parentCreateTool.name, parentCreateTool, async (input: unknown) => {
+    const parsed = parentProfileCreateSchema.parse(input);
+    const profile = await parentProfileStore.createProfile(parsed);
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: profile.historyEnabled ? 'Parent profile ready.' : 'Parent profile storage is disabled.'
+        }
+      ],
+      structuredContent: profile as unknown as Record<string, unknown>,
+      _meta: {
+        ...outputMeta,
+        'openai/widgetAccessible': true
+      }
+    };
+  });
+
+  const parentUpdateTool = {
+    name: 'parent_profile_update',
+    description: 'Update parent-gated Kidbot profile settings',
+    _meta: { 'openai/widgetAccessible': true },
+    inputSchema: parentProfileUpdateSchema
+  };
+  server.registerTool(parentUpdateTool.name, parentUpdateTool, async (input: unknown) => {
+    const parsed = parentProfileUpdateSchema.parse(input);
+    const profile = await parentProfileStore.updateProfile(parsed);
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: 'Parent profile updated.'
+        }
+      ],
+      structuredContent: profile as unknown as Record<string, unknown>,
+      _meta: {
+        ...outputMeta,
+        'openai/widgetAccessible': true
+      }
+    };
+  });
+
+  const parentHistoryTool = {
+    name: 'parent_history_list',
+    description: 'List saved Kidbot session metadata for parent review',
+    _meta: { 'openai/widgetAccessible': true },
+    inputSchema: parentHistoryListSchema
+  };
+  server.registerTool(parentHistoryTool.name, parentHistoryTool, async (input: unknown) => {
+    const parsed = parentHistoryListSchema.parse(input);
+    const events = await parentProfileStore.listHistory(parsed);
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `Found ${events.length} saved history events.`
+        }
+      ],
+      structuredContent: { events },
+      _meta: {
+        ...outputMeta,
+        'openai/widgetAccessible': true
+      }
+    };
+  });
+
   const voiceTool = {
     name: 'voice_chat',
     description: 'Kid-friendly persona voice replies',
@@ -271,13 +423,14 @@ export const registerTools = (server: McpServer): void => {
       handleWithModeration(
         voiceInputSchema,
         input,
+        voiceTool.name,
         (data) => [data.text ?? ''],
         async (data) =>
           fallbackMode
             ? Promise.resolve(fixtureVoice(data))
             : callAgent<{ blocked: boolean; message?: string; persona?: string; text?: string; ssml?: string }>(
                 '/voice',
-                data
+                stripParentAccessToken(data)
               ),
         (data, response) =>
           response.blocked
@@ -295,13 +448,14 @@ export const registerTools = (server: McpServer): void => {
       handleWithModeration(
         storyPanelsSchema,
         input,
+        storyTool.name,
         (data) => [data.theme ?? ''],
         async (data) =>
           fallbackMode
             ? Promise.resolve(fixturePanels(data))
             : callAgent<{ blocked: boolean; message?: string; theme?: string; panels?: unknown[] }>(
                 '/story-panels',
-                data
+                stripParentAccessToken(data)
               ),
         (data, response) =>
           response.blocked
@@ -319,11 +473,12 @@ export const registerTools = (server: McpServer): void => {
       handleWithModeration(
         coloringOutlineSchema,
         input,
+        coloringTool.name,
         (data) => [data.scene ?? ''],
         async (data) =>
           fallbackMode
             ? Promise.resolve(fixtureColoring())
-            : callAgent<{ blocked: boolean; message?: string; svg?: string }>('/coloring-outline', data),
+            : callAgent<{ blocked: boolean; message?: string; svg?: string }>('/coloring-outline', stripParentAccessToken(data)),
         (data, response) =>
           response.blocked ? response.message ?? 'Coloring outline blocked.' : `Outline ready for ${data.scene}.`
       ));
@@ -338,6 +493,7 @@ export const registerTools = (server: McpServer): void => {
       handleWithModeration(
         scienceSimSchema,
         input,
+        scienceTool.name,
         (data) => [data.topic ?? '', kidTone((data.ageBand ?? '7-9') as '4-6' | '7-9' | '10-12')],
         async (data) =>
           fallbackMode
@@ -348,7 +504,7 @@ export const registerTools = (server: McpServer): void => {
                 title?: string;
                 objective?: string;
                 steps?: string[];
-              }>('/science-sim', data),
+              }>('/science-sim', stripParentAccessToken(data)),
         (data, response) =>
           response.blocked
             ? response.message ?? 'Science sim paused.'

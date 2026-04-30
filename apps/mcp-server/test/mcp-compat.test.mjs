@@ -12,7 +12,15 @@ if (!existsSync(serverEntry)) {
   throw new Error('Missing apps/mcp-server/dist/server.js. Run `pnpm --filter mcp-server build` before compatibility test.');
 }
 
-const toolIds = ['voice_chat', 'story_panels', 'coloring_outline', 'science_sim'];
+const toolIds = [
+  'voice_chat',
+  'story_panels',
+  'coloring_outline',
+  'science_sim',
+  'parent_profile_create',
+  'parent_profile_update',
+  'parent_history_list',
+];
 const port = randomInt(3200, 3899);
 const baseUrl = `http://localhost:${port}`;
 let serverProcess;

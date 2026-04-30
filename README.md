@@ -40,6 +40,10 @@ REDIS_URL=redis://localhost:6379
 PROVIDER_FAILURE_POLICY=503
 PROVIDER_TIMEOUT_MS=15000
 PROVIDER_RETRIES=1
+PARENT_PROFILE_STORE=disabled
+PARENT_AUTH_SECRET=
+PARENT_HISTORY_RETENTION_DAYS=30
+PARENT_HISTORY_MAX_EVENTS=200
 ```
 
 Production secured posture requires a dedicated `AGENT_SERVICE_TOKEN`; do not reuse `OPENAI_API_KEY` as service auth. Generate a high-entropy token with:
@@ -73,6 +77,8 @@ The smoke check starts local built services on ephemeral ports, verifies MCP can
 The widget creates a local `sessionId`, uses the non-PII `profileId` value `local-default`, and stores the locked age band in ChatGPT widget state. Parent controls are gated by a 4-digit session PIN; the PIN is session-scoped widget state only and is not an account, authentication factor, persistent parent identity, or server-side access control.
 
 All child-facing tools use the locked widget age band. MCP and agent-service accept optional `sessionId`, `profileId`, and `ageBand` metadata for safe audit logs, default omitted `ageBand` to `7-9` behaviorally, and do not store profile or session data.
+
+To enable persistent parent profiles and metadata-only session history, set `PARENT_PROFILE_STORE=redis`, provide the same `REDIS_URL`, and set a high-entropy `PARENT_AUTH_SECRET`. MCP issues a server-side parent access token after the widget parent PIN flow and stores only an HMAC hash of that token. This token gates saved profile settings and history reads/writes, but it is still not account identity. Saved history excludes prompts, responses, PINs, service tokens, and generated artifacts. MCP `/healthz` reports parent profile store readiness without exposing secrets or history.
 
 ### Ngrok (optional)
 
