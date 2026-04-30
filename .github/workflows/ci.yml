@@ -73,6 +73,9 @@ jobs:
           PARENT_AUTH_SECRET: parent-secret-abcdefghijklmnopqrstuvwxyz0123456789
         run: pnpm --filter @kidbot/mcp-server run test:parent-store
 
+      - name: Run parent store Redis deploy smoke
+        run: pnpm run smoke:parent-store-redis
+
       - name: Run secured deploy posture smoke
         run: pnpm run smoke:secured-posture
 
