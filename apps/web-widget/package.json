@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint src --max-warnings=0",
-    "test": "vitest --run --environment jsdom"
+    "test": "cross-env NODE_ENV=test vitest --run --environment jsdom"
   },
   "dependencies": {
     "react": "^18.3.1",
