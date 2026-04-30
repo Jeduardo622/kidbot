@@ -116,6 +116,25 @@ The widget currently uses browser `speechSynthesis` for local voice playback. Re
 Voice input currently uses browser speech recognition where available and writes captured text into the existing prompt box. Future Realtime STT/TTS should replace the internals behind the voice capture/playback utilities, not the `voice_chat` contract.
 Browser speech recognition may ask for microphone permission; unsupported browsers continue to use typed input.
 
+### Voice Capture Manual QA
+
+Browser speech recognition and microphone permission prompts are controlled by the browser and are not reliably covered by jsdom. Before adding Realtime voice behavior, validate the current browser capture flow manually in Chrome or Edge:
+
+```bash
+pnpm install
+pnpm run dev
+```
+
+Open the Vite widget URL printed by the dev server, usually `http://localhost:5173`, then check:
+
+- A supported browser shows `Start Voice Input`.
+- Clicking `Start Voice Input` prompts for microphone permission when permission is unset.
+- Allowing permission shows `Listening...`; final speech fills the textarea without clicking `Speak`.
+- Denying permission returns to `Start Voice Input` and shows `Microphone access is blocked. You can still type your question.`
+- No speech, stopping, or aborted capture returns to idle with `Voice input stopped. You can try again or type your question.`
+- Unsupported browsers show disabled `Voice Input Unavailable`.
+- Typed input and the explicit `Speak` button still work after any capture error.
+
 ### Railway Production Deploy
 
 Railway is the first recommended production host for Kidbot because the repo currently runs long-lived Node/Express services plus Redis.
