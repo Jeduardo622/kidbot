@@ -68,6 +68,12 @@ pnpm run smoke:secured-posture
 
 The smoke check starts local built services on ephemeral ports, verifies MCP can call agent-service with the shared token, and verifies unauthenticated, wrong-posture, and wrong-token calls fail.
 
+### Parent/Session Safety MVP
+
+The widget creates a local `sessionId`, uses the non-PII `profileId` value `local-default`, and stores the locked age band in ChatGPT widget state. Parent controls are gated by a 4-digit session PIN; the PIN is session-scoped widget state only and is not an account, authentication factor, persistent parent identity, or server-side access control.
+
+All child-facing tools use the locked widget age band. MCP and agent-service accept optional `sessionId`, `profileId`, and `ageBand` metadata for safe audit logs, default omitted `ageBand` to `7-9` behaviorally, and do not store profile or session data.
+
 ### Ngrok (optional)
 
 To expose the MCP server externally for ChatGPT Developer Mode connectors:

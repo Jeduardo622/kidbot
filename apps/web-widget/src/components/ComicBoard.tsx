@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { LiveRegion } from './LiveRegion.js';
 import { buildAnnouncementState } from '../utils/announcementState.js';
 import {
@@ -6,6 +6,7 @@ import {
   errorMessage,
   unavailableMessageFromError,
 } from '../utils/degradation.js';
+import { defaultSessionContext, type SessionContext } from '../utils/sessionContext.js';
 
 interface StoryPanel {
   title: string;
@@ -22,10 +23,13 @@ interface StoryResponse {
   panels?: StoryPanel[];
 }
 
-export const ComicBoard = () => {
+interface ComicBoardProps {
+  sessionContext?: SessionContext;
+}
+
+export const ComicBoard = ({ sessionContext = defaultSessionContext }: ComicBoardProps) => {
   const [theme, setTheme] = useState('A brave turtle shares snacks');
   const [panelCount, setPanelCount] = useState(4);
-  const [ageBand, setAgeBand] = useState<'4-6' | '7-9' | '10-12'>('7-9');
   const [panels, setPanels] = useState<StoryPanel[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>();
@@ -38,10 +42,6 @@ export const ComicBoard = () => {
     readyMessage: panels.length > 0 ? `Planned ${panels.length} panels.` : '',
   });
 
-  useEffect(() => {
-    window.openai?.setWidgetState?.({ tab: 'comics', theme, panelCount, ageBand });
-  }, [theme, panelCount, ageBand]);
-
   const handlePlan = async () => {
     setLoading(true);
     setError(undefined);
@@ -49,9 +49,9 @@ export const ComicBoard = () => {
     setPanels([]);
     try {
       const result = (await window.openai?.callTool?.('story_panels', {
+        ...sessionContext,
         theme,
         panels: panelCount,
-        ageBand,
       })) as StoryResponse | undefined;
       if (!result) {
         throw new Error('Widget bridge unavailable.');
@@ -94,16 +94,7 @@ export const ComicBoard = () => {
           value={panelCount}
           onChange={(event) => setPanelCount(Number(event.target.value))}
         />
-        <label htmlFor="panel-age">Age</label>
-        <select
-          id="panel-age"
-          value={ageBand}
-          onChange={(event) => setAgeBand(event.target.value as '4-6' | '7-9' | '10-12')}
-        >
-          <option value="4-6">Ages 4-6</option>
-          <option value="7-9">Ages 7-9</option>
-          <option value="10-12">Ages 10-12</option>
-        </select>
+        <span className="locked-age">Age: {sessionContext.ageBand}</span>
         <button type="button" onClick={handlePlan} disabled={loading}>
           {loading ? 'Planning...' : 'Plan Panels'}
         </button>

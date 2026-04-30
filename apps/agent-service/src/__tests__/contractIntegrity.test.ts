@@ -38,12 +38,22 @@ describe('contract integrity', () => {
   it('keeps voice schema constraints aligned', async () => {
     const mcp = await loadMcpSchemas();
     const valid = { text: 'a', persona: 'robot' as const };
+    const validWithSession = {
+      ...valid,
+      ageBand: '7-9',
+      profileId: 'local-default',
+      sessionId: 'kb_session_abc123XYZ',
+    };
     const maxBoundary = { text: 'a'.repeat(280), persona: 'robot' as const };
     const tooLong = { text: 'a'.repeat(281), persona: 'robot' as const };
     const missingText = { persona: 'robot' as const };
+    const invalidSession = { ...valid, sessionId: 'kid name' };
+    const invalidProfile = { ...valid, profileId: 'ab' };
 
     expect(accepts(mcp.voiceInputSchema, valid)).toBe(true);
     expect(accepts(voiceRequestSchema, valid)).toBe(true);
+    expect(accepts(mcp.voiceInputSchema, validWithSession)).toBe(true);
+    expect(accepts(voiceRequestSchema, validWithSession)).toBe(true);
     expect(accepts(mcp.voiceInputSchema, maxBoundary)).toBe(true);
     expect(accepts(voiceRequestSchema, maxBoundary)).toBe(true);
     expect(accepts(mcp.voiceInputSchema, tooLong)).toBe(false);
@@ -54,12 +64,22 @@ describe('contract integrity', () => {
     expect(accepts(voiceRequestSchema, { ...valid, ageBand: '7-9' })).toBe(true);
     expect(accepts(mcp.voiceInputSchema, { ...valid, ageBand: '13-15' })).toBe(false);
     expect(accepts(voiceRequestSchema, { ...valid, ageBand: '13-15' })).toBe(false);
+    expect(accepts(mcp.voiceInputSchema, invalidSession)).toBe(false);
+    expect(accepts(voiceRequestSchema, invalidSession)).toBe(false);
+    expect(accepts(mcp.voiceInputSchema, invalidProfile)).toBe(false);
+    expect(accepts(voiceRequestSchema, invalidProfile)).toBe(false);
   });
 
   it('keeps story schema constraints aligned', async () => {
     const mcp = await loadMcpSchemas();
     const valid = { theme: 'Kind dragon story', panels: 4 };
     const validWithAge = { theme: 'Kind dragon story', panels: 4, ageBand: '7-9' };
+    const validWithSession = {
+      ...valid,
+      ageBand: '4-6',
+      profileId: 'local-default',
+      sessionId: 'kb_session_story123',
+    };
     const tooShortTheme = { theme: 'ab', panels: 4 };
     const tooManyPanels = { theme: 'Kind dragon story', panels: 9 };
     const tooFewPanels = { theme: 'Kind dragon story', panels: 1 };
@@ -69,6 +89,8 @@ describe('contract integrity', () => {
     expect(accepts(storyRequestSchema, valid)).toBe(true);
     expect(accepts(mcp.storyPanelsSchema, validWithAge)).toBe(true);
     expect(accepts(storyRequestSchema, validWithAge)).toBe(true);
+    expect(accepts(mcp.storyPanelsSchema, validWithSession)).toBe(true);
+    expect(accepts(storyRequestSchema, validWithSession)).toBe(true);
     expect(accepts(mcp.storyPanelsSchema, tooShortTheme)).toBe(false);
     expect(accepts(storyRequestSchema, tooShortTheme)).toBe(false);
     expect(accepts(mcp.storyPanelsSchema, tooManyPanels)).toBe(false);
@@ -83,6 +105,12 @@ describe('contract integrity', () => {
     const mcp = await loadMcpSchemas();
     const valid = { scene: 'space cat' };
     const validWithStyle = { scene: 'space cat', style: 'space' };
+    const validWithSession = {
+      ...valid,
+      ageBand: '10-12',
+      profileId: 'local-default',
+      sessionId: 'kb_session_color123',
+    };
     const invalidStyle = { scene: 'space cat', style: 'forest' };
     const tooShortScene = { scene: 'ab' };
 
@@ -90,6 +118,8 @@ describe('contract integrity', () => {
     expect(accepts(coloringRequestSchema, valid)).toBe(true);
     expect(accepts(mcp.coloringOutlineSchema, validWithStyle)).toBe(true);
     expect(accepts(coloringRequestSchema, validWithStyle)).toBe(true);
+    expect(accepts(mcp.coloringOutlineSchema, validWithSession)).toBe(true);
+    expect(accepts(coloringRequestSchema, validWithSession)).toBe(true);
     expect(accepts(mcp.coloringOutlineSchema, invalidStyle)).toBe(false);
     expect(accepts(coloringRequestSchema, invalidStyle)).toBe(false);
     expect(accepts(mcp.coloringOutlineSchema, tooShortScene)).toBe(false);
@@ -99,12 +129,20 @@ describe('contract integrity', () => {
   it('keeps science schema constraints aligned', async () => {
     const mcp = await loadMcpSchemas();
     const valid = { topic: 'buoyancy' };
+    const validWithSession = {
+      ...valid,
+      ageBand: '7-9',
+      profileId: 'local-default',
+      sessionId: 'kb_session_science123',
+    };
     const tooShortTopic = { topic: 'ab' };
     const validWithAge = { topic: 'buoyancy', ageBand: '10-12' };
     const invalidAge = { topic: 'buoyancy', ageBand: '13-15' };
 
     expect(accepts(mcp.scienceSimSchema, valid)).toBe(true);
     expect(accepts(scienceRequestSchema, valid)).toBe(true);
+    expect(accepts(mcp.scienceSimSchema, validWithSession)).toBe(true);
+    expect(accepts(scienceRequestSchema, validWithSession)).toBe(true);
     expect(accepts(mcp.scienceSimSchema, tooShortTopic)).toBe(false);
     expect(accepts(scienceRequestSchema, tooShortTopic)).toBe(false);
     expect(accepts(mcp.scienceSimSchema, validWithAge)).toBe(true);

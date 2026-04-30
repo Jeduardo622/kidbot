@@ -8,6 +8,7 @@ import {
   errorMessage,
   unavailableMessageFromError,
 } from '../utils/degradation.js';
+import { defaultSessionContext, type SessionContext } from '../utils/sessionContext.js';
 
 type OutlineStyle = 'animals' | 'space' | 'underwater' | undefined;
 
@@ -50,7 +51,11 @@ const renderStrokes = (canvas: HTMLCanvasElement, strokes: Stroke[]) => {
   }
 };
 
-export const ColoringBook = () => {
+interface ColoringBookProps {
+  sessionContext?: SessionContext;
+}
+
+export const ColoringBook = ({ sessionContext = defaultSessionContext }: ColoringBookProps) => {
   const [scene, setScene] = useState('Joyful treehouse afternoon');
   const [style, setStyle] = useState<OutlineStyle>(undefined);
   const [outline, setOutline] = useState<string | undefined>();
@@ -71,10 +76,6 @@ export const ColoringBook = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawingRef = useRef<boolean>(false);
   const currentStrokeRef = useRef<Stroke | null>(null);
-
-  useEffect(() => {
-    window.openai?.setWidgetState?.({ tab: 'coloring', scene, style, brushColor, brushSize });
-  }, [scene, style, brushColor, brushSize]);
 
   useEffect(() => {
     if (canvasRef.current) {
@@ -153,9 +154,11 @@ export const ColoringBook = () => {
     setUnavailable(undefined);
     setOutline(undefined);
     try {
-      const result = (await window.openai?.callTool?.('coloring_outline', { scene, style })) as
-        | ColoringResponse
-        | undefined;
+      const result = (await window.openai?.callTool?.('coloring_outline', {
+        ...sessionContext,
+        scene,
+        style,
+      })) as ColoringResponse | undefined;
       if (!result) {
         throw new Error('Widget bridge unavailable.');
       }

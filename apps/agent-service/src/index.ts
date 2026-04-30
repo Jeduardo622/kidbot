@@ -23,6 +23,7 @@ import { createRateLimiter, createRateLimitStoreFromEnv } from './rateLimit.js';
 import { safeFallbackSvg, validateColoringSvg } from './svgSafety.js';
 import {
   coloringRequestSchema,
+  defaultAgeBand,
   scienceRequestSchema,
   storyRequestSchema,
   voiceRequestSchema,
@@ -113,6 +114,18 @@ const withValidation = <T>(
     res.locals.correlationId = id;
     try {
       const parsed = schema.parse(req.body);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const metadata = parsed as {
+          ageBand?: unknown;
+          profileId?: unknown;
+          sessionId?: unknown;
+        };
+        res.locals.sessionId =
+          typeof metadata.sessionId === 'string' ? metadata.sessionId : undefined;
+        res.locals.profileId =
+          typeof metadata.profileId === 'string' ? metadata.profileId : undefined;
+        res.locals.ageBand = typeof metadata.ageBand === 'string' ? metadata.ageBand : defaultAgeBand;
+      }
       const data = await handler(parsed);
       if (!data || typeof data !== 'object' || Array.isArray(data)) {
         throw new Error('Handler must return an object payload.');
@@ -329,6 +342,9 @@ app.use((req, res, next) => {
       route: req.path,
       status: res.statusCode,
       latencyMs: Date.now() - startedAt,
+      sessionId: res.locals.sessionId as string | undefined,
+      profileId: res.locals.profileId as string | undefined,
+      ageBand: res.locals.ageBand as string | undefined,
       source: res.locals.source as string | undefined,
       blocked: res.locals.blocked as boolean | undefined,
       inputLength,
