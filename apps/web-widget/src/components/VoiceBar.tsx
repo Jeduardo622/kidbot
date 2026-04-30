@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { LiveRegion } from './LiveRegion.js';
 import { buildAnnouncementState } from '../utils/announcementState.js';
 import {
@@ -7,9 +7,15 @@ import {
   unavailableMessageFromError,
 } from '../utils/degradation.js';
 import { defaultSessionContext, type SessionContext } from '../utils/sessionContext.js';
+import {
+  createVoiceCapture,
+  isVoiceCaptureAvailable,
+  type VoiceCaptureSession,
+} from '../utils/voiceCapture.js';
 import { speakText } from '../utils/voicePlayback.js';
 
 type Persona = 'robot' | 'fairy' | 'explorer';
+type CaptureState = 'idle' | 'listening' | 'unsupported';
 
 interface VoiceResult {
   blocked: boolean;
@@ -33,10 +39,14 @@ interface VoiceBarProps {
 export const VoiceBar = ({ sessionContext = defaultSessionContext }: VoiceBarProps) => {
   const [persona, setPersona] = useState<Persona>('robot');
   const [text, setText] = useState('Tell me a cheerful space fact!');
+  const [captureState, setCaptureState] = useState<CaptureState>(() =>
+    isVoiceCaptureAvailable() ? 'idle' : 'unsupported',
+  );
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState<VoiceResult | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [unavailable, setUnavailable] = useState<string | undefined>();
+  const captureSessionRef = useRef<VoiceCaptureSession | undefined>();
   const blockedMessage = response?.blocked
     ? (response.message ?? 'Kidbot paused this request.')
     : undefined;
@@ -47,6 +57,49 @@ export const VoiceBar = ({ sessionContext = defaultSessionContext }: VoiceBarPro
     urgentMessage: unavailable ?? blockedMessage,
     readyMessage: response?.text ? `${response.persona ?? 'Kidbot'} reply ready.` : '',
   });
+
+  useEffect(
+    () => () => {
+      captureSessionRef.current?.stop();
+    },
+    [],
+  );
+
+  const handleVoiceInput = () => {
+    if (captureState === 'unsupported') {
+      return;
+    }
+    if (captureState === 'listening') {
+      captureSessionRef.current?.stop();
+      setCaptureState('idle');
+      return;
+    }
+
+    const session = createVoiceCapture({
+      onEnd: () => setCaptureState('idle'),
+      onError: (message) => {
+        setError(message);
+        setCaptureState('idle');
+      },
+      onStart: () => setCaptureState('listening'),
+      onText: (transcript) => setText(transcript),
+    });
+    if (!session) {
+      setCaptureState('unsupported');
+      return;
+    }
+
+    setError(undefined);
+    captureSessionRef.current = session;
+    session.start();
+  };
+
+  const voiceInputLabel =
+    captureState === 'unsupported'
+      ? 'Voice Input Unavailable'
+      : captureState === 'listening'
+        ? 'Stop Voice Input'
+        : 'Start Voice Input';
 
   const handleSpeak = async () => {
     if (!text.trim()) {
@@ -114,6 +167,13 @@ export const VoiceBar = ({ sessionContext = defaultSessionContext }: VoiceBarPro
         placeholder="Ask a question or share a topic"
         rows={3}
       />
+      <button
+        type="button"
+        onClick={handleVoiceInput}
+        disabled={captureState === 'unsupported'}
+      >
+        {voiceInputLabel}
+      </button>
       <button type="button" onClick={handleSpeak} disabled={loading}>
         {loading ? 'Thinking...' : 'Speak'}
       </button>
