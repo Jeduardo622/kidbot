@@ -33,6 +33,7 @@ OPENAI_API_KEY=
 AGENT_SERVICE_TOKEN=
 MCP_PORT=3000
 AGENT_PORT=4505
+AGENT_BASE_URL=
 FALLBACK_WIDGET=0
 KIDBOT_LOCAL_DEV=0
 RATE_LIMIT_STORE=redis
@@ -54,6 +55,8 @@ openssl rand -base64 48
 ```
 
 When `FALLBACK_WIDGET` is not `1` (secured posture), both `agent-service` and `mcp-server` must receive the same `AGENT_SERVICE_TOKEN`. Direct calls to `agent-service` must include both `Authorization: Bearer <AGENT_SERVICE_TOKEN>` and `x-kidbot-startup-posture: secured`. The MCP server sets both automatically for tool calls. Outside `NODE_ENV=test`, secured startup fails if the token is missing or shorter than 32 characters.
+
+For split-service production deploys, set `AGENT_BASE_URL` on MCP to the agent-service origin. If omitted, MCP keeps the local default `http://localhost:${AGENT_PORT}`.
 
 Start self-hosted Redis locally with:
 
@@ -106,6 +109,49 @@ pnpm run smoke:parent-store-remote
 The remote smoke uses only the deployed MCP URL. It never reads, sends, or logs `PARENT_AUTH_SECRET`; it proves secret-backed startup indirectly through Redis health plus successful parent profile create/update/history behavior. A degraded child-tool response is acceptable if it is recorded as safe metadata rather than treated as a safety block.
 
 GitHub Actions also includes the manual `Production Parent Store Smoke` workflow. Store `KIDBOT_REMOTE_MCP_URL` as a protected production environment secret before running it.
+
+### Railway Production Deploy
+
+Railway is the first recommended production host for Kidbot because the repo currently runs long-lived Node/Express services plus Redis.
+
+Create one Railway project with:
+
+- `kidbot-agent-service`: build `pnpm install --no-frozen-lockfile && pnpm --filter @kidbot/agent-service run build`; start `pnpm --filter @kidbot/agent-service run start`.
+- `kidbot-mcp-server`: build `pnpm install --no-frozen-lockfile && pnpm --filter @kidbot/mcp-server run build`; start `pnpm --filter @kidbot/mcp-server run start`.
+- `redis`: Railway Redis service/template.
+
+Set shared Railway env:
+
+```env
+NODE_ENV=production
+FALLBACK_WIDGET=0
+KIDBOT_LOCAL_DEV=0
+REDIS_URL=<Railway Redis private URL>
+```
+
+Set agent-service env:
+
+```env
+PORT=<Railway assigned port>
+AGENT_SERVICE_TOKEN=<same high-entropy service token as MCP>
+OPENAI_API_KEY=<production OpenAI key>
+RATE_LIMIT_STORE=redis
+PROVIDER_FAILURE_POLICY=503
+```
+
+Set MCP env:
+
+```env
+MCP_PORT=<Railway assigned port>
+AGENT_BASE_URL=<agent-service Railway private URL, or public HTTPS URL if private DNS is unavailable>
+AGENT_SERVICE_TOKEN=<same high-entropy service token as agent-service>
+PARENT_PROFILE_STORE=redis
+PARENT_AUTH_SECRET=<high-entropy parent secret>
+PARENT_HISTORY_RETENTION_DAYS=30
+PARENT_HISTORY_MAX_EVENTS=200
+```
+
+Only expose the MCP service publicly for ChatGPT and the remote smoke. Keep agent-service private where Railway supports it; if a public agent URL is temporarily needed, `AGENT_SERVICE_TOKEN` and the secured startup posture still protect direct calls.
 
 ### Ngrok (optional)
 

@@ -15,6 +15,7 @@ export interface McpServerConfig {
 type McpServerEnv = Partial<
   Record<
     | 'AGENT_PORT'
+    | 'AGENT_BASE_URL'
     | 'AGENT_SERVICE_TOKEN'
     | 'FALLBACK_WIDGET'
     | 'KIDBOT_LOCAL_DEV'
@@ -51,6 +52,22 @@ const parsePositiveInteger = (name: string, value: string | undefined, fallback:
   return parsed;
 };
 
+const parseBaseUrl = (name: string, value: string | undefined): string | undefined => {
+  const trimmed = trimOptional(value);
+  if (!trimmed) {
+    return undefined;
+  }
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      throw new Error('invalid protocol');
+    }
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    throw new Error(`${name} must be a valid http(s) URL.`);
+  }
+};
+
 const validateServiceToken = ({
   serviceAuthToken,
   fallbackMode,
@@ -78,6 +95,7 @@ const validateServiceToken = ({
 
 export const parseMcpServerConfig = (env: McpServerEnv = process.env): McpServerConfig => {
   const agentPort = parsePort('AGENT_PORT', env.AGENT_PORT, 4505);
+  const agentBaseUrl = parseBaseUrl('AGENT_BASE_URL', env.AGENT_BASE_URL) ?? `http://localhost:${agentPort}`;
   const mcpPort = parsePort('MCP_PORT', env.MCP_PORT, 3000);
   const fallbackMode = env.FALLBACK_WIDGET === '1';
   const localDevIntent = env.KIDBOT_LOCAL_DEV === '1';
@@ -113,7 +131,7 @@ export const parseMcpServerConfig = (env: McpServerEnv = process.env): McpServer
 
   return {
     agentPort,
-    agentBaseUrl: `http://localhost:${agentPort}`,
+    agentBaseUrl,
     mcpPort,
     fallbackMode,
     localDevIntent,

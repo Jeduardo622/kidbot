@@ -20,6 +20,33 @@ test('parent profile config is disabled by default and needs no secret', () => {
 
   assert.equal(config.parentProfileStore, 'disabled');
   assert.equal(config.parentAuthSecret, undefined);
+  assert.equal(config.agentBaseUrl, 'http://localhost:4505');
+});
+
+test('agent base url overrides local agent port for split-service deploys', () => {
+  const config = parseMcpServerConfig({
+    AGENT_BASE_URL: 'https://kidbot-agent-service.railway.internal/',
+    AGENT_PORT: '4999',
+    AGENT_SERVICE_TOKEN: 'service-token-abcdefghijklmnopqrstuvwxyz0123456789',
+    FALLBACK_WIDGET: '0',
+    NODE_ENV: 'production',
+  });
+
+  assert.equal(config.agentPort, 4999);
+  assert.equal(config.agentBaseUrl, 'https://kidbot-agent-service.railway.internal');
+});
+
+test('agent base url rejects non-http values', () => {
+  assert.throws(
+    () =>
+      parseMcpServerConfig({
+        AGENT_BASE_URL: 'redis://kidbot-agent-service.internal',
+        AGENT_SERVICE_TOKEN: 'service-token-abcdefghijklmnopqrstuvwxyz0123456789',
+        FALLBACK_WIDGET: '0',
+        NODE_ENV: 'production',
+      }),
+    /AGENT_BASE_URL must be a valid http\(s\) URL/i,
+  );
 });
 
 test('redis parent profile storage requires a secret', () => {
