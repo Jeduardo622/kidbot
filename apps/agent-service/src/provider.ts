@@ -8,6 +8,11 @@ export interface TextGenerationRequest {
   temperature?: number;
 }
 
+export interface ImageGenerationRequest {
+  prompt: string;
+  size?: '1024x1024' | '1536x1024' | '1024x1536';
+}
+
 export interface ProviderModerationResult {
   blocked: boolean;
   reason?: string;
@@ -15,6 +20,7 @@ export interface ProviderModerationResult {
 
 export interface ModelProvider {
   generateText(request: TextGenerationRequest): Promise<string>;
+  generateImage?(request: ImageGenerationRequest): Promise<string>;
   moderateText(text: string): Promise<ProviderModerationResult>;
 }
 
@@ -154,6 +160,7 @@ export const createOpenAIProvider = (apiKey: string | undefined): ModelProvider 
 
   const client = new OpenAI({ apiKey });
   const generationModel = process.env.KIDBOT_OPENAI_MODEL ?? 'gpt-4o-mini';
+  const imageModel = process.env.KIDBOT_OPENAI_IMAGE_MODEL ?? 'gpt-image-2';
   const moderationModel = process.env.KIDBOT_OPENAI_MODERATION_MODEL ?? 'omni-moderation-latest';
   const timeoutMs = Number(process.env.PROVIDER_TIMEOUT_MS ?? 15_000);
   const retries = Number(process.env.PROVIDER_RETRIES ?? 1);
@@ -175,6 +182,27 @@ export const createOpenAIProvider = (apiKey: string | undefined): ModelProvider 
       );
 
       return response.choices[0]?.message?.content?.trim() ?? '';
+    },
+    async generateImage(request) {
+      const response = await withProviderRetry(
+        () =>
+          client.images.generate({
+            model: imageModel,
+            prompt: request.prompt,
+            n: 1,
+            size: request.size ?? '1024x1024',
+            quality: 'low',
+            output_format: 'png',
+          }),
+        { timeoutMs, retries },
+      );
+
+      const base64 = response.data?.[0]?.b64_json?.trim();
+      if (!base64) {
+        throw new MalformedOutputError('Provider image output did not include base64 data');
+      }
+
+      return base64;
     },
     async moderateText(text) {
       if (!text.trim()) {

@@ -1,14 +1,30 @@
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.setConfig({ testTimeout: 15_000 });
 
+let tempDirs: string[] = [];
+
 const ENV_KEYS = [
+  'DOTENV_CONFIG_PATH',
   'NODE_ENV',
   'FALLBACK_WIDGET',
   'KIDBOT_LOCAL_DEV',
   'AGENT_SERVICE_TOKEN',
   'OPENAI_API_KEY',
+  'PROVIDER_FAILURE_POLICY',
+  'KIDBOT_IMAGE_STORAGE_MODE',
+  'KIDBOT_IMAGE_STORAGE_DIR',
+  'KIDBOT_IMAGE_PUBLIC_BASE_URL',
+  'KIDBOT_IMAGE_MAX_BYTES',
+  'KIDBOT_IMAGE_TTL_SECONDS',
+  'KIDBOT_SUPABASE_URL',
+  'KIDBOT_SUPABASE_SERVICE_ROLE_KEY',
+  'KIDBOT_SUPABASE_IMAGE_BUCKET',
+  'KIDBOT_SUPABASE_IMAGE_PREFIX',
   'RATE_LIMIT_STORE',
   'REDIS_URL',
 ] as const;
@@ -20,7 +36,10 @@ const withEnv = async <T>(
   const previous = new Map<string, string | undefined>();
   for (const key of ENV_KEYS) {
     previous.set(key, process.env[key]);
-    const value = overrides[key];
+    const value =
+      key === 'DOTENV_CONFIG_PATH' && !Object.prototype.hasOwnProperty.call(overrides, key)
+        ? '__kidbot_test_env_not_found__'
+        : overrides[key];
     if (value === undefined) {
       delete process.env[key];
     } else {
@@ -59,8 +78,21 @@ const withServer = async (
 };
 
 afterEach(() => {
+  vi.doUnmock('../provider.js');
+  vi.unstubAllGlobals();
   vi.resetModules();
 });
+
+afterEach(async () => {
+  await Promise.all(tempDirs.map((dir) => rm(dir, { force: true, recursive: true })));
+  tempDirs = [];
+});
+
+const createTempDir = async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'kidbot-service-images-'));
+  tempDirs.push(dir);
+  return dir;
+};
 
 describe('service auth boundary', () => {
   it('fails startup when token is required but missing', async () => {
@@ -419,6 +451,511 @@ describe('service auth boundary', () => {
       expect(logs).not.toContain('1234');
     } finally {
       logSpy.mockRestore();
+    }
+  });
+
+  it('returns generated story image data URLs through the HTTP route', async () => {
+    await withEnv(
+      {
+        NODE_ENV: 'test',
+        FALLBACK_WIDGET: '0',
+        KIDBOT_LOCAL_DEV: undefined,
+        AGENT_SERVICE_TOKEN: 'test-service-token',
+        OPENAI_API_KEY: 'test-provider-key',
+        PROVIDER_FAILURE_POLICY: '503',
+        KIDBOT_IMAGE_STORAGE_MODE: 'data-url',
+      },
+      async () => {
+        vi.doMock('../provider.js', async (importOriginal) => {
+          const actual = await importOriginal<typeof import('../provider.js')>();
+          return {
+            ...actual,
+            createOpenAIProvider: () => ({
+              async generateText() {
+                return JSON.stringify({
+                  panels: [
+                    {
+                      title: 'Seed',
+                      caption: 'Mia plants a bean.',
+                      imagePrompt: 'Mia planting a bean',
+                      imageUrl: null,
+                    },
+                    {
+                      title: 'Sprout',
+                      caption: 'A green sprout pops up.',
+                      imagePrompt: 'A happy sprout',
+                      imageUrl: null,
+                    },
+                  ],
+                });
+              },
+              async generateImage({ prompt }: { prompt: string }) {
+                return Buffer.from(prompt).toString('base64');
+              },
+              async moderateText() {
+                return { blocked: false };
+              },
+            }),
+          };
+        });
+
+        const mod = await import('../index.js');
+        await withServer(mod.app, async (baseUrl) => {
+          const response = await fetch(`${baseUrl}/story-panels`, {
+            method: 'POST',
+            headers: {
+              Authorization: 'Bearer test-service-token',
+              'x-kidbot-startup-posture': 'secured',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              theme: 'A bean grows',
+              panels: 2,
+              ageBand: '7-9',
+            }),
+          });
+          const body = (await response.json()) as {
+            blocked?: boolean;
+            panels?: Array<{ imageUrl?: string | null }>;
+          };
+
+          expect(response.status).toBe(200);
+          expect(body.blocked).toBe(false);
+          expect(body.panels?.[0]?.imageUrl).toBe(
+            `data:image/png;base64,${Buffer.from('Mia planting a bean').toString('base64')}`,
+          );
+          expect(body.panels?.[1]?.imageUrl).toBe(
+            `data:image/png;base64,${Buffer.from('A happy sprout').toString('base64')}`,
+          );
+        });
+      },
+    );
+  });
+
+  it('returns stored story image URLs through the HTTP route when local image storage is enabled', async () => {
+    const imageDir = await createTempDir();
+    await withEnv(
+      {
+        NODE_ENV: 'test',
+        FALLBACK_WIDGET: '0',
+        KIDBOT_LOCAL_DEV: undefined,
+        AGENT_SERVICE_TOKEN: 'test-service-token',
+        OPENAI_API_KEY: 'test-provider-key',
+        PROVIDER_FAILURE_POLICY: '503',
+        KIDBOT_IMAGE_STORAGE_MODE: 'local',
+        KIDBOT_IMAGE_STORAGE_DIR: imageDir,
+        KIDBOT_IMAGE_PUBLIC_BASE_URL: '/generated-images',
+        KIDBOT_IMAGE_MAX_BYTES: '1024',
+        KIDBOT_IMAGE_TTL_SECONDS: '60',
+      },
+      async () => {
+        vi.doMock('../provider.js', async (importOriginal) => {
+          const actual = await importOriginal<typeof import('../provider.js')>();
+          return {
+            ...actual,
+            createOpenAIProvider: () => ({
+              async generateText() {
+                return JSON.stringify({
+                  panels: [
+                    {
+                      title: 'Seed',
+                      caption: 'Mia plants a bean.',
+                      imagePrompt: 'Mia planting a bean',
+                      imageUrl: null,
+                    },
+                    {
+                      title: 'Sprout',
+                      caption: 'A green sprout pops up.',
+                      imagePrompt: 'A happy sprout',
+                      imageUrl: null,
+                    },
+                  ],
+                });
+              },
+              async generateImage({ prompt }: { prompt: string }) {
+                return Buffer.from(`png:${prompt}`).toString('base64');
+              },
+              async moderateText() {
+                return { blocked: false };
+              },
+            }),
+          };
+        });
+
+        const mod = await import('../index.js');
+        await withServer(mod.app, async (baseUrl) => {
+          const response = await fetch(`${baseUrl}/story-panels`, {
+            method: 'POST',
+            headers: {
+              Authorization: 'Bearer test-service-token',
+              'x-kidbot-startup-posture': 'secured',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              theme: 'A bean grows',
+              panels: 2,
+              ageBand: '7-9',
+            }),
+          });
+          const body = (await response.json()) as {
+            blocked?: boolean;
+            panels?: Array<{ imageUrl?: string | null }>;
+          };
+
+          expect(response.status).toBe(200);
+          expect(body.blocked).toBe(false);
+          expect(body.panels?.[0]?.imageUrl).toMatch(/^\/generated-images\/[a-f0-9-]+\.png$/);
+          expect(body.panels?.[1]?.imageUrl).toMatch(/^\/generated-images\/[a-f0-9-]+\.png$/);
+          expect(body.panels?.[0]?.imageUrl).not.toContain('base64');
+
+          const storedResponse = await fetch(`${baseUrl}${body.panels?.[0]?.imageUrl}`);
+          expect(storedResponse.status).toBe(200);
+          expect(storedResponse.headers.get('Content-Type')).toContain('image/png');
+          await expect(storedResponse.text()).resolves.toBe('png:Mia planting a bean');
+
+          const files = await readFile(
+            path.join(imageDir, path.basename(body.panels?.[0]?.imageUrl ?? '')),
+            'utf-8',
+          );
+          expect(files).toBe('png:Mia planting a bean');
+        });
+      },
+    );
+  });
+
+  it('returns Supabase Storage story image URLs through the HTTP route when Supabase storage is enabled', async () => {
+    const originalFetch = globalThis.fetch;
+    const supabaseFetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.startsWith('https://project-ref.supabase.co/storage/v1/object/kidbot-images/')) {
+        expect(init?.method).toBe('POST');
+        expect(init?.headers).toMatchObject({
+          apikey: 'server-secret-key',
+          Authorization: 'Bearer server-secret-key',
+          'Content-Type': 'image/png',
+        });
+        return new Response(JSON.stringify({ Key: 'ok' }), { status: 200 });
+      }
+      return originalFetch(input, init);
+    });
+    vi.stubGlobal('fetch', supabaseFetch);
+
+    await withEnv(
+      {
+        NODE_ENV: 'test',
+        FALLBACK_WIDGET: '0',
+        KIDBOT_LOCAL_DEV: undefined,
+        AGENT_SERVICE_TOKEN: 'test-service-token',
+        OPENAI_API_KEY: 'test-provider-key',
+        PROVIDER_FAILURE_POLICY: '503',
+        KIDBOT_IMAGE_STORAGE_MODE: 'supabase',
+        KIDBOT_IMAGE_MAX_BYTES: '1024',
+        KIDBOT_IMAGE_TTL_SECONDS: '60',
+        KIDBOT_SUPABASE_URL: 'https://project-ref.supabase.co',
+        KIDBOT_SUPABASE_SERVICE_ROLE_KEY: 'server-secret-key',
+        KIDBOT_SUPABASE_IMAGE_BUCKET: 'kidbot-images',
+        KIDBOT_SUPABASE_IMAGE_PREFIX: 'story-panels',
+      },
+      async () => {
+        vi.doMock('../provider.js', async (importOriginal) => {
+          const actual = await importOriginal<typeof import('../provider.js')>();
+          return {
+            ...actual,
+            createOpenAIProvider: () => ({
+              async generateText() {
+                return JSON.stringify({
+                  panels: [
+                    {
+                      title: 'Seed',
+                      caption: 'Mia plants a bean.',
+                      imagePrompt: 'Mia planting a bean',
+                      imageUrl: null,
+                    },
+                    {
+                      title: 'Sprout',
+                      caption: 'A green sprout pops up.',
+                      imagePrompt: 'A happy sprout',
+                      imageUrl: null,
+                    },
+                  ],
+                });
+              },
+              async generateImage({ prompt }: { prompt: string }) {
+                return Buffer.from(`png:${prompt}`).toString('base64');
+              },
+              async moderateText() {
+                return { blocked: false };
+              },
+            }),
+          };
+        });
+
+        const mod = await import('../index.js');
+        await withServer(mod.app, async (baseUrl) => {
+          const response = await fetch(`${baseUrl}/story-panels`, {
+            method: 'POST',
+            headers: {
+              Authorization: 'Bearer test-service-token',
+              'x-kidbot-startup-posture': 'secured',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              theme: 'A bean grows',
+              panels: 2,
+              ageBand: '7-9',
+            }),
+          });
+          const body = (await response.json()) as {
+            blocked?: boolean;
+            panels?: Array<{ imageUrl?: string | null }>;
+          };
+
+          expect(response.status).toBe(200);
+          expect(body.blocked).toBe(false);
+          expect(body.panels?.[0]?.imageUrl).toMatch(
+            /^https:\/\/project-ref\.supabase\.co\/storage\/v1\/object\/public\/kidbot-images\/story-panels\/exp-\d+-[a-f0-9-]+\.png$/,
+          );
+          expect(body.panels?.[1]?.imageUrl).toMatch(
+            /^https:\/\/project-ref\.supabase\.co\/storage\/v1\/object\/public\/kidbot-images\/story-panels\/exp-\d+-[a-f0-9-]+\.png$/,
+          );
+        });
+      },
+    );
+  });
+
+  it('returns degraded service when stored story image output exceeds the byte cap under 503 policy', async () => {
+    const imageDir = await createTempDir();
+    await withEnv(
+      {
+        NODE_ENV: 'test',
+        FALLBACK_WIDGET: '0',
+        KIDBOT_LOCAL_DEV: undefined,
+        AGENT_SERVICE_TOKEN: 'test-service-token',
+        OPENAI_API_KEY: 'test-provider-key',
+        PROVIDER_FAILURE_POLICY: '503',
+        KIDBOT_IMAGE_STORAGE_MODE: 'local',
+        KIDBOT_IMAGE_STORAGE_DIR: imageDir,
+        KIDBOT_IMAGE_PUBLIC_BASE_URL: '/generated-images',
+        KIDBOT_IMAGE_MAX_BYTES: '4',
+        KIDBOT_IMAGE_TTL_SECONDS: '60',
+      },
+      async () => {
+        vi.doMock('../provider.js', async (importOriginal) => {
+          const actual = await importOriginal<typeof import('../provider.js')>();
+          return {
+            ...actual,
+            createOpenAIProvider: () => ({
+              async generateText() {
+                return JSON.stringify({
+                  panels: [
+                    {
+                      title: 'Seed',
+                      caption: 'Mia plants a bean.',
+                      imagePrompt: 'Mia planting a bean',
+                      imageUrl: null,
+                    },
+                    {
+                      title: 'Sprout',
+                      caption: 'A green sprout pops up.',
+                      imagePrompt: 'A happy sprout',
+                      imageUrl: null,
+                    },
+                  ],
+                });
+              },
+              async generateImage() {
+                return Buffer.from('too large for cap').toString('base64');
+              },
+              async moderateText() {
+                return { blocked: false };
+              },
+            }),
+          };
+        });
+
+        const mod = await import('../index.js');
+        await withServer(mod.app, async (baseUrl) => {
+          const response = await fetch(`${baseUrl}/story-panels`, {
+            method: 'POST',
+            headers: {
+              Authorization: 'Bearer test-service-token',
+              'x-kidbot-startup-posture': 'secured',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              theme: 'A bean grows',
+              panels: 2,
+              ageBand: '7-9',
+            }),
+          });
+          const body = (await response.json()) as {
+            error?: string;
+            fallbackReason?: string;
+            panels?: unknown[];
+          };
+
+          expect(response.status).toBe(503);
+          expect(body.error).toBe('Service temporarily degraded');
+          expect(body.fallbackReason).toBe('provider_unavailable');
+          expect(body.panels).toBeUndefined();
+        });
+      },
+    );
+  });
+
+  it('returns degraded service when story image generation fails under 503 policy', async () => {
+    await withEnv(
+      {
+        NODE_ENV: 'test',
+        FALLBACK_WIDGET: '0',
+        KIDBOT_LOCAL_DEV: undefined,
+        AGENT_SERVICE_TOKEN: 'test-service-token',
+        OPENAI_API_KEY: 'test-provider-key',
+        PROVIDER_FAILURE_POLICY: '503',
+      },
+      async () => {
+        vi.doMock('../provider.js', async (importOriginal) => {
+          const actual = await importOriginal<typeof import('../provider.js')>();
+          return {
+            ...actual,
+            createOpenAIProvider: () => ({
+              async generateText() {
+                return JSON.stringify({
+                  panels: [
+                    {
+                      title: 'Seed',
+                      caption: 'Mia plants a bean.',
+                      imagePrompt: 'Mia planting a bean',
+                      imageUrl: null,
+                    },
+                    {
+                      title: 'Sprout',
+                      caption: 'A green sprout pops up.',
+                      imagePrompt: 'A happy sprout',
+                      imageUrl: null,
+                    },
+                  ],
+                });
+              },
+              async generateImage() {
+                throw new actual.ProviderUnavailableError('image provider unavailable');
+              },
+              async moderateText() {
+                return { blocked: false };
+              },
+            }),
+          };
+        });
+
+        const mod = await import('../index.js');
+        await withServer(mod.app, async (baseUrl) => {
+          const response = await fetch(`${baseUrl}/story-panels`, {
+            method: 'POST',
+            headers: {
+              Authorization: 'Bearer test-service-token',
+              'x-kidbot-startup-posture': 'secured',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              theme: 'A bean grows',
+              panels: 2,
+              ageBand: '7-9',
+            }),
+          });
+          const body = (await response.json()) as {
+            error?: string;
+            fallbackReason?: string;
+            panels?: unknown[];
+          };
+
+          expect(response.status).toBe(503);
+          expect(body.error).toBe('Service temporarily degraded');
+          expect(body.fallbackReason).toBe('provider_unavailable');
+          expect(body.panels).toBeUndefined();
+        });
+      },
+    );
+  });
+
+  it('uses safe placeholder panels when story image generation fails under fallback policy', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      await withEnv(
+        {
+          NODE_ENV: 'test',
+          FALLBACK_WIDGET: '0',
+          KIDBOT_LOCAL_DEV: undefined,
+          AGENT_SERVICE_TOKEN: 'test-service-token',
+          OPENAI_API_KEY: 'test-provider-key',
+          PROVIDER_FAILURE_POLICY: 'fallback',
+        },
+        async () => {
+          vi.doMock('../provider.js', async (importOriginal) => {
+            const actual = await importOriginal<typeof import('../provider.js')>();
+            return {
+              ...actual,
+              createOpenAIProvider: () => ({
+                async generateText() {
+                  return JSON.stringify({
+                    panels: [
+                      {
+                        title: 'Seed',
+                        caption: 'Mia plants a bean.',
+                        imagePrompt: 'Mia planting a bean',
+                        imageUrl: null,
+                      },
+                      {
+                        title: 'Sprout',
+                        caption: 'A green sprout pops up.',
+                        imagePrompt: 'A happy sprout',
+                        imageUrl: null,
+                      },
+                    ],
+                  });
+                },
+                async generateImage() {
+                  throw new actual.ProviderUnavailableError('image provider unavailable');
+                },
+                async moderateText() {
+                  return { blocked: false };
+                },
+              }),
+            };
+          });
+
+          const mod = await import('../index.js');
+          await withServer(mod.app, async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/story-panels`, {
+              method: 'POST',
+              headers: {
+                Authorization: 'Bearer test-service-token',
+                'x-kidbot-startup-posture': 'secured',
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                theme: 'A bean grows',
+                panels: 2,
+                ageBand: '7-9',
+              }),
+            });
+            const body = (await response.json()) as {
+              blocked?: boolean;
+              fallbackReason?: string;
+              panels?: Array<{ imageUrl?: string | null }>;
+              providerFallback?: boolean;
+            };
+
+            expect(response.status).toBe(200);
+            expect(body.blocked).toBe(false);
+            expect(body.providerFallback).toBe(true);
+            expect(body.fallbackReason).toBe('provider_unavailable');
+            expect(body.panels).toHaveLength(2);
+            expect(body.panels?.every((panel) => panel.imageUrl === null)).toBe(true);
+          });
+        },
+      );
+    } finally {
+      warnSpy.mockRestore();
     }
   });
 });

@@ -144,32 +144,34 @@ export const createRateLimiter = ({
   store = createMemoryRateLimitStore(clock),
   keyPrefix = 'global',
 }: RateLimitOptions): RequestHandler => {
-  return async (req, res, next) => {
-    let bucket: RateLimitIncrement;
-    const now = clock.now();
-    try {
-      const clientKey = req.ip ?? req.socket.remoteAddress ?? 'unknown';
-      bucket = await store.increment(`${keyPrefix}:${clientKey}`, windowMs);
-    } catch (error) {
-      next(error);
-      return;
-    }
+  return (req, res, next) => {
+    void (async () => {
+      let bucket: RateLimitIncrement;
+      const now = clock.now();
+      try {
+        const clientKey = req.ip ?? req.socket.remoteAddress ?? 'unknown';
+        bucket = await store.increment(`${keyPrefix}:${clientKey}`, windowMs);
+      } catch (error) {
+        next(error);
+        return;
+      }
 
-    if (bucket.count > limit) {
-      const retryAfterSeconds = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
-      const id = correlationId();
-      res.setHeader('Retry-After', String(retryAfterSeconds));
-      const body = {
-        error: 'Too Many Requests',
-        retryAfter: retryAfterSeconds,
-        correlationId: id,
-      };
-      res.locals.correlationId = id;
-      res.locals.outputLength = JSON.stringify(body).length;
-      res.status(429).json(body);
-      return;
-    }
+      if (bucket.count > limit) {
+        const retryAfterSeconds = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
+        const id = correlationId();
+        res.setHeader('Retry-After', String(retryAfterSeconds));
+        const body = {
+          error: 'Too Many Requests',
+          retryAfter: retryAfterSeconds,
+          correlationId: id,
+        };
+        res.locals.correlationId = id;
+        res.locals.outputLength = JSON.stringify(body).length;
+        res.status(429).json(body);
+        return;
+      }
 
-    next();
+      next();
+    })().catch(next);
   };
 };

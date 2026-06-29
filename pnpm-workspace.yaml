@@ -1,3 +1,5 @@
+verifyDepsBeforeRun: false
+
 packages:
   - apps/mcp-server
   - apps/web-widget

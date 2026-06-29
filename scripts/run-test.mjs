@@ -1,7 +1,21 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
+
+const rootTestFiles = existsSync('tests')
+  ? readdirSync('tests')
+      .filter((file) => file.endsWith('.test.mjs'))
+      .map((file) => path.join('tests', file))
+  : [];
+
+const runRootNodeTests = () => {
+  if (rootTestFiles.length === 0) {
+    return 0;
+  }
+  const result = spawnSync(process.execPath, ['--test', ...rootTestFiles], { stdio: 'inherit' });
+  return result.status ?? 0;
+};
 
 const resolvePathCommand = (name) => {
   const pathValue = process.env.PATH ?? '';
@@ -50,7 +64,10 @@ if (pnpmCommand && hasNodeModules) {
     shell: pnpmCommand.shell,
     stdio: 'inherit'
   });
-  process.exit(result.status ?? 0);
+  if ((result.status ?? 0) !== 0) {
+    process.exit(result.status ?? 0);
+  }
+  process.exit(runRootNodeTests());
 }
 
 const reasons = [
@@ -66,5 +83,4 @@ if (strictMode) {
 
 console.warn(`⚠️  Full workspace tests unavailable (${reasons.join('; ')}).`);
 console.warn('⚠️  Running smoke-only fallback. This is non-authoritative and does not run package Vitest suites.');
-const fallback = spawnSync(process.execPath, ['--test', 'tests/zero-install.test.mjs'], { stdio: 'inherit' });
-process.exit(fallback.status ?? 0);
+process.exit(runRootNodeTests());

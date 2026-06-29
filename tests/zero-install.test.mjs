@@ -31,3 +31,17 @@ test('science fixture has prediction choices', () => {
   assert.ok(Array.isArray(data.prediction.choices));
   assert.equal(data.prediction.choices.length > 0, true);
 });
+
+test('package manager pin matches CI pnpm version', () => {
+  const packageJson = JSON.parse(read('package.json'));
+  const workflow = read('.github/workflows/ci.yml');
+  const workflowPnpmVersion = workflow.match(/version:\s*([0-9]+\.[0-9]+\.[0-9]+)/)?.[1];
+
+  assert.equal(packageJson.packageManager, `pnpm@${workflowPnpmVersion}`);
+});
+
+test('pnpm run smoke preflight stays zero-install locally', () => {
+  const workspace = read('pnpm-workspace.yaml');
+
+  assert.match(workspace, /^verifyDepsBeforeRun:\s*false$/m);
+});

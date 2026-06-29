@@ -22,6 +22,11 @@ import {
 import { createRateLimiter, createRateLimitStoreFromEnv } from './rateLimit.js';
 import { safeFallbackSvg, validateColoringSvg } from './svgSafety.js';
 import {
+  cleanupExpiredImageAssets,
+  createImageAssetStore,
+  parseImageAssetStorageConfig,
+} from './imageAssetStore.js';
+import {
   coloringRequestSchema,
   defaultAgeBand,
   scienceRequestSchema,
@@ -47,6 +52,12 @@ const {
   port,
 } = config;
 const providerFailurePolicy = parseProviderFailurePolicy(process.env);
+const imageAssetStorageConfig = parseImageAssetStorageConfig(process.env);
+const imageAssetStore = createImageAssetStore(imageAssetStorageConfig);
+
+if (imageAssetStorageConfig.mode !== 'data-url') {
+  void cleanupExpiredImageAssets(imageAssetStorageConfig);
+}
 
 const authorization: RequestHandler = (req, res, next) => {
   const postureHeaderRaw = req.headers['x-kidbot-startup-posture'];
@@ -86,19 +97,41 @@ const authorization: RequestHandler = (req, res, next) => {
 const perMinute = 60_000;
 const rateLimitStore = createRateLimitStoreFromEnv();
 
-app.get('/healthz', async (_req, res) => {
-  const id = correlationId();
-  res.locals.correlationId = id;
-  const limiter = await rateLimitStore.readiness();
-  const body = {
-    ok: limiter.ready,
-    service: 'agent-service',
-    startupPosture,
-    rateLimitStore: limiter,
-    correlationId: id,
-  };
-  res.locals.outputLength = JSON.stringify(body).length;
-  res.status(limiter.ready ? 200 : 503).json(body);
+app.get('/healthz', (_req, res, next) => {
+  void (async () => {
+    const id = correlationId();
+    res.locals.correlationId = id;
+    const limiter = await rateLimitStore.readiness();
+    const body = {
+      ok: limiter.ready,
+      service: 'agent-service',
+      startupPosture,
+      rateLimitStore: limiter,
+      correlationId: id,
+    };
+    res.locals.outputLength = JSON.stringify(body).length;
+    res.status(limiter.ready ? 200 : 503).json(body);
+  })().catch(next);
+});
+
+app.get('/generated-images/:filename([a-f0-9-]+\\.png)', (req, res) => {
+  if (imageAssetStorageConfig.mode !== 'local') {
+    res.status(404).json({ error: 'Not Found', correlationId: correlationId() });
+    return;
+  }
+
+  const filename = req.params.filename;
+  if (!filename) {
+    res.status(404).json({ error: 'Not Found', correlationId: correlationId() });
+    return;
+  }
+
+  res.setHeader('Cache-Control', 'private, max-age=3600');
+  res.sendFile(path.resolve(imageAssetStorageConfig.directory, filename), (error) => {
+    if (error && !res.headersSent) {
+      res.status(404).json({ error: 'Not Found', correlationId: correlationId() });
+    }
+  });
 });
 
 app.use(authorization);
@@ -109,65 +142,68 @@ const withValidation = <T>(
   },
   handler: (payload: T) => Promise<unknown> | unknown,
 ): RequestHandler => {
-  return async (req, res) => {
-    const id = correlationId();
-    res.locals.correlationId = id;
-    try {
-      const parsed = schema.parse(req.body);
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        const metadata = parsed as {
-          ageBand?: unknown;
-          profileId?: unknown;
-          sessionId?: unknown;
-        };
-        res.locals.sessionId =
-          typeof metadata.sessionId === 'string' ? metadata.sessionId : undefined;
-        res.locals.profileId =
-          typeof metadata.profileId === 'string' ? metadata.profileId : undefined;
-        res.locals.ageBand = typeof metadata.ageBand === 'string' ? metadata.ageBand : defaultAgeBand;
-      }
-      const data = await handler(parsed);
-      if (!data || typeof data !== 'object' || Array.isArray(data)) {
-        throw new Error('Handler must return an object payload.');
-      }
-      const body: Record<string, unknown> = {
-        correlationId: id,
-        ...(data as Record<string, unknown>),
-      };
-      res.locals.source = body.source;
-      res.locals.blocked = body.blocked;
-      res.locals.providerFallback = body.providerFallback;
-      res.locals.fallbackReason = body.fallbackReason;
-      res.locals.outputLength = JSON.stringify(body).length;
-      res.json(body);
-    } catch (error) {
-      if (error instanceof ZodError) {
-        const body = { error: 'Bad Request', details: error.errors, correlationId: id };
-        res.locals.outputLength = JSON.stringify(body).length;
-        res.status(400).json(body);
-        return;
-      }
-
-      if (error instanceof ProviderError) {
-        const fallbackReason = classifyProviderError(error);
-        const body = {
-          error: 'Service temporarily degraded',
-          fallbackReason,
+  return (req, res, next) => {
+    void (async () => {
+      const id = correlationId();
+      res.locals.correlationId = id;
+      try {
+        const parsed = schema.parse(req.body);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          const metadata = parsed as {
+            ageBand?: unknown;
+            profileId?: unknown;
+            sessionId?: unknown;
+          };
+          res.locals.sessionId =
+            typeof metadata.sessionId === 'string' ? metadata.sessionId : undefined;
+          res.locals.profileId =
+            typeof metadata.profileId === 'string' ? metadata.profileId : undefined;
+          res.locals.ageBand =
+            typeof metadata.ageBand === 'string' ? metadata.ageBand : defaultAgeBand;
+        }
+        const data = await handler(parsed);
+        if (!data || typeof data !== 'object' || Array.isArray(data)) {
+          throw new Error('Handler must return an object payload.');
+        }
+        const body: Record<string, unknown> = {
           correlationId: id,
+          ...(data as Record<string, unknown>),
         };
-        res.locals.providerFallback = false;
-        res.locals.fallbackReason = fallbackReason;
+        res.locals.source = body.source;
+        res.locals.blocked = body.blocked;
+        res.locals.providerFallback = body.providerFallback;
+        res.locals.fallbackReason = body.fallbackReason;
         res.locals.outputLength = JSON.stringify(body).length;
-        res.status(503).json(body);
-        return;
-      }
+        res.json(body);
+      } catch (error) {
+        if (error instanceof ZodError) {
+          const body = { error: 'Bad Request', details: error.errors, correlationId: id };
+          res.locals.outputLength = JSON.stringify(body).length;
+          res.status(400).json(body);
+          return;
+        }
 
-      // eslint-disable-next-line no-console
-      console.warn(JSON.stringify({ route: req.path, error: safeProviderErrorSummary(error) }));
-      const body = { error: 'Internal Error', correlationId: id };
-      res.locals.outputLength = JSON.stringify(body).length;
-      res.status(500).json(body);
-    }
+        if (error instanceof ProviderError) {
+          const fallbackReason = classifyProviderError(error);
+          const body = {
+            error: 'Service temporarily degraded',
+            fallbackReason,
+            correlationId: id,
+          };
+          res.locals.providerFallback = false;
+          res.locals.fallbackReason = fallbackReason;
+          res.locals.outputLength = JSON.stringify(body).length;
+          res.status(503).json(body);
+          return;
+        }
+
+        // eslint-disable-next-line no-console
+        console.warn(JSON.stringify({ route: req.path, error: safeProviderErrorSummary(error) }));
+        const body = { error: 'Internal Error', correlationId: id };
+        res.locals.outputLength = JSON.stringify(body).length;
+        res.status(500).json(body);
+      }
+    })().catch(next);
   };
 };
 
@@ -408,7 +444,12 @@ app.post(
       return stubStory(payload);
     }
     try {
-      const response = provider ? await planStory(payload, provider) : planStory(payload);
+      const response = provider
+        ? await planStory(payload, provider, {
+            resolveGeneratedImageUrl: (_panel, pngBase64) =>
+              imageAssetStore.storePngBase64(pngBase64),
+          })
+        : planStory(payload);
       return response.blocked ? response : { ...response, source: 'agent' as const };
     } catch (error) {
       return providerFailureFallback('/story-panels', error, () => stubStory(payload));
@@ -449,16 +490,33 @@ app.post(
 );
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  void _next;
   // eslint-disable-next-line no-console
   console.warn(JSON.stringify({ route: 'unhandled', error: safeProviderErrorSummary(err) }));
   res.status(500).json({ error: 'Internal Error', correlationId: correlationId() });
 });
 
-export const start = () =>
-  app.listen(port, () => {
+export const start = () => {
+  let cleanupTimer: NodeJS.Timeout | undefined;
+  if (imageAssetStorageConfig.mode !== 'data-url' && process.env.NODE_ENV !== 'test') {
+    cleanupTimer = setInterval(
+      () => void cleanupExpiredImageAssets(imageAssetStorageConfig),
+      Math.min(imageAssetStorageConfig.ttlMs, 60 * 60 * 1_000),
+    );
+    cleanupTimer.unref();
+  }
+
+  const server = app.listen(port, () => {
     // eslint-disable-next-line no-console
     console.log(`Agent service listening on http://localhost:${port}`);
   });
+  server.on('close', () => {
+    if (cleanupTimer) {
+      clearInterval(cleanupTimer);
+    }
+  });
+  return server;
+};
 
 if (process.env.NODE_ENV !== 'test') {
   const server = start();

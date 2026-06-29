@@ -56,6 +56,9 @@ jobs:
           RATE_LIMIT_STORE: redis
         run: pnpm --filter @kidbot/agent-service exec vitest run --coverage.enabled=false
 
+      - name: Run provider preflight config check
+        run: pnpm run smoke:provider-preflight:ci
+
       - name: Build web-widget
         run: pnpm --filter @kidbot/web-widget run build
 

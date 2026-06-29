@@ -21,6 +21,8 @@ The `dev` script runs the widget (Vite), MCP server, and agent service together.
 
 - Authoritative recursive test run (packages with a `test` script): `pnpm -r --if-present run test`
 - MCP compatibility smoke test (not included in recursive `test`): `pnpm --filter mcp-server run test:compat`
+- CI-safe provider preflight config check: `pnpm run smoke:provider-preflight:ci`
+- Live provider preflight smoke test (requires real provider secrets and may generate images): `pnpm run smoke:provider-preflight`
 - Root wrapper: `pnpm run test` (runs full recursive package tests when pnpm and workspace dependencies are detectable; otherwise falls back to smoke-only mode)
 - If the wrapper prints a smoke-only fallback warning, package Vitest suites were not executed.
 
@@ -39,8 +41,18 @@ KIDBOT_LOCAL_DEV=0
 RATE_LIMIT_STORE=redis
 REDIS_URL=redis://localhost:6379
 PROVIDER_FAILURE_POLICY=503
-PROVIDER_TIMEOUT_MS=15000
+PROVIDER_TIMEOUT_MS=120000
 PROVIDER_RETRIES=1
+KIDBOT_OPENAI_IMAGE_MODEL=gpt-image-2
+KIDBOT_IMAGE_STORAGE_MODE=local
+KIDBOT_IMAGE_STORAGE_DIR=.kidbot/generated-images
+KIDBOT_IMAGE_PUBLIC_BASE_URL=/generated-images
+KIDBOT_IMAGE_MAX_BYTES=2500000
+KIDBOT_IMAGE_TTL_SECONDS=86400
+KIDBOT_SUPABASE_URL=
+KIDBOT_SUPABASE_SERVICE_ROLE_KEY=
+KIDBOT_SUPABASE_IMAGE_BUCKET=kidbot-images
+KIDBOT_SUPABASE_IMAGE_PREFIX=story-panels
 PARENT_PROFILE_STORE=disabled
 PARENT_AUTH_SECRET=
 PARENT_HISTORY_RETENTION_DAYS=30
@@ -66,6 +78,8 @@ docker compose -f docker-compose.redis.yml up -d
 
 `RATE_LIMIT_STORE=redis` requires `REDIS_URL` and shares route buckets across service replicas. The agent service `/healthz` endpoint reports limiter readiness. `PROVIDER_FAILURE_POLICY=503` makes model-backed failures visible as degraded service responses; set it to `fallback` only when deterministic stub substitution is acceptable.
 
+Provider-backed story panel images default to `KIDBOT_IMAGE_STORAGE_MODE=local`, which writes generated PNGs under `.kidbot/generated-images`, returns `/generated-images/<id>.png` in the existing nullable `imageUrl` field, rejects images larger than `KIDBOT_IMAGE_MAX_BYTES`, and cleans expired assets after `KIDBOT_IMAGE_TTL_SECONDS`. Set `KIDBOT_IMAGE_PUBLIC_BASE_URL` to the public origin/path that serves the agent-service `/generated-images` route when deployed behind a proxy. `KIDBOT_IMAGE_STORAGE_MODE=supabase` uploads generated PNGs to `KIDBOT_SUPABASE_IMAGE_BUCKET` under `KIDBOT_SUPABASE_IMAGE_PREFIX`, returns public Supabase Storage object URLs, and performs best-effort cleanup for expired `exp-...png` objects. In Supabase mode, leave `KIDBOT_IMAGE_PUBLIC_BASE_URL` empty so the service derives `https://<project-ref>.supabase.co/storage/v1/object/public/<bucket>`, or set it to that Supabase public object base explicitly; do not leave it at `/generated-images`. Keep `KIDBOT_SUPABASE_SERVICE_ROLE_KEY` server-only; never expose it to the widget or MCP iframe. `KIDBOT_IMAGE_STORAGE_MODE=data-url` keeps inline `data:image/png;base64,...` URLs for local compatibility but is not preferred for production MCP payload size. Image generation can take longer than short text calls, so `PROVIDER_TIMEOUT_MS=120000` is the documented provider-backed story-panel baseline.
+
 Before deploying, build both services and run the secured posture smoke check:
 
 ```bash
@@ -75,6 +89,22 @@ pnpm run smoke:secured-posture
 ```
 
 The smoke check starts local built services on ephemeral ports, verifies MCP can call agent-service with the shared token, and verifies unauthenticated, wrong-posture, and wrong-token calls fail.
+
+For CI-safe provider-backed story-panel config coverage, run:
+
+```bash
+pnpm run smoke:provider-preflight:ci
+```
+
+This non-live check validates the provider preflight helpers, timeout baseline, and expected image URL shape for `local`, `data-url`, and `supabase` storage modes without reading real secrets, calling OpenAI, starting services, or uploading images.
+
+For live provider-backed story-panel readiness, configure real local `.env` values for `OPENAI_API_KEY`, `AGENT_SERVICE_TOKEN`, and the selected image storage mode, then run:
+
+```bash
+pnpm run smoke:provider-preflight
+```
+
+The live provider preflight first calls OpenAI moderation with a harmless prompt, then starts local agent and MCP services on ephemeral ports, calls `story_panels`, verifies generated `imageUrl` values match the configured storage mode, and fetches the first generated image when the URL is fetchable. Use `pnpm run smoke:provider-preflight -- --moderation-only` for a cheaper key/quota check that does not generate images. The script fails fast if `.env` and `apps/agent-service/.env` contain mismatched provider secrets or if Supabase mode is configured to return local `/generated-images` URLs.
 
 ### Parent/Session Safety MVP
 
@@ -115,6 +145,11 @@ GitHub Actions also includes the manual `Production Parent Store Smoke` workflow
 The widget currently uses browser `speechSynthesis` for local voice playback. Realtime STT/TTS should be integrated behind the widget voice playback boundary so the existing `voice_chat` tool contract and child-safety flow remain unchanged.
 Voice input currently uses browser speech recognition where available and writes captured text into the existing prompt box. Future Realtime STT/TTS should replace the internals behind the voice capture/playback utilities, not the `voice_chat` contract.
 Browser speech recognition may ask for microphone permission; unsupported browsers continue to use typed input.
+
+### Story Panel Artwork Boundary
+
+Story panels are image-generation-ready at the widget boundary: each panel preserves `imagePrompt` and nullable `imageUrl`, renders `imageUrl` when present, and otherwise shows a deterministic accessible placeholder. When `OPENAI_API_KEY` is configured and fallback mode is disabled, the agent service uses `KIDBOT_OPENAI_IMAGE_MODEL` to attach generated image URLs to `imageUrl` behind the existing `story_panels` contract. Local storage mode serves those URLs from `/generated-images` with payload size limits and expiry cleanup.
+For multi-instance production deploys, prefer `KIDBOT_IMAGE_STORAGE_MODE=supabase` or another external object store over local filesystem storage.
 
 ### Voice Capture Manual QA
 
@@ -162,6 +197,17 @@ AGENT_SERVICE_TOKEN=<same high-entropy service token as MCP>
 OPENAI_API_KEY=<production OpenAI key>
 RATE_LIMIT_STORE=redis
 PROVIDER_FAILURE_POLICY=503
+PROVIDER_TIMEOUT_MS=120000
+KIDBOT_OPENAI_IMAGE_MODEL=gpt-image-2
+KIDBOT_IMAGE_STORAGE_MODE=supabase
+KIDBOT_IMAGE_STORAGE_DIR=.kidbot/generated-images
+KIDBOT_IMAGE_PUBLIC_BASE_URL=https://<project-ref>.supabase.co/storage/v1/object/public/kidbot-images
+KIDBOT_IMAGE_MAX_BYTES=2500000
+KIDBOT_IMAGE_TTL_SECONDS=86400
+KIDBOT_SUPABASE_URL=<Supabase project URL>
+KIDBOT_SUPABASE_SERVICE_ROLE_KEY=<server-only Supabase service role key>
+KIDBOT_SUPABASE_IMAGE_BUCKET=kidbot-images
+KIDBOT_SUPABASE_IMAGE_PREFIX=story-panels
 ```
 
 Set MCP env:

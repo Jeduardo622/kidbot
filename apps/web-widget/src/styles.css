@@ -226,12 +226,56 @@ textarea {
   box-shadow: inset 0 0 0 2px #e0f2fe;
 }
 
-.panel-card img {
+.panel-artwork {
   width: 100%;
   aspect-ratio: 1 / 1;
-  object-fit: cover;
   border-radius: 12px;
+}
+
+img.panel-artwork {
+  object-fit: cover;
   background: #e2e8f0;
+}
+
+.panel-artwork-placeholder {
+  position: relative;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, #dbeafe 0%, #f8fafc 58%, #dcfce7 100%);
+  box-shadow: inset 0 0 0 2px #bfdbfe;
+}
+
+.panel-artwork-placeholder-sun,
+.panel-artwork-placeholder-hill {
+  position: absolute;
+  display: block;
+}
+
+.panel-artwork-placeholder-sun {
+  top: 14%;
+  right: 16%;
+  width: 22%;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  background: #fde68a;
+  box-shadow: 0 0 0 8px rgba(253, 230, 138, 0.35);
+}
+
+.panel-artwork-placeholder-hill {
+  left: -8%;
+  right: -8%;
+  bottom: -18%;
+  height: 48%;
+  border-radius: 50% 50% 0 0;
+  background: #86efac;
+}
+
+.panel-artwork-placeholder-hill-back {
+  left: 28%;
+  right: -24%;
+  bottom: 2%;
+  height: 38%;
+  background: #93c5fd;
 }
 
 .coloring-stage {

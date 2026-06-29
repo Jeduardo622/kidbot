@@ -48,8 +48,18 @@ DEFAULT_AGE_BAND=7-9   # one of: 4-6, 7-9, 10-12
 RATE_LIMIT_STORE=redis
 REDIS_URL=redis://localhost:6379
 PROVIDER_FAILURE_POLICY=503
-PROVIDER_TIMEOUT_MS=15000
+PROVIDER_TIMEOUT_MS=120000
 PROVIDER_RETRIES=1
+KIDBOT_OPENAI_IMAGE_MODEL=gpt-image-2
+KIDBOT_IMAGE_STORAGE_MODE=local
+KIDBOT_IMAGE_STORAGE_DIR=.kidbot/generated-images
+KIDBOT_IMAGE_PUBLIC_BASE_URL=/generated-images
+KIDBOT_IMAGE_MAX_BYTES=2500000
+KIDBOT_IMAGE_TTL_SECONDS=86400
+KIDBOT_SUPABASE_URL=
+KIDBOT_SUPABASE_SERVICE_ROLE_KEY=
+KIDBOT_SUPABASE_IMAGE_BUCKET=kidbot-images
+KIDBOT_SUPABASE_IMAGE_PREFIX=story-panels
 
 Install & Run
 pnpm i
@@ -135,7 +145,7 @@ Response
 }
 
 
-imageUrl is null in MVP (UI can render placeholders). Future: attach generated images.
+imageUrl is null in local fallback/stub mode (UI renders placeholders). In provider-backed mode, the agent service can attach generated image URLs behind the same nullable imageUrl field. `KIDBOT_IMAGE_STORAGE_MODE=local` stores generated PNGs under `KIDBOT_IMAGE_STORAGE_DIR` and returns `/generated-images/...` URLs with byte limits and expiry cleanup. `KIDBOT_IMAGE_STORAGE_MODE=supabase` uploads generated PNGs to Supabase Storage using server-only service credentials and returns public object URLs. `KIDBOT_IMAGE_STORAGE_MODE=data-url` keeps the legacy inline data URL behavior for local compatibility.
 
 3) POST /coloring-outline
 
