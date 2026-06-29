@@ -21,7 +21,8 @@ The `dev` script runs the widget (Vite), MCP server, and agent service together.
 
 - Authoritative recursive test run (packages with a `test` script): `pnpm -r --if-present run test`
 - MCP compatibility smoke test (not included in recursive `test`): `pnpm --filter mcp-server run test:compat`
-- Provider preflight smoke test (requires real provider secrets and may generate images): `pnpm run smoke:provider-preflight`
+- CI-safe provider preflight config check: `pnpm run smoke:provider-preflight:ci`
+- Live provider preflight smoke test (requires real provider secrets and may generate images): `pnpm run smoke:provider-preflight`
 - Root wrapper: `pnpm run test` (runs full recursive package tests when pnpm and workspace dependencies are detectable; otherwise falls back to smoke-only mode)
 - If the wrapper prints a smoke-only fallback warning, package Vitest suites were not executed.
 
@@ -89,13 +90,21 @@ pnpm run smoke:secured-posture
 
 The smoke check starts local built services on ephemeral ports, verifies MCP can call agent-service with the shared token, and verifies unauthenticated, wrong-posture, and wrong-token calls fail.
 
-For provider-backed story-panel readiness, configure real local `.env` values for `OPENAI_API_KEY`, `AGENT_SERVICE_TOKEN`, and the selected image storage mode, then run:
+For CI-safe provider-backed story-panel config coverage, run:
+
+```bash
+pnpm run smoke:provider-preflight:ci
+```
+
+This non-live check validates the provider preflight helpers, timeout baseline, and expected image URL shape for `local`, `data-url`, and `supabase` storage modes without reading real secrets, calling OpenAI, starting services, or uploading images.
+
+For live provider-backed story-panel readiness, configure real local `.env` values for `OPENAI_API_KEY`, `AGENT_SERVICE_TOKEN`, and the selected image storage mode, then run:
 
 ```bash
 pnpm run smoke:provider-preflight
 ```
 
-The provider preflight first calls OpenAI moderation with a harmless prompt, then starts local agent and MCP services on ephemeral ports, calls `story_panels`, verifies generated `imageUrl` values match the configured storage mode, and fetches the first generated image when the URL is fetchable. Use `pnpm run smoke:provider-preflight -- --moderation-only` for a cheaper key/quota check that does not generate images. The script fails fast if `.env` and `apps/agent-service/.env` contain mismatched provider secrets or if Supabase mode is configured to return local `/generated-images` URLs.
+The live provider preflight first calls OpenAI moderation with a harmless prompt, then starts local agent and MCP services on ephemeral ports, calls `story_panels`, verifies generated `imageUrl` values match the configured storage mode, and fetches the first generated image when the URL is fetchable. Use `pnpm run smoke:provider-preflight -- --moderation-only` for a cheaper key/quota check that does not generate images. The script fails fast if `.env` and `apps/agent-service/.env` contain mismatched provider secrets or if Supabase mode is configured to return local `/generated-images` URLs.
 
 ### Parent/Session Safety MVP
 

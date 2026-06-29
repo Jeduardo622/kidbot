@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import {
   classifyImageUrl,
   mergeProviderSmokeEnv,
+  runProviderPreflightCiCheck,
   validateProviderSmokeEnv,
 } from '../scripts/smoke-provider-preflight.mjs';
 
@@ -80,4 +81,37 @@ test('image URL classifier distinguishes supported storage URL shapes', () => {
   assert.equal(classifyImageUrl('/generated-images/image.png'), 'local-url');
   assert.equal(classifyImageUrl('data:image/png;base64,abc'), 'data-url');
   assert.equal(classifyImageUrl('https://assets.example.test/image.png'), 'other-url');
+});
+
+test('CI provider preflight validates non-live storage shapes without real secrets', () => {
+  const result = runProviderPreflightCiCheck();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.live, false);
+  assert.deepEqual(
+    result.checks.map((check) => ({
+      mode: check.mode,
+      expectedImageUrlShape: check.expectedImageUrlShape,
+      imageUrlShape: check.imageUrlShape,
+    })),
+    [
+      {
+        mode: 'local',
+        expectedImageUrlShape: 'local-url',
+        imageUrlShape: 'local-url',
+      },
+      {
+        mode: 'data-url',
+        expectedImageUrlShape: 'data-url',
+        imageUrlShape: 'data-url',
+      },
+      {
+        mode: 'supabase',
+        expectedImageUrlShape: 'supabase-public-url',
+        imageUrlShape: 'supabase-public-url',
+      },
+    ],
+  );
+  assert.equal(JSON.stringify(result).includes(openAiKey), false);
+  assert.equal(JSON.stringify(result).includes(serviceRole), false);
 });

@@ -189,6 +189,93 @@ export const classifyImageUrl = (url) => {
   return 'other-url';
 };
 
+const expectedUrlShapeForMode = (mode) => {
+  if (mode === 'supabase') {
+    return 'supabase-public-url';
+  }
+  if (mode === 'data-url') {
+    return 'data-url';
+  }
+  return 'local-url';
+};
+
+const sampleImageUrlForMode = (mode, env) => {
+  if (mode === 'supabase') {
+    return `${supabasePublicBase(env)}/story-panels/exp-9999999999999-ci-check.png`;
+  }
+  if (mode === 'data-url') {
+    return 'data:image/png;base64,ci-check';
+  }
+  return '/generated-images/ci-check.png';
+};
+
+export const runProviderPreflightCiCheck = () => {
+  const ciToken = 'ci-service-token-abcdefghijklmnopqrstuvwxyz0123456789';
+  const ciOpenAiKey = 'ci-openai-key-abcdefghijklmnopqrstuvwxyz0123456789';
+  const ciServiceRoleKey = 'ci-supabase-service-role-abcdefghijklmnopqrstuvwxyz0123456789';
+  const scenarios = [
+    {
+      mode: 'local',
+      env: {
+        OPENAI_API_KEY: ciOpenAiKey,
+        AGENT_SERVICE_TOKEN: ciToken,
+        KIDBOT_IMAGE_STORAGE_MODE: 'local',
+        KIDBOT_IMAGE_PUBLIC_BASE_URL: '/generated-images',
+      },
+    },
+    {
+      mode: 'data-url',
+      env: {
+        OPENAI_API_KEY: ciOpenAiKey,
+        AGENT_SERVICE_TOKEN: ciToken,
+        KIDBOT_IMAGE_STORAGE_MODE: 'data-url',
+      },
+    },
+    {
+      mode: 'supabase',
+      env: {
+        OPENAI_API_KEY: ciOpenAiKey,
+        AGENT_SERVICE_TOKEN: ciToken,
+        KIDBOT_IMAGE_STORAGE_MODE: 'supabase',
+        KIDBOT_SUPABASE_URL: 'https://project-ref.supabase.co',
+        KIDBOT_SUPABASE_SERVICE_ROLE_KEY: ciServiceRoleKey,
+        KIDBOT_SUPABASE_IMAGE_BUCKET: 'kidbot-images',
+        KIDBOT_SUPABASE_IMAGE_PREFIX: 'story-panels',
+      },
+    },
+  ];
+
+  const checks = scenarios.map((scenario) => {
+    const env = mergeProviderSmokeEnv({
+      processEnv: {},
+      rootEnv: scenario.env,
+      appEnv: {},
+    });
+    const { mode } = validateProviderSmokeEnv(env);
+    const imageUrl = sampleImageUrlForMode(mode, env);
+    const imageUrlShape = classifyImageUrl(imageUrl);
+    const expectedImageUrlShape = expectedUrlShapeForMode(mode);
+    if (imageUrlShape !== expectedImageUrlShape) {
+      throw new Error(
+        `CI provider preflight expected ${expectedImageUrlShape} for ${mode}, got ${imageUrlShape}.`,
+      );
+    }
+    return {
+      mode,
+      expectedImageUrlShape,
+      imageUrlShape,
+      providerTimeoutMs: env.PROVIDER_TIMEOUT_MS,
+      publicBaseConfigured: Boolean(trimValue(env.KIDBOT_IMAGE_PUBLIC_BASE_URL)),
+    };
+  });
+
+  return {
+    ok: true,
+    live: false,
+    checks,
+  };
+};
+
 const getFreePort = () =>
   new Promise((resolve, reject) => {
     const server = createServer();
@@ -300,16 +387,6 @@ const runModerationPreflight = async (env) => {
   };
 };
 
-const expectedUrlShapeForMode = (mode) => {
-  if (mode === 'supabase') {
-    return 'supabase-public-url';
-  }
-  if (mode === 'data-url') {
-    return 'data-url';
-  }
-  return 'local-url';
-};
-
 const resolveFetchUrl = (imageUrl, agentBaseUrl) => {
   if (imageUrl.startsWith('/')) {
     return `${agentBaseUrl}${imageUrl}`;
@@ -408,13 +485,16 @@ const runStoryPanelsSmoke = async ({ env, mode, theme, panels }) => {
 
 const parseArgs = (argv) => {
   const options = {
+    ciConfigCheck: false,
     moderationOnly: false,
     panels: 2,
     theme: 'A robot paints a rainbow garden',
   };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
-    if (arg === '--moderation-only') {
+    if (arg === '--ci-config-check') {
+      options.ciConfigCheck = true;
+    } else if (arg === '--moderation-only') {
       options.moderationOnly = true;
     } else if (arg === '--theme') {
       options.theme = argv[++i] ?? options.theme;
@@ -455,7 +535,9 @@ export const runProviderPreflightSmoke = async (options = {}) => {
 
 const main = async () => {
   const options = parseArgs(process.argv.slice(2));
-  const result = await runProviderPreflightSmoke(options);
+  const result = options.ciConfigCheck
+    ? runProviderPreflightCiCheck()
+    : await runProviderPreflightSmoke(options);
   console.log(JSON.stringify(result, null, 2));
 };
 
