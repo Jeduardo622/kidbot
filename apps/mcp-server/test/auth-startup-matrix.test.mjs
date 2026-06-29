@@ -33,6 +33,28 @@ const toolIds = [
   'parent_history_list',
 ];
 const strongToken = () => `matrix-token-${randomInt(1000, 9999)}-abcdefghijklmnopqrstuvwxyz0123456789`;
+const localEnvBypassPath = join(process.cwd(), '.env.auth-matrix-not-used');
+const isolatedEnvKeys = [
+  'AGENT_BASE_URL',
+  'AGENT_PORT',
+  'AGENT_SERVICE_TOKEN',
+  'FALLBACK_WIDGET',
+  'KIDBOT_LOCAL_DEV',
+  'MCP_PORT',
+  'OPENAI_API_KEY',
+  'PARENT_HISTORY_MAX_EVENTS',
+  'PARENT_HISTORY_RETENTION_DAYS',
+  'PARENT_PROFILE_STORE',
+  'PORT',
+];
+
+const childBaseEnv = () => {
+  const base = { ...process.env };
+  for (const key of isolatedEnvKeys) {
+    delete base[key];
+  }
+  return base;
+};
 
 const getFreePort = () =>
   new Promise((resolve, reject) => {
@@ -60,7 +82,8 @@ const spawnProcess = (entry, env) =>
   spawn(process.execPath, [entry], {
     cwd: process.cwd(),
     env: {
-      ...process.env,
+      ...childBaseEnv(),
+      DOTENV_CONFIG_PATH: localEnvBypassPath,
       ...env,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
