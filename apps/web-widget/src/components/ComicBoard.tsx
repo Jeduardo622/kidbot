@@ -27,6 +27,24 @@ interface ComicBoardProps {
   sessionContext?: SessionContext;
 }
 
+const artworkAltText = (imagePrompt: string) => `Story panel artwork: ${imagePrompt}`;
+
+const PanelArtwork = ({ panel }: { panel: StoryPanel }) => {
+  const altText = artworkAltText(panel.imagePrompt);
+
+  if (panel.imageUrl) {
+    return <img className="panel-artwork" src={panel.imageUrl} alt={altText} />;
+  }
+
+  return (
+    <div className="panel-artwork panel-artwork-placeholder" role="img" aria-label={altText}>
+      <span className="panel-artwork-placeholder-sun" aria-hidden="true" />
+      <span className="panel-artwork-placeholder-hill panel-artwork-placeholder-hill-back" aria-hidden="true" />
+      <span className="panel-artwork-placeholder-hill" aria-hidden="true" />
+    </div>
+  );
+};
+
 export const ComicBoard = ({ sessionContext = defaultSessionContext }: ComicBoardProps) => {
   const [theme, setTheme] = useState('A brave turtle shares snacks');
   const [panelCount, setPanelCount] = useState(4);
@@ -104,7 +122,7 @@ export const ComicBoard = ({ sessionContext = defaultSessionContext }: ComicBoar
       <div className="panel-grid">
         {panels.map((panel) => (
           <article key={panel.title} className="panel-card">
-            <img src={panel.imageUrl ?? '/placeholder.svg'} alt={panel.imagePrompt} />
+            <PanelArtwork panel={panel} />
             <h3>{panel.title}</h3>
             <p>{panel.caption}</p>
             <small>{panel.imagePrompt}</small>

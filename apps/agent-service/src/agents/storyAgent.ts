@@ -3,11 +3,14 @@ import { kidTone, moderate, moderateAsync, safeSystemPrompt } from '../guardrail
 import { MalformedOutputError, UnsafeOutputError, type ModelProvider } from '../provider.js';
 import { asRecord, cleanText, extractJson } from '../structuredOutput.js';
 
+export interface StoryGenerationOptions {
+  resolveGeneratedImageUrl?: (panel: StoryPanel, pngBase64: string) => Promise<string> | string;
+}
+
 const buildPanelCaption = (
   theme: string,
   toneNote: string,
   index: number,
-  total: number,
 ): string => {
   const intro = ['First', 'Next', 'Then', 'After that', 'Almost there', 'Finally'][
     Math.min(index, 5)
@@ -32,7 +35,7 @@ const createPanels = (request: StoryRequest): StoryPanel[] => {
     const prompt = prompts[Math.min(i, prompts.length - 1)];
     panels.push({
       title: `${request.theme} — Panel ${i + 1}`,
-      caption: buildPanelCaption(request.theme, tone.vocabulary, i, total),
+      caption: buildPanelCaption(request.theme, tone.vocabulary, i),
       imagePrompt: `${request.theme} for kids, ${prompt}, bright colors`,
       imageUrl: null,
     });
@@ -74,9 +77,40 @@ const repairPanels = (value: unknown, request: StoryRequest): StoryPanel[] | und
   return panels.length >= 2 ? panels : undefined;
 };
 
+const attachGeneratedImages = async (
+  panels: StoryPanel[],
+  provider: ModelProvider,
+  options: StoryGenerationOptions = {},
+): Promise<StoryPanel[]> => {
+  if (!provider.generateImage) {
+    return panels;
+  }
+
+  return Promise.all(
+    panels.map(async (panel) => {
+      const pngBase64 = await provider.generateImage?.({
+        prompt: panel.imagePrompt,
+        size: '1024x1024',
+      });
+
+      if (!pngBase64) {
+        throw new MalformedOutputError('Provider image output did not include base64 data');
+      }
+
+      return {
+        ...panel,
+        imageUrl: options.resolveGeneratedImageUrl
+          ? await options.resolveGeneratedImageUrl(panel, pngBase64)
+          : `data:image/png;base64,${pngBase64}`,
+      };
+    }),
+  );
+};
+
 const planStoryWithProvider = async (
   request: StoryRequest,
   provider: ModelProvider,
+  options: StoryGenerationOptions = {},
 ): Promise<StoryResponse> => {
   const inputModeration = await moderateAsync(request.theme, provider);
   if (inputModeration.blocked) {
@@ -110,22 +144,28 @@ const planStoryWithProvider = async (
   if (outputModeration.blocked) {
     throw new UnsafeOutputError(outputModeration.message);
   }
+  const panels = await attachGeneratedImages(repaired, provider, options);
 
   return {
     blocked: false,
     theme: request.theme,
-    panels: repaired,
+    panels,
   };
 };
 
 export function planStory(request: StoryRequest): StoryResponse;
-export function planStory(request: StoryRequest, provider: ModelProvider): Promise<StoryResponse>;
+export function planStory(
+  request: StoryRequest,
+  provider: ModelProvider,
+  options?: StoryGenerationOptions,
+): Promise<StoryResponse>;
 export function planStory(
   request: StoryRequest,
   provider?: ModelProvider,
+  options: StoryGenerationOptions = {},
 ): StoryResponse | Promise<StoryResponse> {
   if (provider) {
-    return planStoryWithProvider(request, provider);
+    return planStoryWithProvider(request, provider, options);
   }
 
   const inputModeration = moderate(request.theme);

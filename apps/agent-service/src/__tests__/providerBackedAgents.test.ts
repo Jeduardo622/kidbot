@@ -7,14 +7,25 @@ import { moderate } from '../guardrails.js';
 import {
   MalformedOutputError,
   UnsafeOutputError,
+  type ImageGenerationRequest,
   type ModelProvider,
   type TextGenerationRequest,
 } from '../provider.js';
 
-const fakeProvider = (generate: (request: TextGenerationRequest) => string): ModelProvider => ({
+const fakeProvider = (
+  generate: (request: TextGenerationRequest) => string,
+  generateImage?: (request: ImageGenerationRequest) => string,
+): ModelProvider => ({
   async generateText(request) {
     return generate(request);
   },
+  ...(generateImage
+    ? {
+        async generateImage(request: ImageGenerationRequest) {
+          return generateImage(request);
+        },
+      }
+    : {}),
   async moderateText(text) {
     const result = moderate(text);
     return { blocked: result.blocked, reason: result.message };
@@ -95,6 +106,50 @@ describe('provider-backed agents', () => {
         answerIndex: 0,
       }),
     });
+  });
+
+  it('attaches generated image data URLs to provider-backed story panels', async () => {
+    const imagePrompts: string[] = [];
+    const provider = fakeProvider(
+      () =>
+        JSON.stringify({
+          panels: [
+            {
+              title: 'Seed',
+              caption: 'Mia plants a bean.',
+              imagePrompt: 'Mia planting a bean',
+              imageUrl: null,
+            },
+            {
+              title: 'Sprout',
+              caption: 'A green sprout pops up.',
+              imagePrompt: 'A happy sprout',
+              imageUrl: null,
+            },
+          ],
+        }),
+      (request) => {
+        imagePrompts.push(request.prompt);
+        return Buffer.from(request.prompt).toString('base64');
+      },
+    );
+
+    await expect(
+      planStory({ theme: 'A bean grows', panels: 2, ageBand: '7-9' }, provider),
+    ).resolves.toMatchObject({
+      blocked: false,
+      panels: [
+        expect.objectContaining({
+          imagePrompt: 'Mia planting a bean',
+          imageUrl: `data:image/png;base64,${Buffer.from('Mia planting a bean').toString('base64')}`,
+        }),
+        expect.objectContaining({
+          imagePrompt: 'A happy sprout',
+          imageUrl: `data:image/png;base64,${Buffer.from('A happy sprout').toString('base64')}`,
+        }),
+      ],
+    });
+    expect(imagePrompts).toEqual(['Mia planting a bean', 'A happy sprout']);
   });
 
   it('surfaces malformed structured provider output for route-level policy handling', async () => {
