@@ -16,10 +16,11 @@
     "smoke:parent-store-remote": "node ./scripts/smoke-parent-store.mjs remote",
     "smoke:provider-preflight:ci": "node ./scripts/smoke-provider-preflight.mjs --ci-config-check",
     "smoke:provider-preflight": "node ./scripts/smoke-provider-preflight.mjs",
+    "smoke:railway-provider-roundtrip": "node ./scripts/smoke-railway-provider-roundtrip.mjs",
     "smoke:secured-posture": "node ./scripts/smoke-secured-posture.mjs",
     "typecheck": "node ./scripts/run-typecheck.mjs",
     "test": "node ./scripts/run-test.mjs",
-    "test:all": "cross-env CI=1 pnpm -r --if-present run test && node --test tests/zero-install.test.mjs tests/provider-preflight-smoke-script.test.mjs && pnpm --filter mcp-server run test:compat"
+    "test:all": "cross-env CI=1 pnpm -r --if-present run test && node --test tests/zero-install.test.mjs tests/provider-preflight-smoke-script.test.mjs tests/railway-provider-roundtrip-smoke-script.test.mjs && pnpm --filter mcp-server run test:compat"
   },
   "devDependencies": {
     "@types/node": "^20.12.7",
