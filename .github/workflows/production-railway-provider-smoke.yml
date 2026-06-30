@@ -1,0 +1,48 @@
+name: Production Railway Provider Roundtrip Smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Railway agent-service base URL
+        required: false
+        default: https://kidbot-production.up.railway.app
+
+jobs:
+  railway-provider-roundtrip:
+    name: Railway Provider Roundtrip Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+
+    env:
+      AGENT_SERVICE_TOKEN: ${{ secrets.KIDBOT_AGENT_SERVICE_TOKEN }}
+      KIDBOT_RAILWAY_BASE_URL: ${{ inputs.base_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: 8.15.8
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Verify production smoke secret
+        run: |
+          if [ -z "$AGENT_SERVICE_TOKEN" ]; then
+            echo "KIDBOT_AGENT_SERVICE_TOKEN is required as a protected production environment secret."
+            exit 1
+          fi
+
+      - name: Run Railway provider roundtrip smoke
+        run: pnpm run smoke:railway-provider-roundtrip
