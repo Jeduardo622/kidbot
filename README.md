@@ -23,6 +23,7 @@ The `dev` script runs the widget (Vite), MCP server, and agent service together.
 - MCP compatibility smoke test (not included in recursive `test`): `pnpm --filter mcp-server run test:compat`
 - CI-safe provider preflight config check: `pnpm run smoke:provider-preflight:ci`
 - Live provider preflight smoke test (requires real provider secrets and may generate images): `pnpm run smoke:provider-preflight`
+- Production MCP story panels smoke test (requires remote MCP URL and may generate images): `pnpm run smoke:production-mcp-story-panels`
 - Hosted Railway provider roundtrip smoke test (requires production agent-service auth and may generate images): `pnpm run smoke:railway-provider-roundtrip`
 - Root wrapper: `pnpm run test` (runs full recursive package tests when pnpm and workspace dependencies are detectable; otherwise falls back to smoke-only mode)
 - If the wrapper prints a smoke-only fallback warning, package Vitest suites were not executed.
@@ -108,6 +109,8 @@ pnpm run smoke:provider-preflight
 The live provider preflight first calls OpenAI moderation with a harmless prompt, then starts local agent and MCP services on ephemeral ports, calls `story_panels`, verifies generated `imageUrl` values match the configured storage mode, and fetches the first generated image when the URL is fetchable. Use `pnpm run smoke:provider-preflight -- --moderation-only` for a cheaper key/quota check that does not generate images. The script fails fast if `.env` and `apps/agent-service/.env` contain mismatched provider secrets or if Supabase mode is configured to return local `/generated-images` URLs.
 
 After a Railway production deploy, run the manual `Production Railway Provider Roundtrip Smoke` GitHub Actions workflow. Store `KIDBOT_AGENT_SERVICE_TOKEN` as a protected production environment secret with the deployed agent-service `AGENT_SERVICE_TOKEN` value. The workflow defaults to `https://kidbot-production.up.railway.app`, checks `/healthz`, generates a two-panel story through `/story-panels`, verifies Supabase public image URLs, and fetches the first PNG without logging secrets or full image URLs.
+
+For production MCP connector coverage, run the manual `Production MCP Story Panels Smoke` GitHub Actions workflow. Store `KIDBOT_REMOTE_MCP_URL` as a protected production environment secret with the deployed MCP origin, with or without the `/mcp` suffix. The workflow checks MCP `/healthz`, calls the public MCP `story_panels` tool, verifies two Supabase public image URLs, and fetches the first PNG.
 
 ### Parent/Session Safety MVP
 
