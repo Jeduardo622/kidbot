@@ -17,11 +17,12 @@
     "smoke:provider-preflight:ci": "node ./scripts/smoke-provider-preflight.mjs --ci-config-check",
     "smoke:provider-preflight": "node ./scripts/smoke-provider-preflight.mjs",
     "smoke:production-mcp-story-panels": "node ./scripts/smoke-production-mcp-story-panels.mjs",
+    "smoke:production-widget-story-panels": "tsx ./scripts/smoke-production-widget-story-panels.tsx",
     "smoke:railway-provider-roundtrip": "node ./scripts/smoke-railway-provider-roundtrip.mjs",
     "smoke:secured-posture": "node ./scripts/smoke-secured-posture.mjs",
     "typecheck": "node ./scripts/run-typecheck.mjs",
     "test": "node ./scripts/run-test.mjs",
-    "test:all": "cross-env CI=1 pnpm -r --if-present run test && node --test tests/zero-install.test.mjs tests/provider-preflight-smoke-script.test.mjs tests/production-mcp-story-panels-smoke-script.test.mjs tests/railway-provider-roundtrip-smoke-script.test.mjs && pnpm --filter mcp-server run test:compat"
+    "test:all": "cross-env CI=1 pnpm -r --if-present run test && node --test tests/zero-install.test.mjs tests/provider-preflight-smoke-script.test.mjs tests/production-mcp-story-panels-smoke-script.test.mjs tests/production-widget-story-panels-smoke-script.test.mjs tests/railway-provider-roundtrip-smoke-script.test.mjs && pnpm --filter mcp-server run test:compat"
   },
   "devDependencies": {
     "@types/node": "^20.12.7",
