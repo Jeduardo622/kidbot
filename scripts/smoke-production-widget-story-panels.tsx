@@ -54,6 +54,24 @@ export const normalizeMcpBaseUrl = (value: string | undefined) => {
   }
 };
 
+const defineGlobalValue = (key: keyof typeof globalThis, value: unknown) => {
+  Object.defineProperty(globalThis, key, {
+    configurable: true,
+    value,
+    writable: true,
+  });
+};
+
+export const installDomGlobals = (domWindow: Window) => {
+  defineGlobalValue('window', domWindow);
+  defineGlobalValue('document', domWindow.document);
+  defineGlobalValue('navigator', domWindow.navigator);
+  defineGlobalValue('HTMLElement', domWindow.HTMLElement);
+  defineGlobalValue('HTMLImageElement', domWindow.HTMLImageElement);
+  defineGlobalValue('MutationObserver', domWindow.MutationObserver);
+  defineGlobalValue('getComputedStyle', domWindow.getComputedStyle);
+};
+
 const parseArgs = (argv: string[]) => {
   const options = {
     mcpBaseUrl: process.env.KIDBOT_REMOTE_MCP_URL,
@@ -199,15 +217,7 @@ export const runProductionWidgetStoryPanelsSmoke = async ({
     url: 'https://kidbot-widget-smoke.local/',
   });
 
-  Object.assign(globalThis, {
-    window: dom.window,
-    document: dom.window.document,
-    navigator: dom.window.navigator,
-    HTMLElement: dom.window.HTMLElement,
-    HTMLImageElement: dom.window.HTMLImageElement,
-    MutationObserver: dom.window.MutationObserver,
-    getComputedStyle: dom.window.getComputedStyle,
-  });
+  installDomGlobals(dom.window);
   Object.assign(globalThis, { React });
   Object.assign(dom.window, { React });
 
