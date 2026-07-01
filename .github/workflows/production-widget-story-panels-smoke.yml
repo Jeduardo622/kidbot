@@ -1,0 +1,42 @@
+name: Production Widget Story Panels Smoke
+
+on:
+  workflow_dispatch:
+
+jobs:
+  production-widget-story-panels:
+    name: Production Widget Story Panels Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+
+    env:
+      KIDBOT_REMOTE_MCP_URL: ${{ secrets.KIDBOT_REMOTE_MCP_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: 8.15.8
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Verify production MCP URL secret
+        run: |
+          if [ -z "$KIDBOT_REMOTE_MCP_URL" ]; then
+            echo "KIDBOT_REMOTE_MCP_URL is required as a protected production environment secret."
+            exit 1
+          fi
+
+      - name: Run production widget story panels smoke
+        run: pnpm run smoke:production-widget-story-panels
