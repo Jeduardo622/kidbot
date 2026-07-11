@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rename, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
+
+import { parseGitNameStatus } from "../scripts/engineering-policy.mjs";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(import.meta.dirname, "..");
@@ -43,6 +45,7 @@ async function createGitRepo() {
   await git(root, "config", "user.email", "router@example.test");
   await git(root, "config", "user.name", "Router Test");
   await writeFile(path.join(root, "README.md"), "base\n");
+  await writeFile(path.join(root, "package.json"), "{}\n");
   await writeFile(path.join(root, "tracked.mjs"), "export const base = true;\n");
   await writeFile(path.join(root, "deleted.mjs"), "delete me\n");
   await git(root, "add", ".");
@@ -90,6 +93,16 @@ test("rejects invalid options, repository-external paths, and mixed base mode", 
   }
 });
 
+test("rejects nonexistent, directory, and uncovered explicit paths with exit 2", async () => {
+  const root = await createGitRepo();
+  await mkdir(path.join(root, "docs"));
+  await writeFile(path.join(root, "notes.txt"), "not covered\n");
+  for (const candidate of ["missing.mjs", "docs", "notes.txt"]) {
+    const result = await runCli([candidate], { cwd: root });
+    assert.equal(result.code, 2, `${candidate}: ${result.stderr}`);
+  }
+});
+
 test("reports missing bases and empty implicit scope as unresolved", async () => {
   const root = await createGitRepo();
   const missing = await runCli(["--base", "missing-ref"], { cwd: root });
@@ -117,4 +130,44 @@ test("resolves committed, staged, unstaged, and deleted Git paths deterministica
     "staged.mjs",
     "tracked.mjs",
   ]);
+});
+
+test("committed rename includes protected old path and cannot downgrade", async () => {
+  const root = await createGitRepo();
+  const { stdout: base } = await git(root, "rev-parse", "HEAD");
+  await mkdir(path.join(root, "docs"));
+  await rename(path.join(root, "package.json"), path.join(root, "docs", "package.md"));
+  await git(root, "add", "-A");
+  await git(root, "commit", "-m", "rename protected file");
+
+  const result = await runCli(["--base", base.trim(), "--json"], { cwd: root });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).classification, "protected");
+  assert.deepEqual(JSON.parse(result.stdout).paths, ["docs/package.md", "package.json"]);
+});
+
+test("staged rename includes protected old path and cannot downgrade", async () => {
+  const root = await createGitRepo();
+  await mkdir(path.join(root, "docs"));
+  await rename(path.join(root, "package.json"), path.join(root, "docs", "package.md"));
+  await git(root, "add", "-A");
+
+  const result = await runCli(["--json"], { cwd: root });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).classification, "protected");
+  assert.deepEqual(JSON.parse(result.stdout).paths, ["docs/package.md", "package.json"]);
+});
+
+test("NUL-delimited Git status preserves filenames containing newlines", () => {
+  assert.deepEqual(
+    parseGitNameStatus("M\0line\nbreak.mjs\0R100\0old.mjs\0new.mjs\0"),
+    ["line\nbreak.mjs", "old.mjs", "new.mjs"],
+  );
+});
+
+test("unreadable policy is an unresolved-scope exit 3", async () => {
+  const root = await createGitRepo();
+  await writeFile(path.join(root, ".agents", "engineering-policy.json"), "not json");
+  const result = await runCli(["README.md"], { cwd: root });
+  assert.equal(result.code, 3, result.stderr);
 });

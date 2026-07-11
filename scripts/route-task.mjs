@@ -5,9 +5,10 @@ import {
   classifyPaths,
   loadEngineeringPolicy,
   resolveScope,
+  TaskInputError,
 } from "./engineering-policy.mjs";
 
-class ArgumentError extends Error {}
+class ArgumentError extends TaskInputError {}
 
 export function parseArguments(argv) {
   const options = { base: undefined, json: false, explicitPaths: [] };
@@ -61,7 +62,12 @@ export async function routeTask({ argv = [], repoRoot = process.cwd() } = {}) {
     explicitPaths: options.explicitPaths.length ? options.explicitPaths : undefined,
   });
   const policy = await loadEngineeringPolicy({ repoRoot });
-  return { result: classifyPaths({ repoRoot, paths, policy }), json: options.json };
+  try {
+    return { result: classifyPaths({ repoRoot, paths, policy }), json: options.json };
+  } catch (error) {
+    if (options.explicitPaths.length > 0) throw new TaskInputError(error.message, { cause: error });
+    throw error;
+  }
 }
 
 export async function runCli({ argv = process.argv.slice(2), repoRoot = process.cwd(), stdout = process.stdout, stderr = process.stderr } = {}) {
@@ -70,7 +76,7 @@ export async function runCli({ argv = process.argv.slice(2), repoRoot = process.
     stdout.write(formatResult(routed.result, { json: routed.json }));
     return 0;
   } catch (error) {
-    const invalid = error instanceof ArgumentError || /outside repository|scope paths|does not select a file/iu.test(error.message);
+    const invalid = error instanceof TaskInputError;
     stderr.write(`${invalid ? "Invalid arguments or paths" : "Unable to resolve scope"}: ${error.message}\n`);
     return invalid ? 2 : 3;
   }

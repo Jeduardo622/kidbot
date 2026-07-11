@@ -1,9 +1,17 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+
+export class TaskInputError extends Error {
+  code = "INVALID_INPUT";
+}
+
+export class ScopeResolutionError extends Error {
+  code = "UNRESOLVED_SCOPE";
+}
 
 const CLASSIFICATIONS = ["review-only", "standard", "protected"];
 const PRECEDENCE = new Map(CLASSIFICATIONS.map((value, index) => [value, index]));
@@ -108,35 +116,67 @@ function normalizeRepoPath(repoRoot, candidate) {
   return relative.split(path.sep).join("/");
 }
 
+export function parseGitNameStatus(stdout) {
+  const fields = stdout.split("\0");
+  if (fields.at(-1) === "") fields.pop();
+  const paths = [];
+  for (let index = 0; index < fields.length;) {
+    const status = fields[index];
+    index += 1;
+    if (!status) throw new ScopeResolutionError("Git returned an invalid empty status");
+    const pathCount = /^[RC]/u.test(status) ? 2 : 1;
+    if (index + pathCount > fields.length) throw new ScopeResolutionError(`Git returned incomplete ${status} status data`);
+    paths.push(...fields.slice(index, index + pathCount));
+    index += pathCount;
+  }
+  return paths;
+}
+
 async function gitPaths(repoRoot, args) {
   const { stdout } = await execFileAsync("git", args, {
     cwd: repoRoot,
     encoding: "utf8",
     windowsHide: true,
   });
-  return stdout.split(/\r?\n/u).filter(Boolean);
+  return parseGitNameStatus(stdout);
 }
 
 export async function resolveScope({ repoRoot, base, explicitPaths } = {}) {
   if (typeof repoRoot !== "string" || repoRoot.length === 0) throw new Error("repoRoot is required");
-  if (base !== undefined && (typeof base !== "string" || base.length === 0)) throw new Error("base must be a non-empty Git ref");
-  if (explicitPaths !== undefined && !Array.isArray(explicitPaths)) throw new Error("explicitPaths must be an array");
-  if (base !== undefined && explicitPaths?.length) throw new Error("--base cannot be combined with explicit paths");
+  if (base !== undefined && (typeof base !== "string" || base.length === 0)) throw new TaskInputError("base must be a non-empty Git ref");
+  if (explicitPaths !== undefined && !Array.isArray(explicitPaths)) throw new TaskInputError("explicitPaths must be an array");
+  if (base !== undefined && explicitPaths?.length) throw new TaskInputError("--base cannot be combined with explicit paths");
 
   if (explicitPaths?.length) {
-    return [...new Set(explicitPaths.map((candidate) => normalizeRepoPath(repoRoot, candidate)))].sort();
+    let normalized;
+    try {
+      normalized = [...new Set(explicitPaths.map((candidate) => normalizeRepoPath(repoRoot, candidate)))].sort();
+    } catch (error) {
+      throw new TaskInputError(error.message, { cause: error });
+    }
+    for (const candidate of normalized) {
+      try {
+        const entry = await stat(path.resolve(repoRoot, candidate));
+        if (!entry.isFile()) throw new TaskInputError(`explicit path is not a file: ${candidate}`);
+      } catch (error) {
+        if (error instanceof TaskInputError) throw error;
+        throw new TaskInputError(`explicit path does not exist or is unreadable: ${candidate}`, { cause: error });
+      }
+    }
+    return normalized;
   }
 
   try {
     const groups = [];
-    if (base !== undefined) groups.push(await gitPaths(repoRoot, ["diff", "--name-only", "--diff-filter=ACDMRTUXB", `${base}...HEAD`, "--"]));
-    groups.push(await gitPaths(repoRoot, ["diff", "--cached", "--name-only", "--diff-filter=ACDMRTUXB", "--"]));
-    groups.push(await gitPaths(repoRoot, ["diff", "--name-only", "--diff-filter=ACDMRTUXB", "--"]));
+    const statusArgs = ["--name-status", "-z", "--find-renames", "--find-copies", "--diff-filter=ACDMRTUXB"];
+    if (base !== undefined) groups.push(await gitPaths(repoRoot, ["diff", ...statusArgs, `${base}...HEAD`, "--"]));
+    groups.push(await gitPaths(repoRoot, ["diff", "--cached", ...statusArgs, "--"]));
+    groups.push(await gitPaths(repoRoot, ["diff", ...statusArgs, "--"]));
     const resolved = [...new Set(groups.flat().map((candidate) => normalizeRepoPath(repoRoot, candidate)))].sort();
-    if (resolved.length === 0) throw new Error("Git scope contains no changed paths");
+    if (resolved.length === 0) throw new ScopeResolutionError("Git scope contains no changed paths");
     return resolved;
   } catch (error) {
-    throw new Error(`Unable to resolve Git scope: ${error.message}`, { cause: error });
+    throw new ScopeResolutionError(`Unable to resolve Git scope: ${error.message}`, { cause: error });
   }
 }
 
