@@ -55,7 +55,14 @@ jobs:
         run: node scripts/resolve-harness-base.mjs >> "$GITHUB_ENV"
 
       - name: Route engineering change
-        run: pnpm run route-task -- --base "$HARNESS_BASE" --json
+        run: |
+          pnpm run route-task -- --base "$HARNESS_BASE" --json > harness-route.json
+          cat harness-route.json
+          node scripts/export-harness-classification.mjs harness-route.json >> "$GITHUB_ENV"
+
+      - name: Verify review-only baseline
+        if: env.HARNESS_CLASSIFICATION == 'review-only'
+        run: pnpm run verify:local
 
       - name: Verify engineering change
         run: pnpm run verify-change -- --base "$HARNESS_BASE"

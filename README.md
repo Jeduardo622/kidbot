@@ -37,6 +37,8 @@ Classification precedence is `protected` > `standard` > `review-only`. Protected
 
 Standard verification runs lint, typecheck, package and root tests, and MCP compatibility. CI invokes `verify-change` once for this broad verification, then retains only build, Redis-specific, and other CI-specific checks instead of repeating the same suites.
 
+Documentation-only (`review-only`) changes still receive the full `verify:local` baseline in CI. CI parses the router's JSON into an exact classification and enables this fallback only for `review-only`; malformed or missing routing output fails closed.
+
 - Authoritative local verification: `pnpm run verify:local` (lint, typecheck, package and root tests, CI-safe provider preflight, and secured-posture smoke; no production secrets required)
 - Authoritative recursive test run (packages with a `test` script): `pnpm -r --if-present run test`
 - MCP compatibility smoke test (not included in recursive `test`): `pnpm --filter mcp-server run test:compat`
