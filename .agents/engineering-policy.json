@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "protected-engineering-surfaces",
+      "classification": "protected",
+      "patterns": [
+        ".github/workflows/**",
+        "**/auth/**",
+        "**/.env",
+        "**/.env.*",
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml"
+      ],
+      "requiresHumanReview": true
+    },
+    {
+      "id": "review-only-documentation",
+      "classification": "review-only",
+      "patterns": ["**/*.md", "*.md"],
+      "requiresHumanReview": false
+    },
+    {
+      "id": "standard-repository-content",
+      "classification": "standard",
+      "patterns": [
+        "**/*.cjs", "**/*.css", "**/*.html", "**/*.js", "**/*.json",
+        "**/*.jsx", "**/*.mjs", "**/*.scss", "**/*.ts", "**/*.tsx",
+        "*.cjs", "*.css", "*.html", "*.js", "*.json", "*.jsx", "*.mjs",
+        "*.scss", "*.ts", "*.tsx"
+      ],
+      "requiresHumanReview": false
+    }
+  ],
+  "verification": {
+    "review-only": [],
+    "standard": ["pnpm test"],
+    "protected": ["pnpm run verify:local"]
+  }
+}
