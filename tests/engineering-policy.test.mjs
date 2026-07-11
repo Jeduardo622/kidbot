@@ -51,10 +51,14 @@ test("classifies Markdown-only scope as review-only", async () => {
 
 test("classifies ordinary source as standard", async () => {
   const policy = await loadEngineeringPolicy({ repoRoot });
-  assert.equal(
-    classifyPaths({ repoRoot, paths: ["apps/web-widget/src/main.tsx"], policy }).classification,
-    "standard",
-  );
+  const result = classifyPaths({ repoRoot, paths: ["apps/web-widget/src/main.tsx"], policy });
+  assert.equal(result.classification, "standard");
+  assert.deepEqual(result.commands, [
+    "pnpm run lint",
+    "pnpm run typecheck",
+    "pnpm test",
+    "pnpm --filter @kidbot/mcp-server run test:compat",
+  ]);
 });
 
 test("uses protected over standard over review-only precedence", async () => {

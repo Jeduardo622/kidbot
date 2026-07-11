@@ -27,7 +27,7 @@ function recordingRunner(statuses = []) {
 test("selects policy commands for review-only, standard, and protected scopes", async () => {
   for (const [candidate, classification, commands, requiresHumanReview] of [
     ["README.md", "review-only", [], false],
-    ["scripts/route-task.mjs", "standard", ["pnpm test"], false],
+    ["scripts/route-task.mjs", "standard", ["pnpm run lint", "pnpm run typecheck", "pnpm test", "pnpm --filter @kidbot/mcp-server run test:compat"], false],
     ["package.json", "protected", ["pnpm run verify:local"], true],
   ]) {
     const runner = recordingRunner();
@@ -68,9 +68,9 @@ test("classification callback cannot append or replace validated commands or rep
       }
     },
   });
-  assert.deepEqual(runner.commands.map(({ command }) => command), ["pnpm test"]);
+  assert.deepEqual(runner.commands.map(({ command }) => command), ["pnpm run lint", "pnpm run typecheck", "pnpm test", "pnpm --filter @kidbot/mcp-server run test:compat"]);
   assert.equal(report.classification, "standard");
-  assert.deepEqual(report.commands, ["pnpm test"]);
+  assert.deepEqual(report.commands, ["pnpm run lint", "pnpm run typecheck", "pnpm test", "pnpm --filter @kidbot/mcp-server run test:compat"]);
   assert.equal(report.requiresHumanReview, false);
 });
 
@@ -138,7 +138,7 @@ test("CLI reports classification, commands, status, human review, and propagates
   });
   assert.equal(status, 9);
   assert.match(stdout.value, /classification: standard/);
-  assert.match(stdout.value, /command: pnpm test/);
+  assert.match(stdout.value, /command: pnpm run lint/);
   assert.match(stdout.value, /status: failed \(9\)/);
   assert.match(stdout.value, /human review: not required/);
   assert.equal(stderr.value, "");

@@ -35,8 +35,9 @@ test('test:all delegates root test discovery to test:root', async () => {
   assert.doesNotMatch(packageJson.scripts['test:all'], /tests\/[^ ]+\.test\.mjs/);
 });
 
-test('CI explicitly runs the root smoke-script tests', async () => {
+test('CI delegates root smoke-script tests to verify-change', async () => {
   const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
 
-  assert.match(workflow, /name: Run root smoke-script tests\s+run: pnpm run test:root/);
+  assert.match(workflow, /name: Verify engineering change\s+run: pnpm run verify-change/);
+  assert.doesNotMatch(workflow, /name: Run root smoke-script tests/);
 });

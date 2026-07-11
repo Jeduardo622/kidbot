@@ -35,6 +35,8 @@ pnpm run verify-change -- --base main
 
 Classification precedence is `protected` > `standard` > `review-only`. Protected scopes select `pnpm run verify:local` and require human review. Invalid, external, empty, unreadable-policy, and unresolved-Git scopes fail closed. Exit code `0` means routing or selected verification completed successfully; a nonzero exit means the scope was rejected, could not be resolved, or verification failed. The harness is secret-free and never dispatches manual production workflows.
 
+Standard verification runs lint, typecheck, package and root tests, and MCP compatibility. CI invokes `verify-change` once for this broad verification, then retains only build, Redis-specific, and other CI-specific checks instead of repeating the same suites.
+
 - Authoritative local verification: `pnpm run verify:local` (lint, typecheck, package and root tests, CI-safe provider preflight, and secured-posture smoke; no production secrets required)
 - Authoritative recursive test run (packages with a `test` script): `pnpm -r --if-present run test`
 - MCP compatibility smoke test (not included in recursive `test`): `pnpm --filter mcp-server run test:compat`

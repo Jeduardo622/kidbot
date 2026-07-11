@@ -25,14 +25,25 @@ test('CI resolves a safe Git base and enforces routing and verification', async 
   const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
 
   assert.match(workflow, /fetch-depth:\s*0/);
-  assert.match(workflow, /origin\/\$\{\{ github\.base_ref \}\}/);
-  assert.match(workflow, /\$\{\{ github\.event\.before \}\}/);
-  assert.match(workflow, /0{40}/);
-  assert.match(workflow, /git (?:rev-parse|cat-file)[^\n]+/);
+  assert.match(workflow, /EVENT_NAME:\s*\$\{\{ github\.event_name \}\}/);
+  assert.match(workflow, /BASE_REF:\s*\$\{\{ github\.base_ref \}\}/);
+  assert.match(workflow, /BEFORE_SHA:\s*\$\{\{ github\.event\.before \}\}/);
+  assert.match(workflow, /node scripts\/resolve-harness-base\.mjs/);
+  assert.doesNotMatch(workflow, /run:\s*\|[^]*\$\{\{ github\./);
   assert.match(workflow, /HARNESS_BASE/);
   assert.match(workflow, /pnpm run route-task -- --base "\$HARNESS_BASE" --json/);
   assert.match(workflow, /pnpm run verify-change -- --base "\$HARNESS_BASE"/);
   assert.doesNotMatch(workflow, /pnpm run smoke:(?:production|railway)/);
+  for (const duplicatedStep of [
+    'name: Typecheck',
+    'name: Run root smoke-script tests',
+    'name: Test web-widget',
+    'name: Run MCP compatibility tests',
+  ]) assert.doesNotMatch(workflow, new RegExp(duplicatedStep));
+  assert.match(workflow, /name: Build agent-service/);
+  assert.match(workflow, /name: Test agent-service with Redis limiter smoke[^]*RATE_LIMIT_STORE: redis/);
+  assert.match(workflow, /name: Run parent store Redis deploy smoke/);
+  assert.match(workflow, /name: Run MCP auth\/startup matrix/);
 });
 
 test('agent service retains service documentation ownership', async () => {

@@ -20,4 +20,6 @@ Classification precedence is `protected` over `standard` over `review-only`. Pro
 
 Run `pnpm run verify-change -- --base <git-ref>` (or with explicit paths) before finalization. Protected changes select `pnpm run verify:local` and require human review; automation must not bypass that review requirement.
 
+Standard changes run the exact secret-free sequence: lint, typecheck, package and root tests through `pnpm test`, then MCP compatibility. CI relies on this selection and must not repeat those broad suites after `verify-change`.
+
 Report verification in separate categories: executed, skipped, blocked, and secret-dependent. Include exact commands and outcomes, never describe an unexecuted check as passing, and identify residual risk or the next unblock step.

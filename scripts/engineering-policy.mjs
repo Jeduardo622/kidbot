@@ -18,7 +18,10 @@ const PRECEDENCE = new Map(CLASSIFICATIONS.map((value, index) => [value, index])
 const RULE_KEYS = ["classification", "id", "patterns", "requiresHumanReview"];
 const POLICY_KEYS = ["rules", "verification", "version"];
 const ALLOWED_VERIFICATION_COMMANDS = new Set([
+  "pnpm run lint",
+  "pnpm run typecheck",
   "pnpm test",
+  "pnpm --filter @kidbot/mcp-server run test:compat",
   "pnpm run verify:local",
 ]);
 

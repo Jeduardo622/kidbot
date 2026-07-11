@@ -48,33 +48,17 @@ jobs:
         run: pnpm install --no-frozen-lockfile
 
       - name: Resolve engineering harness base
-        shell: bash
-        run: |
-          set -euo pipefail
-          zero_sha=0000000000000000000000000000000000000000
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            candidate="origin/${{ github.base_ref }}"
-          else
-            candidate="${{ github.event.before }}"
-          fi
-          if [[ -z "$candidate" || "$candidate" == "$zero_sha" ]]; then
-            echo "Engineering harness base is empty or the zero SHA" >&2
-            exit 1
-          fi
-          if ! git rev-parse --verify "${candidate}^{commit}" >/dev/null; then
-            echo "Engineering harness base is unavailable: $candidate" >&2
-            exit 1
-          fi
-          echo "HARNESS_BASE=$candidate" >> "$GITHUB_ENV"
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: node scripts/resolve-harness-base.mjs >> "$GITHUB_ENV"
 
       - name: Route engineering change
         run: pnpm run route-task -- --base "$HARNESS_BASE" --json
 
       - name: Verify engineering change
         run: pnpm run verify-change -- --base "$HARNESS_BASE"
-
-      - name: Typecheck
-        run: pnpm run typecheck
 
       - name: Build agent-service
         run: pnpm --filter @kidbot/agent-service run build
@@ -87,20 +71,11 @@ jobs:
       - name: Run provider preflight config check
         run: pnpm run smoke:provider-preflight:ci
 
-      - name: Run root smoke-script tests
-        run: pnpm run test:root
-
       - name: Build web-widget
         run: pnpm --filter @kidbot/web-widget run build
 
-      - name: Test web-widget
-        run: pnpm --filter @kidbot/web-widget run test
-
       - name: Build MCP server
         run: pnpm --filter @kidbot/mcp-server run build
-
-      - name: Run MCP compatibility tests
-        run: pnpm --filter @kidbot/mcp-server run test:compat
 
       - name: Run MCP parent profile store tests
         env:
