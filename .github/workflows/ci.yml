@@ -30,6 +30,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v5
@@ -44,6 +46,32 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
+
+      - name: Resolve engineering harness base
+        shell: bash
+        run: |
+          set -euo pipefail
+          zero_sha=0000000000000000000000000000000000000000
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            candidate="origin/${{ github.base_ref }}"
+          else
+            candidate="${{ github.event.before }}"
+          fi
+          if [[ -z "$candidate" || "$candidate" == "$zero_sha" ]]; then
+            echo "Engineering harness base is empty or the zero SHA" >&2
+            exit 1
+          fi
+          if ! git rev-parse --verify "${candidate}^{commit}" >/dev/null; then
+            echo "Engineering harness base is unavailable: $candidate" >&2
+            exit 1
+          fi
+          echo "HARNESS_BASE=$candidate" >> "$GITHUB_ENV"
+
+      - name: Route engineering change
+        run: pnpm run route-task -- --base "$HARNESS_BASE" --json
+
+      - name: Verify engineering change
+        run: pnpm run verify-change -- --base "$HARNESS_BASE"
 
       - name: Typecheck
         run: pnpm run typecheck
