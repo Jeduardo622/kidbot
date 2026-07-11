@@ -31,7 +31,8 @@ test('CI resolves a safe Git base and enforces routing and verification', async 
   assert.match(workflow, /node scripts\/resolve-harness-base\.mjs/);
   assert.doesNotMatch(workflow, /run:\s*\|[^]*\$\{\{ github\./);
   assert.match(workflow, /HARNESS_BASE/);
-  assert.match(workflow, /pnpm run route-task -- --base "\$HARNESS_BASE" --json/);
+  assert.match(workflow, /node \.\/scripts\/route-task\.mjs --base "\$HARNESS_BASE" --json > harness-route\.json/);
+  assert.doesNotMatch(workflow, /pnpm run route-task[^\n]*>/);
   assert.match(workflow, /> harness-route\.json/);
   assert.match(workflow, /cat harness-route\.json/);
   assert.match(workflow, /node scripts\/export-harness-classification\.mjs harness-route\.json >> "\$GITHUB_ENV"/);

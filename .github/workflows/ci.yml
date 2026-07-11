@@ -56,7 +56,7 @@ jobs:
 
       - name: Route engineering change
         run: |
-          pnpm run route-task -- --base "$HARNESS_BASE" --json > harness-route.json
+          node ./scripts/route-task.mjs --base "$HARNESS_BASE" --json > harness-route.json
           cat harness-route.json
           node scripts/export-harness-classification.mjs harness-route.json >> "$GITHUB_ENV"
 
