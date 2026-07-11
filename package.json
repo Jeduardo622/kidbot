@@ -12,6 +12,7 @@
     "dev:agent": "pnpm --filter agent-service dev",
     "dev": "concurrently -c auto -n WIDGET,MCP,AGENT \"pnpm --filter web-widget dev\" \"pnpm --filter mcp-server dev\" \"pnpm --filter agent-service dev\"",
     "lint": "node ./scripts/run-lint.mjs",
+    "route-task": "node ./scripts/route-task.mjs",
     "smoke:parent-store-redis": "node ./scripts/smoke-parent-store.mjs local",
     "smoke:parent-store-remote": "node ./scripts/smoke-parent-store.mjs remote",
     "smoke:provider-preflight:ci": "node ./scripts/smoke-provider-preflight.mjs --ci-config-check",

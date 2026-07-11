@@ -1,5 +1,9 @@
 import { readFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import path from "node:path";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 const CLASSIFICATIONS = ["review-only", "standard", "protected"];
 const PRECEDENCE = new Map(CLASSIFICATIONS.map((value, index) => [value, index]));
@@ -102,6 +106,38 @@ function normalizeRepoPath(repoRoot, candidate) {
     throw new Error(`path is outside repository or does not select a file: ${candidate}`);
   }
   return relative.split(path.sep).join("/");
+}
+
+async function gitPaths(repoRoot, args) {
+  const { stdout } = await execFileAsync("git", args, {
+    cwd: repoRoot,
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  return stdout.split(/\r?\n/u).filter(Boolean);
+}
+
+export async function resolveScope({ repoRoot, base, explicitPaths } = {}) {
+  if (typeof repoRoot !== "string" || repoRoot.length === 0) throw new Error("repoRoot is required");
+  if (base !== undefined && (typeof base !== "string" || base.length === 0)) throw new Error("base must be a non-empty Git ref");
+  if (explicitPaths !== undefined && !Array.isArray(explicitPaths)) throw new Error("explicitPaths must be an array");
+  if (base !== undefined && explicitPaths?.length) throw new Error("--base cannot be combined with explicit paths");
+
+  if (explicitPaths?.length) {
+    return [...new Set(explicitPaths.map((candidate) => normalizeRepoPath(repoRoot, candidate)))].sort();
+  }
+
+  try {
+    const groups = [];
+    if (base !== undefined) groups.push(await gitPaths(repoRoot, ["diff", "--name-only", "--diff-filter=ACDMRTUXB", `${base}...HEAD`, "--"]));
+    groups.push(await gitPaths(repoRoot, ["diff", "--cached", "--name-only", "--diff-filter=ACDMRTUXB", "--"]));
+    groups.push(await gitPaths(repoRoot, ["diff", "--name-only", "--diff-filter=ACDMRTUXB", "--"]));
+    const resolved = [...new Set(groups.flat().map((candidate) => normalizeRepoPath(repoRoot, candidate)))].sort();
+    if (resolved.length === 0) throw new Error("Git scope contains no changed paths");
+    return resolved;
+  } catch (error) {
+    throw new Error(`Unable to resolve Git scope: ${error.message}`, { cause: error });
+  }
 }
 
 export function classifyPaths({ repoRoot, paths, policy } = {}) {
