@@ -27,7 +27,12 @@ test("classifies workflow, auth, and configuration paths as protected", async ()
   for (const candidate of [
     ".github/workflows/ci.yml",
     "apps/agent-service/src/auth/token.ts",
+    "apps/agent-service/src/config.ts",
+    "apps/mcp-server/src/auth-startup-matrix.test.mjs",
     "apps/agent-service/.env.example",
+    "vite.config.ts",
+    "apps/web-widget/tsconfig.app.json",
+    "eslint.config.mjs",
     "package.json",
   ]) {
     const result = classifyPaths({ repoRoot, paths: [candidate], policy });
@@ -107,4 +112,30 @@ test("fails closed for malformed and unreadable policy files", async () => {
     loadEngineeringPolicy({ repoRoot, policyPath: path.join(tempRoot, "missing.json") }),
     /policy/i,
   );
+});
+
+test("rejects verification commands outside the secret-free repository allowlist", async () => {
+  const basePolicy = await loadEngineeringPolicy({ repoRoot });
+  for (const unsafeCommand of [
+    "pnpm run smoke:production-widget-story-panels",
+    "pnpm run deploy",
+    "printenv",
+    "node -e \"console.log(process.env)\"",
+    "type .env",
+  ]) {
+    const tempRoot = await mkdtemp(path.join(tmpdir(), "kidbot-policy-command-"));
+    const policyPath = path.join(tempRoot, "policy.json");
+    await writeFile(policyPath, JSON.stringify({
+      ...basePolicy,
+      verification: {
+        ...basePolicy.verification,
+        standard: [unsafeCommand],
+      },
+    }));
+    await assert.rejects(
+      loadEngineeringPolicy({ repoRoot, policyPath }),
+      /verification command/i,
+      unsafeCommand,
+    );
+  }
 });

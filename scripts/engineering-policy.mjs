@@ -5,6 +5,10 @@ const CLASSIFICATIONS = ["review-only", "standard", "protected"];
 const PRECEDENCE = new Map(CLASSIFICATIONS.map((value, index) => [value, index]));
 const RULE_KEYS = ["classification", "id", "patterns", "requiresHumanReview"];
 const POLICY_KEYS = ["rules", "verification", "version"];
+const ALLOWED_VERIFICATION_COMMANDS = new Set([
+  "pnpm test",
+  "pnpm run verify:local",
+]);
 
 function assertExactKeys(value, expected, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -67,6 +71,11 @@ function validatePolicy(policy) {
   assertExactKeys(policy.verification, [...CLASSIFICATIONS].sort(), "policy verification");
   for (const classification of CLASSIFICATIONS) {
     validateStringArray(policy.verification[classification], `verification.${classification}`);
+    for (const command of policy.verification[classification]) {
+      if (!ALLOWED_VERIFICATION_COMMANDS.has(command)) {
+        throw new Error(`verification command is not permitted: ${command}`);
+      }
+    }
   }
   if (!policy.verification.protected.includes("pnpm run verify:local")) {
     throw new Error("protected verification must include pnpm run verify:local");
