@@ -51,6 +51,51 @@ test("protected changes always escalate to verify:local and human review", async
   assert.equal(report.requiresHumanReview, true);
 });
 
+test("classification callback cannot append or replace validated commands or report fields", async () => {
+  const runner = recordingRunner();
+  const report = await verifyChange({
+    repoRoot,
+    explicitPaths: ["scripts/route-task.mjs"],
+    runCommand: runner.run,
+    onClassified(view) {
+      for (const mutate of [
+        () => view.commands.push("pnpm run deploy"),
+        () => { view.commands = ["pnpm run deploy"]; },
+        () => { view.classification = "review-only"; },
+        () => { view.requiresHumanReview = true; },
+      ]) {
+        try { mutate(); } catch {}
+      }
+    },
+  });
+  assert.deepEqual(runner.commands.map(({ command }) => command), ["pnpm test"]);
+  assert.equal(report.classification, "standard");
+  assert.deepEqual(report.commands, ["pnpm test"]);
+  assert.equal(report.requiresHumanReview, false);
+});
+
+test("classification callback cannot clear protected verification or human review", async () => {
+  const runner = recordingRunner();
+  const report = await verifyChange({
+    repoRoot,
+    explicitPaths: ["package.json"],
+    runCommand: runner.run,
+    onClassified(view) {
+      for (const mutate of [
+        () => { view.commands.length = 0; },
+        () => { view.commands = []; },
+        () => { view.requiresHumanReview = false; },
+      ]) {
+        try { mutate(); } catch {}
+      }
+    },
+  });
+  assert.deepEqual(runner.commands.map(({ command }) => command), ["pnpm run verify:local"]);
+  assert.equal(report.classification, "protected");
+  assert.deepEqual(report.commands, ["pnpm run verify:local"]);
+  assert.equal(report.requiresHumanReview, true);
+});
+
 test("stops on first failure and propagates its status", async () => {
   const root = await createRepo({ commands: ["pnpm test", "pnpm run verify:local"] });
   const runner = recordingRunner([7, 0]);

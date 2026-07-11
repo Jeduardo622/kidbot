@@ -38,6 +38,20 @@ function defaultRunCommand(command, options) {
   return spawnSync(command, options);
 }
 
+function immutableClassification(source) {
+  return Object.freeze({
+    classification: source.classification,
+    paths: Object.freeze([...source.paths]),
+    matches: Object.freeze(source.matches.map((match) => Object.freeze({
+      path: match.path,
+      rules: Object.freeze([...match.rules]),
+      classification: match.classification,
+    }))),
+    commands: Object.freeze([...source.commands]),
+    requiresHumanReview: source.requiresHumanReview,
+  });
+}
+
 export async function verifyChange({ repoRoot, base, explicitPaths, runCommand = defaultRunCommand, onClassified, onCommand } = {}) {
   const resolvedRoot = path.resolve(repoRoot ?? process.cwd());
   const paths = await resolveScope({ repoRoot: resolvedRoot, base, explicitPaths });
@@ -49,11 +63,12 @@ export async function verifyChange({ repoRoot, base, explicitPaths, runCommand =
     if (explicitPaths?.length) throw new TaskInputError(error.message, { cause: error });
     throw error;
   }
-  onClassified?.(routed);
+  const classification = immutableClassification(routed);
+  onClassified?.(immutableClassification(classification));
 
   const executedCommands = [];
   let status = 0;
-  for (const command of routed.commands) {
+  for (const command of classification.commands) {
     onCommand?.(command);
     const result = runCommand(command, {
       cwd: resolvedRoot,
@@ -67,7 +82,7 @@ export async function verifyChange({ repoRoot, base, explicitPaths, runCommand =
   }
 
   return {
-    ...routed,
+    ...classification,
     executedCommands,
     status,
     passed: status === 0,
