@@ -59,6 +59,9 @@ jobs:
       - name: Run provider preflight config check
         run: pnpm run smoke:provider-preflight:ci
 
+      - name: Run root smoke-script tests
+        run: pnpm run test:root
+
       - name: Build web-widget
         run: pnpm --filter @kidbot/web-widget run build
 

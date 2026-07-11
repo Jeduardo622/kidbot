@@ -13,9 +13,15 @@ const runRootNodeTests = () => {
   if (rootTestFiles.length === 0) {
     return 0;
   }
-  const result = spawnSync(process.execPath, ['--test', ...rootTestFiles], { stdio: 'inherit' });
+  const result = spawnSync(process.execPath, ['--import', 'tsx', '--test', ...rootTestFiles], {
+    stdio: 'inherit'
+  });
   return result.status ?? 0;
 };
+
+if (process.argv.includes('--root-only')) {
+  process.exit(runRootNodeTests());
+}
 
 const resolvePathCommand = (name) => {
   const pathValue = process.env.PATH ?? '';

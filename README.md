@@ -19,6 +19,7 @@ The `dev` script runs the widget (Vite), MCP server, and agent service together.
 
 ### Verification
 
+- Authoritative local verification: `pnpm run verify:local` (lint, typecheck, package and root tests, CI-safe provider preflight, and secured-posture smoke; no production secrets required)
 - Authoritative recursive test run (packages with a `test` script): `pnpm -r --if-present run test`
 - MCP compatibility smoke test (not included in recursive `test`): `pnpm --filter mcp-server run test:compat`
 - CI-safe provider preflight config check: `pnpm run smoke:provider-preflight:ci`
