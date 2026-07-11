@@ -23,7 +23,10 @@
     "smoke:secured-posture": "node ./scripts/smoke-secured-posture.mjs",
     "typecheck": "node ./scripts/run-typecheck.mjs",
     "test": "node ./scripts/run-test.mjs",
-    "test:all": "cross-env CI=1 pnpm -r --if-present run test && node --import tsx --test tests/zero-install.test.mjs tests/provider-preflight-smoke-script.test.mjs tests/production-mcp-story-panels-smoke-script.test.mjs tests/production-widget-dist-preflight-smoke-script.test.mjs tests/production-widget-story-panels-smoke-script.test.mjs tests/railway-provider-roundtrip-smoke-script.test.mjs && pnpm --filter mcp-server run test:compat"
+    "test:root": "node ./scripts/run-test.mjs --root-only",
+    "test:all": "cross-env CI=1 pnpm -r --if-present run test && pnpm run test:root && pnpm --filter mcp-server run test:compat",
+    "verify:local": "cross-env STRICT_VERIFY=1 pnpm run verify:local:strict",
+    "verify:local:strict": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm --filter @kidbot/mcp-server run test:compat && pnpm run smoke:provider-preflight:ci && pnpm run smoke:secured-posture"
   },
   "devDependencies": {
     "@types/node": "^20.12.7",
