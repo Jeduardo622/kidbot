@@ -207,10 +207,14 @@ export function classifyPaths({ repoRoot, paths, policy } = {}) {
     expressions: rule.patterns.map(globToRegExp),
   }));
   const matches = normalizedPaths.map((candidate) => {
-    const matchingRules = compiledRules
+    const explicitMatches = compiledRules
       .filter((rule) => rule.expressions.some((expression) => expression.test(candidate)))
       .sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
-    if (matchingRules.length === 0) throw new Error(`path is not covered by policy: ${candidate}`);
+    const matchingRules = explicitMatches.length > 0 ? explicitMatches : [{
+      id: "default-standard",
+      classification: "standard",
+      requiresHumanReview: false,
+    }];
     return {
       path: candidate,
       rules: matchingRules.map((rule) => rule.id),

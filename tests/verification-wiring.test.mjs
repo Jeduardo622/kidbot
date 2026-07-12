@@ -38,6 +38,6 @@ test('test:all delegates root test discovery to test:root', async () => {
 test('CI delegates root smoke-script tests to verify-change', async () => {
   const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
 
-  assert.match(workflow, /name: Verify engineering change\s+if: env\.HARNESS_CLASSIFICATION != 'review-only'\s+run: pnpm run verify-change/);
+  assert.match(workflow, /name: Verify engineering change\s+run: pnpm run verify-change/);
   assert.doesNotMatch(workflow, /name: Run root smoke-script tests/);
 });

@@ -93,14 +93,15 @@ test("rejects invalid options, repository-external paths, and mixed base mode", 
   }
 });
 
-test("rejects nonexistent and uncovered explicit paths with exit 2", async () => {
+test("rejects nonexistent explicit paths with exit 2 and defaults unknown files to standard", async () => {
   const root = await createGitRepo();
   await mkdir(path.join(root, "docs"));
   await writeFile(path.join(root, "notes.txt"), "not covered\n");
-  for (const candidate of ["missing.mjs", "notes.txt"]) {
-    const result = await runCli([candidate], { cwd: root });
-    assert.equal(result.code, 2, `${candidate}: ${result.stderr}`);
-  }
+  const missing = await runCli(["missing.mjs"], { cwd: root });
+  assert.equal(missing.code, 2, missing.stderr);
+  const unknown = await runCli(["--json", "notes.txt"], { cwd: root });
+  assert.equal(unknown.code, 0, unknown.stderr);
+  assert.equal(JSON.parse(unknown.stdout).classification, "standard");
 });
 
 test("expands explicit directories deterministically and excludes ignored content", async () => {
@@ -109,11 +110,14 @@ test("expands explicit directories deterministically and excludes ignored conten
   await mkdir(path.join(root, "docs", "node_modules"), { recursive: true });
   await writeFile(path.join(root, "docs", "b.md"), "b\n");
   await writeFile(path.join(root, "docs", "a.md"), "a\n");
+  await writeFile(path.join(root, "docs", "art.svg"), "<svg/>\n");
+  await writeFile(path.join(root, "docs", "custom.unknown"), "custom\n");
   await writeFile(path.join(root, ".gitignore"), "node_modules/\n");
   await writeFile(path.join(root, "docs", "node_modules", "ignored.mjs"), "ignored\n");
   const result = await runCli(["--json", "docs"], { cwd: root });
   assert.equal(result.code, 0, result.stderr);
-  assert.deepEqual(JSON.parse(result.stdout).paths, ["docs/a.md", "docs/b.md"]);
+  assert.deepEqual(JSON.parse(result.stdout).paths, ["docs/a.md", "docs/art.svg", "docs/b.md", "docs/custom.unknown"]);
+  assert.equal(JSON.parse(result.stdout).classification, "standard");
 });
 
 test("includes only-untracked and mixed untracked Git scope", async () => {

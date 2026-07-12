@@ -78,6 +78,15 @@ test("classifies ordinary source as standard", async () => {
   ]);
 });
 
+test("uses deterministic standard fallback for SVG and unknown extensions", async () => {
+  const policy = await loadEngineeringPolicy({ repoRoot });
+  for (const candidate of ["apps/web-widget/src/art.svg", "assets/custom.kidbotasset"]) {
+    const result = classifyPaths({ repoRoot, paths: [candidate], policy });
+    assert.equal(result.classification, "standard");
+    assert.deepEqual(result.matches[0].rules, ["default-standard"]);
+  }
+});
+
 test("uses protected over standard over review-only precedence", async () => {
   const policy = await loadEngineeringPolicy({ repoRoot });
   const standardMixed = classifyPaths({

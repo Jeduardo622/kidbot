@@ -46,7 +46,8 @@ test('CI resolves a safe Git base and enforces routing and verification', async 
   assert.match(workflow, /node scripts\/export-harness-classification\.mjs harness-route\.json >> "\$GITHUB_ENV"/);
   assert.match(workflow, /if: env\.HARNESS_CLASSIFICATION == 'review-only'\s+run: pnpm run verify:local/);
   assert.equal((workflow.match(/run: pnpm run verify:local/g) || []).length, 1);
-  assert.match(workflow, /if: env\.HARNESS_CLASSIFICATION != 'review-only'\s+run: pnpm run verify-change/);
+  assert.match(workflow, /name: Verify engineering change\s+run: pnpm run verify-change/);
+  assert.doesNotMatch(workflow, /if: env\.HARNESS_CLASSIFICATION != 'review-only'/);
   assert.match(workflow, /pnpm run verify-change -- --base "\$HARNESS_BASE"/);
   assert.doesNotMatch(workflow, /pnpm run smoke:(?:production|railway)/);
   for (const duplicatedStep of [

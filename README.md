@@ -41,6 +41,8 @@ Documentation-only (`review-only`) changes still receive the full `verify:local`
 
 Explicit paths may be files or existing directories. Directories expand recursively and deterministically to tracked and nonignored untracked files; ignored generated content such as `node_modules` is excluded. A new file can be pre-routed by its existing containing directory, while nonexistent paths remain invalid. Git-derived routing also includes nonignored untracked files.
 
+Files that match no explicit policy rule, including SVG and project-specific extensions, receive the deterministic `default-standard` fallback. Explicit protected and review-only rules still take precedence, so Markdown is not upgraded by a catch-all standard pattern.
+
 Run the exact secret-free harness suite with `pnpm run test:harness`. Review-only verification selects this focused command locally; CI additionally supplies the full baseline.
 
 `CODEOWNERS` marks governance, CI, service boundaries, and deployment/data surfaces for `@Jeduardo622`. The verifier's `human review: required` flag is evidence only: enforcement requires GitHub branch protection configured to require code-owner review. Repository scripts cannot grant or self-approve that review.

@@ -26,6 +26,8 @@ Review-only changes receive the full `verify:local` CI baseline through a fail-c
 
 Review-only local verification runs `pnpm run test:harness`. Existing explicit directories are expanded to tracked and nonignored untracked files; Git-derived scope also includes nonignored untracked files. Route a planned new file through its existing containing directory.
 
+Unmatched application extensions receive the internal `default-standard` classification. Do not add catch-all standard policy patterns that would upgrade files explicitly covered as review-only.
+
 The human-review flag and CODEOWNERS entries provide evidence and ownership routing only. GitHub branch protection must require code-owner review to enforce approval; no repository script may self-approve or treat its own output as approval.
 
 Report verification in separate categories: executed, skipped, blocked, and secret-dependent. Include exact commands and outcomes, never describe an unexecuted check as passing, and identify residual risk or the next unblock step.
