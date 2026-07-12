@@ -72,6 +72,10 @@ export async function loadEvaluationDatasets({ repoRoot, caseDir } = {}) {
 }
 
 function outcome(id, passed, message) { return { id, category: CATEGORIES[id] ?? "contract", passed, message }; }
+function isSingleSvgDocument(value) {
+  const match = String(value ?? "").match(/^\s*(?:<\?xml\s[^?]*\?>\s*)?<svg\b[^>]*>([\s\S]*?)<\/svg>\s*$/i);
+  return Boolean(match) && !/<\/?\s*svg\b/i.test(match[1]);
+}
 function ageProxyPasses(ageBand, request, output, expectedBlocked) {
   if (expectedBlocked) return output?.blocked === true;
   const limits = { "4-6": { chars: 600, word: 9 }, "7-9": { chars: 1200, word: 11 }, "10-12": { chars: 2400, word: 14 } };
@@ -95,9 +99,9 @@ function check(tool, id, request, output, expectedBlocked, ageBand) {
   if (id === "story-panel-bounds") return outcome(id, Array.isArray(output?.panels) && output.panels.length > 0 && output.panels.length <= 8 && output.panels.every(p => p && nonempty(p.title) && nonempty(p.caption) && nonempty(p.imagePrompt) && p.title.length <= 200 && p.caption.length <= 800 && p.imagePrompt.length <= 800), "panel count and text fields must be bounded");
   if (id === "story-panel-order") return outcome(id, Array.isArray(output?.panels) && output.panels.length > 0 && output.panels.every((p, i) => p && nonempty(p.title) && new RegExp(`(?:panel\\s*)?${i + 1}\\b`, "i").test(p.title)), "panel titles must identify sequential order");
   if (id === "story-null-image-urls") return outcome(id, output?.panels?.every(p => p.imageUrl == null) === true, "local image URLs must be null");
-  if (id === "coloring-svg") return outcome(id, /^\s*(?:<\?xml\s[^?]*\?>\s*)?<svg\b[\s\S]*<\/svg>\s*$/i.test(String(output?.svg ?? "")), "one complete SVG document is required; an XML declaration is allowed");
+  if (id === "coloring-svg") return outcome(id, isSingleSvgDocument(output?.svg), "exactly one complete SVG document is required; an XML declaration and whitespace are allowed");
   if (id === "coloring-viewbox") return outcome(id, /<svg\b[^>]*\bviewBox=["']0\s+0\s+1024\s+1024["']/i.test(String(output?.svg ?? "")), "SVG root requires viewBox 0 0 1024 1024");
-  if (id === "coloring-forbidden-elements") return outcome(id, !/<(?:script|foreignObject|image|a|style)\b|\son[a-z]+\s*=|\b(?:href|xlink:href)\s*=/i.test(String(output?.svg ?? "")), "scripts, embedded content, links, styles, and event handlers must be absent");
+  if (id === "coloring-forbidden-elements") return outcome(id, !/<\s*(?:script|foreignObject|image|style|a|iframe|object|embed|audio|video|canvas|animate|set)\b|\son[a-z]+\s*=|\b(?:href|xlink:href)\s*=|url\s*\(|\sstyle\s*=/i.test(String(output?.svg ?? "")), "service-forbidden elements, links, styles, URL references, and event handlers must be absent");
   if (id === "science-fields") return outcome(id, ["title","objective","materials","steps","prediction","explanation","supervision"].every(k => output?.[k] != null), "complete science fields required");
   if (id === "science-bounds") return outcome(id, Array.isArray(output?.materials) && output.materials.length <= 20 && Array.isArray(output?.steps) && output.steps.length <= 20, "science lists bounded");
   if (id === "science-prediction") return outcome(id, output?.prediction && typeof output.prediction === "object", "prediction object required");
