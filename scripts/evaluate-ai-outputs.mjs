@@ -15,6 +15,16 @@ const CATEGORIES = Object.freeze({
   "age-proxy": "age-proxy", "bounded-text": "completeness", "story-panel-bounds": "completeness", "coloring-svg": "completeness", "science-bounds": "completeness", "science-supervision": "completeness",
 });
 const UNSAFE = /\b(?:weapon|bomb|poison|suicide|self-harm|kill|graphic violence|sexual)\b/i;
+const CORPUS_HYGIENE_PATTERNS = Object.freeze([
+  ["external URL", /(?:https?:\/\/|www\.)[^\s"']+/i],
+  ["email address", /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i],
+  ["phone number", /(?:\+?1[\s.-]?)?(?:\(\d{3}\)|\d{3})[\s.-]\d{3}[\s.-]\d{4}\b/],
+  ["government identifier", /\b\d{3}-\d{2}-\d{4}\b/],
+  ["street address", /\b\d{1,6}\s+[A-Za-z0-9][A-Za-z0-9 .'-]{1,50}\s(?:Street|St|Road|Rd|Avenue|Ave|Boulevard|Blvd|Lane|Ln|Drive|Dr)\b/i],
+  ["secret", /\b(?:api[_-]?key|access[_-]?token|secret|password)\s*[:=]\s*[^\s,}\]]+/i],
+  ["production identifier", /\b(?:prod_(?:user|tenant|project|account)|production-(?:user|tenant|project|account))[-_a-z0-9]*\b/i],
+  ["opaque production identifier", /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/i],
+]);
 const COLORING_ELEMENTS = new Set(["svg", "g", "path", "circle", "ellipse", "rect", "line", "polyline", "polygon"]);
 
 function exactKeys(value, keys) {
@@ -34,6 +44,13 @@ function freeze(value) {
 function assertInside(parent, child, label) {
   const relative = path.relative(parent, child);
   if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error(`${label} is outside repository`);
+}
+
+function assertCorpusHygiene(value, filename) {
+  const serialized = JSON.stringify(value);
+  for (const [label, pattern] of CORPUS_HYGIENE_PATTERNS) {
+    if (pattern.test(serialized)) throw new Error(`${filename} corpus hygiene rejected ${label}`);
+  }
 }
 
 export async function loadEvaluationDatasets({ repoRoot, caseDir } = {}) {
@@ -58,6 +75,7 @@ export async function loadEvaluationDatasets({ repoRoot, caseDir } = {}) {
     if (stat.isSymbolicLink() || !stat.isFile() || stat.nlink !== 1) throw new Error(`${filename} must be a regular file with exactly one physical link, not a symbolic or hard link`);
     const physicalFile = await realpath(file); assertInside(physicalCases, physicalFile, "dataset file");
     let data; try { data = JSON.parse(await readFile(file, "utf8")); } catch (error) { throw new Error(`Invalid JSON in ${filename}: ${error.message}`); }
+    assertCorpusHygiene(data, filename);
     if (!exactKeys(data, ["version", "tool", "cases"])) throw new Error(`${filename} has invalid exact keys`);
     if (data.version !== 1 || data.tool !== tool || !Array.isArray(data.cases) || data.cases.length === 0) throw new Error(`${filename} has invalid version, tool, or cases`);
     for (const item of data.cases) {
@@ -152,4 +170,9 @@ export async function evaluateDatasets({ datasets, agentFunctions = {} }) {
   const cases = [];
   for (const dataset of datasets) for (const caseDefinition of dataset.cases) cases.push(await evaluateCase({dataset, caseDefinition, agentFunctions}));
   return summarizeCaseResults(cases);
+}
+
+export function formatEvaluationReport(result, { json = false } = {}) {
+  if (json) return `${JSON.stringify(result, null, 2)}\n`;
+  return `evaluation: ${result?.passed === true ? "passed" : "failed"}\n`;
 }

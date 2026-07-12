@@ -12,7 +12,7 @@ import { generateColoringOutline } from "../apps/agent-service/src/agents/imageA
 import { planExperiment } from "../apps/agent-service/src/agents/experimentAgent.ts";
 import { validateColoringSvg } from "../apps/agent-service/src/svgSafety.ts";
 
-const { evaluateCase, evaluateDatasets, loadEvaluationDatasets } = evaluator;
+const { evaluateCase, evaluateDatasets, formatEvaluationReport, loadEvaluationDatasets } = evaluator;
 
 const realAgentFunctions = {
   voice_chat: craftVoiceReply,
@@ -51,11 +51,41 @@ test("real local evaluation is provider-free, deterministic, and passes exact th
   const first = await evaluateDatasets({ datasets, agentFunctions: guarded });
   const second = await evaluateDatasets({ datasets, agentFunctions: guarded });
   assert.deepEqual(first, second);
-  assert.equal(JSON.stringify(first), JSON.stringify(second));
+  const firstJson = formatEvaluationReport(first, { json: true });
+  const secondJson = formatEvaluationReport(second, { json: true });
+  assert.equal(firstJson, secondJson);
+  assert.equal(firstJson, `${JSON.stringify(first, null, 2)}\n`);
   assert.equal(first.passed, true);
   assert.ok(first.cases.every(item => item.score >= 85 && item.hardFailures.length === 0));
   assert.ok(first.tools.every(item => item.mean >= 90));
   assert.ok(first.overallMean >= 90);
+});
+
+test("dataset loader rejects PII and production identifiers anywhere in serialized corpus content", async () => {
+  for (const [label, value] of [
+    ["email", "child@example.test"],
+    ["phone", "+1 (555) 123-4567"],
+    ["government id", "123-45-6789"],
+    ["street address", "123 Maple Street"],
+    ["production tenant", "production-tenant-kidbot-42"],
+    ["production id", "prod_user_7f3a91"],
+  ]) {
+    const root = await repo(async ({ dir }) => {
+      const data = dataset("voice_chat");
+      data.cases[0].request.text = `Explain rainbows ${value}`;
+      await writeFile(path.join(dir, "voice.json"), JSON.stringify(data));
+    });
+    await assert.rejects(loadEvaluationDatasets({ repoRoot: root }), /corpus hygiene|personal data|production identifier/i, label);
+  }
+});
+
+test("corpus hygiene permits benign text that only mentions production or short emergency numbers", async () => {
+  const root = await repo(async ({ dir }) => {
+    const data = dataset("voice_chat");
+    data.cases[0].request.text = "Explain the production of a school play and when to call 911";
+    await writeFile(path.join(dir, "voice.json"), JSON.stringify(data));
+  });
+  await assert.doesNotReject(loadEvaluationDatasets({ repoRoot: root }));
 });
 
 const files = { voice_chat: "voice.json", story_panels: "story.json", coloring_outline: "coloring.json", science_sim: "science.json" };
