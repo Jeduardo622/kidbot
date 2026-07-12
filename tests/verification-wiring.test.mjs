@@ -45,6 +45,9 @@ test('CI delegates root smoke-script tests to verify-change', async () => {
   assert.match(workflow, /name: Verify engineering change\s+run: pnpm run verify-change/);
   assert.doesNotMatch(workflow, /name: Run root smoke-script tests/);
   assert.doesNotMatch(workflow, /pnpm run eval:ai|evaluate-ai-outputs|OPENAI_API_KEY/);
+  assert.doesNotMatch(workflow, /GITHUB_(?:ACTIONS|STEP_SUMMARY)\s*:/);
+  assert.doesNotMatch(workflow, /actions\/upload-artifact|pull-requests:\s*write|contents:\s*write|github-script|issues:\s*write/i);
+  assert.equal((workflow.match(/run: pnpm run verify-change/g) ?? []).length, 1);
 });
 
 test('deterministic evaluator command is allowlisted by engineering policy', async () => {

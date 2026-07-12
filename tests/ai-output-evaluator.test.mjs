@@ -144,6 +144,80 @@ test("job summary format accepts the real evaluator result and baseline comparis
   assert.match(markdown, /- Unchanged metrics: 22\n$/);
 });
 
+test("job summary integration writes once from the single evaluation result", async () => {
+  const repoRoot = path.resolve(".");
+  const result = await evaluator.evaluateLocally(repoRoot);
+  let evaluations = 0;
+  const writes = [];
+  const code = await evaluator.runCli([], {
+    repoRoot,
+    evaluate: async () => { evaluations += 1; return structuredClone(result); },
+    summaryEnv: { GITHUB_ACTIONS: "true", GITHUB_STEP_SUMMARY: path.join(tmpdir(), "native-summary.md") },
+    writeSummary: async value => { writes.push(value); return { written: true }; },
+    stdout: () => {},
+  });
+  assert.equal(code, 0);
+  assert.equal(evaluations, 1);
+  assert.equal(writes.length, 1);
+  assert.deepEqual(writes[0].result, result);
+  assert.equal(writes[0].baseline.unchangedCount, 22);
+  assert.equal(writes[0].baseline.passed, true);
+});
+
+test("job summary integration preserves comparison status and inactive no-op behavior", async () => {
+  const repoRoot = path.resolve(".");
+  const passing = await evaluator.evaluateLocally(repoRoot);
+  const regression = structuredClone(passing);
+  regression.cases[0].score -= 1;
+  const datasets = await loadEvaluationDatasets({ repoRoot });
+  const positiveBaseline = buildBaselineManifest({ datasets, result: passing });
+  positiveBaseline.cases[0].score = 99;
+  positiveBaseline.tools.find(item => item.tool === positiveBaseline.cases[0].tool).mean = 99.75;
+  positiveBaseline.overallMean = 99.94;
+  for (const [result, expected, loadBaseline, expectedChanged] of [[passing, true, undefined, 0], [passing, true, async () => positiveBaseline, 3], [regression, false, undefined, 1]]) {
+    const writes = [];
+    const code = await evaluator.runCli([], {
+      repoRoot,
+      datasets,
+      evaluate: async () => structuredClone(result),
+      loadBaseline,
+      summaryEnv: { GITHUB_ACTIONS: "true", GITHUB_STEP_SUMMARY: path.join(tmpdir(), "native-summary.md") },
+      writeSummary: async value => { writes.push(value); return { written: true }; },
+      stdout: () => {},
+    });
+    assert.equal(code, expected ? 0 : 1);
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].baseline.passed, expected);
+    const changed = [...writes[0].baseline.cases, ...writes[0].baseline.tools, writes[0].baseline.overall].filter(item => item.delta !== 0);
+    assert.equal(changed.length, expectedChanged);
+  }
+  for (const summaryEnv of [{}, { GITHUB_ACTIONS: "true" }, { GITHUB_ACTIONS: "TRUE", GITHUB_STEP_SUMMARY: path.join(tmpdir(), "native-summary.md") }]) {
+    let writes = 0;
+    await evaluator.runCli([], { repoRoot, evaluate: async () => structuredClone(passing), summaryEnv, writeSummary: async () => { writes += 1; }, stdout: () => {} });
+    assert.equal(writes, 0);
+  }
+});
+
+test("job summary precedence returns primary failures before writing and sanitizes summary failures", async () => {
+  const repoRoot = path.resolve(".");
+  const passing = await evaluator.evaluateLocally(repoRoot);
+  const active = { GITHUB_ACTIONS: "true", GITHUB_STEP_SUMMARY: path.join(tmpdir(), "secret-summary.md") };
+  let writes = 0;
+  const absoluteFailure = structuredClone(passing); absoluteFailure.passed = false; absoluteFailure.overallMean = 89;
+  assert.equal(await evaluator.runCli([], { repoRoot, evaluate: async () => absoluteFailure, summaryEnv: active, writeSummary: async () => { writes += 1; }, stdout: () => {} }), 1);
+  assert.equal(writes, 0);
+  const missingRoot = await mkdtemp(path.join(tmpdir(), "kidbot-summary-missing-baseline-"));
+  try {
+    assert.equal(await evaluator.runCli([], { repoRoot: missingRoot, datasets: await loadEvaluationDatasets({ repoRoot }), evaluate: async () => passing, summaryEnv: active, writeSummary: async () => { writes += 1; }, stderr: () => {} }), 2);
+  } finally { await rm(missingRoot, { recursive: true, force: true }); }
+  assert.equal(writes, 0);
+  let stderr = "";
+  const code = await evaluator.runCli([], { repoRoot, evaluate: async () => passing, summaryEnv: active, writeSummary: async () => { throw new Error(`payload ${active.GITHUB_STEP_SUMMARY}`); }, stdout: () => {}, stderr: value => { stderr += value; } });
+  assert.equal(code, 3);
+  assert.equal(stderr, "evaluation: summary error\n");
+  assert.doesNotMatch(stderr, /payload|secret-summary|AI output/i);
+});
+
 test("job summary format cross-binds comparison metrics identities regressions and pass state", () => {
   const mutations = [
     value => { value.regressions = []; },
