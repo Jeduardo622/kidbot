@@ -13,8 +13,135 @@ import { planStory } from "../apps/agent-service/src/agents/storyAgent.ts";
 import { generateColoringOutline } from "../apps/agent-service/src/agents/imageAgent.ts";
 import { planExperiment } from "../apps/agent-service/src/agents/experimentAgent.ts";
 import { validateColoringSvg } from "../apps/agent-service/src/svgSafety.ts";
+import { appendEvaluationJobSummary, formatEvaluationJobSummary, writeEvaluationJobSummary } from "../scripts/ai-evaluation-job-summary.mjs";
 
 const { evaluateCase, evaluateDatasets, formatEvaluationReport, loadEvaluationDatasets } = evaluator;
+
+const summaryResult = {
+  version: 1,
+  cases: [
+    { id: "alpha-case", tool: "voice_chat", ageBand: "4-6", score: 90, hardFailures: [], passed: true },
+    { id: "zeta-case", tool: "story_panels", ageBand: "7-9", score: 95, hardFailures: [], passed: true },
+  ],
+  tools: [
+    { tool: "voice_chat", mean: 90, passed: true },
+    { tool: "story_panels", mean: 95, passed: true },
+  ],
+  overallMean: 92.5,
+  passed: true,
+  thresholds: { case: 85, toolMean: 90, overallMean: 90 },
+};
+const fp = "a".repeat(64);
+const summaryComparison = (overrides = {}) => ({
+  fingerprint: fp,
+  cases: [
+    { scope: "case", id: "zeta-case", baseline: 95, current: 95, delta: 0 },
+    { scope: "case", id: "alpha-case", baseline: 89, current: 90, delta: 1 },
+  ],
+  tools: [
+    { scope: "tool", id: "voice_chat", baseline: 91, current: 90, delta: -1 },
+    { scope: "tool", id: "story_panels", baseline: 95, current: 95, delta: 0 },
+  ],
+  overall: { scope: "overall", baseline: 92, current: 92.5, delta: 0.5 },
+  unchangedCount: 2,
+  regressions: [{ scope: "tool", id: "voice_chat", baseline: 91, current: 90, delta: -1 }],
+  passed: false,
+  ...overrides,
+});
+
+test("job summary format emits canonical changed-only markdown", () => {
+  const expected = `## AI output evaluation: Failed\n\n- Fingerprint: \`${fp}\`\n- Absolute totals: cases=2 tools=2 overall=92.50\n- Changed metrics:\n  - case/alpha\\-case: baseline=89.00 current=90.00 delta=+1.00\n  - tool/voice\\_chat: baseline=91.00 current=90.00 delta=-1.00\n  - overall: baseline=92.00 current=92.50 delta=+0.50\n- Drift reasons: none\n- Unchanged metrics: 2\n`;
+  assert.equal(formatEvaluationJobSummary({ result: summaryResult, baseline: summaryComparison() }), expected);
+  assert.equal(formatEvaluationJobSummary({ result: summaryResult, baseline: summaryComparison() }), expected);
+  assert.equal(Buffer.from(expected).at(-1), 10);
+  assert.equal(expected.endsWith("\n\n"), false);
+});
+
+test("job summary markdown covers zero, positive, regression, fingerprint, identity, and mixed changes", () => {
+  const zero = summaryComparison({ cases: [], tools: [], overall: { scope: "overall", baseline: 92.5, current: 92.5, delta: 0 }, unchangedCount: 5, regressions: [], passed: true });
+  assert.match(formatEvaluationJobSummary({ result: summaryResult, baseline: zero }), /^## AI output evaluation: Passed/m);
+  assert.doesNotMatch(formatEvaluationJobSummary({ result: summaryResult, baseline: zero }), /baseline=92\.50/);
+  const drift = summaryComparison({ regressions: [
+    { scope: "fingerprint", baseline: "b".repeat(64), current: fp },
+    { scope: "case", id: "alpha-case", reason: "identity drift" },
+  ] });
+  const text = formatEvaluationJobSummary({ result: summaryResult, baseline: drift });
+  assert.match(text, /fingerprint: fingerprint drift/);
+  assert.match(text, /case\/alpha\\-case: identity drift/);
+});
+
+test("job summary markdown neutralizes injected dynamic text and enforces exact byte bound", () => {
+  const attack = "# head | [link](https://evil.test) ![img](x) <script>alert(1)</script>\r\nTOKEN=supersecret {\"request\":\"payload\"} C:\\private\\file\0";
+  const hostile = summaryComparison({ regressions: [{ scope: "case", id: "alpha-case", reason: attack }] });
+  const text = formatEvaluationJobSummary({ result: summaryResult, baseline: hostile });
+  assert.doesNotMatch(text, /:\s+# head/);
+  for (const literal of ["| [link]", "![img]", "<script>", "\r", "\nTOKEN", "TOKEN=supersecret", "{\"request\":\"payload\"}", "C:\\private\\file", "\0"]) assert.equal(text.includes(literal), false, literal);
+  assert.doesNotMatch(text, /truncat/i);
+
+  const fixed = Buffer.byteLength(formatEvaluationJobSummary({ result: summaryResult, baseline: summaryComparison({ regressions: [{ scope: "case", id: "alpha-case", reason: "" }] }) }));
+  const exact = summaryComparison({ regressions: [{ scope: "case", id: "alpha-case", reason: "x".repeat(32768 - fixed) }] });
+  assert.equal(Buffer.byteLength(formatEvaluationJobSummary({ result: summaryResult, baseline: exact })), 32768);
+  exact.regressions[0].reason += "x";
+  assert.throws(() => formatEvaluationJobSummary({ result: summaryResult, baseline: exact }), /32 KiB/);
+});
+
+test("job summary activation requires exact GitHub environment", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "kidbot-summary-activation-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const target = path.join(root, "summary.md");
+  await writeFile(target, "before\n");
+  for (const env of [{}, { GITHUB_ACTIONS: "TRUE", GITHUB_STEP_SUMMARY: target }, { GITHUB_ACTIONS: "true" }, { GITHUB_ACTIONS: "true", GITHUB_STEP_SUMMARY: "relative.md" }]) {
+    assert.deepEqual(await writeEvaluationJobSummary({ result: summaryResult, baseline: summaryComparison(), env }), { written: false });
+    assert.equal(await readFile(target, "utf8"), "before\n");
+  }
+  assert.deepEqual(await writeEvaluationJobSummary({ result: summaryResult, baseline: summaryComparison(), env: { GITHUB_ACTIONS: "true", GITHUB_STEP_SUMMARY: target } }), { written: true });
+  assert.match(await readFile(target, "utf8"), /^before\n## AI output evaluation:/);
+});
+
+test("job summary path rejects missing directory symlink and hard-link destinations", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "kidbot-summary-path-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const regular = path.join(root, "regular.md");
+  const hard = path.join(root, "hard.md");
+  const symbolic = path.join(root, "symbolic.md");
+  const directory = path.join(root, "directory");
+  await writeFile(regular, "safe\n"); await link(regular, hard); await mkdir(directory);
+  const targets = ["relative.md", path.join(root, "missing.md"), directory, hard];
+  try { await symlink(regular, symbolic); targets.push(symbolic); } catch (error) { if (error.code !== "EPERM") throw error; }
+  for (const target of targets) await assert.rejects(appendEvaluationJobSummary({ summaryPath: target, markdown: "section\n" }), /absolute|existing|regular|link|summary|ENOENT/i);
+  assert.equal(await readFile(regular, "utf8"), "safe\n");
+
+  const outside = path.join(root, "outside"); const linkedParent = path.join(root, "linked-parent");
+  await mkdir(outside); await writeFile(path.join(outside, "summary.md"), "outside\n");
+  if (process.platform === "win32") execFileSync("cmd.exe", ["/d", "/c", "mklink", "/J", linkedParent, outside]);
+  else await symlink(outside, linkedParent, "dir");
+  await assert.rejects(appendEvaluationJobSummary({ summaryPath: path.join(linkedParent, "summary.md"), markdown: "section\n" }), /parent|physical|link|summary/i);
+  assert.equal(await readFile(path.join(outside, "summary.md"), "utf8"), "outside\n");
+});
+
+test("job summary writer preserves content syncs and detects swaps and new links", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "kidbot-summary-writer-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const target = path.join(root, "summary.md");
+  await writeFile(target, "before\n");
+  const phases = [];
+  await appendEvaluationJobSummary({ summaryPath: target, markdown: "section\n", testHooks: { phase: phase => phases.push(phase) } });
+  assert.equal(await readFile(target, "utf8"), "before\nsection\n");
+  assert.deepEqual(phases, ["before-open", "after-open", "after-write", "after-sync", "after-verify"]);
+
+  await writeFile(target, "unchanged\n");
+  await assert.rejects(appendEvaluationJobSummary({ summaryPath: target, markdown: "x\n", testHooks: { phase: phase => { if (phase === "after-open") throw new Error("injected append failure"); } } }), /injected append failure/);
+  assert.equal(await readFile(target, "utf8"), "unchanged\n");
+
+  await writeFile(target, "original\n");
+  const displaced = path.join(root, "displaced.md");
+  await assert.rejects(appendEvaluationJobSummary({ summaryPath: target, markdown: "x\n", testHooks: { phase: async phase => { if (phase === "after-open") { await rename(target, displaced); await writeFile(target, "replacement\n"); } } } }), /identity|summary/i);
+  assert.equal(await readFile(target, "utf8"), "replacement\n");
+
+  await rm(displaced); await writeFile(target, "original\n");
+  const linked = path.join(root, "linked.md");
+  await assert.rejects(appendEvaluationJobSummary({ summaryPath: target, markdown: "x\n", testHooks: { phase: async phase => { if (phase === "after-write") await link(target, linked); } } }), /link|identity|summary/i);
+});
 
 test("baseline refresh refusal rejects failed and nondeterministic evaluations", async t => {
   const root = await mkdtemp(path.join(tmpdir(), "kidbot-refresh-"));
