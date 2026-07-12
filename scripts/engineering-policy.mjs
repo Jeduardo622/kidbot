@@ -18,6 +18,7 @@ const PRECEDENCE = new Map(CLASSIFICATIONS.map((value, index) => [value, index])
 const RULE_KEYS = ["classification", "id", "patterns", "requiresHumanReview"];
 const POLICY_KEYS = ["rules", "verification", "version"];
 const ALLOWED_VERIFICATION_COMMANDS = new Set([
+  "pnpm run test:harness",
   "pnpm run lint",
   "pnpm run typecheck",
   "pnpm test",
@@ -144,6 +145,11 @@ async function gitPaths(repoRoot, args) {
   return parseGitNameStatus(stdout);
 }
 
+async function gitListedPaths(repoRoot, args) {
+  const { stdout } = await execFileAsync("git", args, { cwd: repoRoot, encoding: "utf8", windowsHide: true });
+  return stdout.split("\0").filter(Boolean);
+}
+
 export async function resolveScope({ repoRoot, base, explicitPaths } = {}) {
   if (typeof repoRoot !== "string" || repoRoot.length === 0) throw new Error("repoRoot is required");
   if (base !== undefined && (typeof base !== "string" || base.length === 0)) throw new TaskInputError("base must be a non-empty Git ref");
@@ -157,16 +163,22 @@ export async function resolveScope({ repoRoot, base, explicitPaths } = {}) {
     } catch (error) {
       throw new TaskInputError(error.message, { cause: error });
     }
+    const expanded = [];
     for (const candidate of normalized) {
       try {
         const entry = await stat(path.resolve(repoRoot, candidate));
-        if (!entry.isFile()) throw new TaskInputError(`explicit path is not a file: ${candidate}`);
+        if (entry.isFile()) expanded.push(candidate);
+        else if (entry.isDirectory()) {
+          const files = await gitListedPaths(repoRoot, ["ls-files", "-co", "--exclude-standard", "-z", "--", candidate]);
+          if (files.length === 0) throw new TaskInputError(`explicit directory contains no routable files: ${candidate}`);
+          expanded.push(...files.map((file) => normalizeRepoPath(repoRoot, file)));
+        } else throw new TaskInputError(`explicit path is not a file or directory: ${candidate}`);
       } catch (error) {
         if (error instanceof TaskInputError) throw error;
         throw new TaskInputError(`explicit path does not exist or is unreadable: ${candidate}`, { cause: error });
       }
     }
-    return normalized;
+    return [...new Set(expanded)].sort();
   }
 
   try {
@@ -175,6 +187,7 @@ export async function resolveScope({ repoRoot, base, explicitPaths } = {}) {
     if (base !== undefined) groups.push(await gitPaths(repoRoot, ["diff", ...statusArgs, `${base}...HEAD`, "--"]));
     groups.push(await gitPaths(repoRoot, ["diff", "--cached", ...statusArgs, "--"]));
     groups.push(await gitPaths(repoRoot, ["diff", ...statusArgs, "--"]));
+    groups.push(await gitListedPaths(repoRoot, ["ls-files", "--others", "--exclude-standard", "-z"]));
     const resolved = [...new Set(groups.flat().map((candidate) => normalizeRepoPath(repoRoot, candidate)))].sort();
     if (resolved.length === 0) throw new ScopeResolutionError("Git scope contains no changed paths");
     return resolved;

@@ -65,6 +65,7 @@ jobs:
         run: pnpm run verify:local
 
       - name: Verify engineering change
+        if: env.HARNESS_CLASSIFICATION != 'review-only'
         run: pnpm run verify-change -- --base "$HARNESS_BASE"
 
       - name: Build agent-service

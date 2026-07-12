@@ -19,6 +19,14 @@ test('package exposes routing and verification commands', async () => {
   assert.equal(packageJson.scripts['route-task'], 'node ./scripts/route-task.mjs');
   assert.equal(packageJson.scripts['verify-change'], 'node ./scripts/verify-change.mjs');
   assert.ok(packageJson.scripts['verify:local']);
+  assert.equal(packageJson.scripts['test:harness'], 'node --test tests/engineering-policy.test.mjs tests/route-task.test.mjs tests/verify-change.test.mjs tests/resolve-harness-base.test.mjs tests/export-harness-classification.test.mjs tests/engineering-harness-wiring.test.mjs tests/verification-wiring.test.mjs');
+});
+
+test('CODEOWNERS requires the repository owner on protected governance surfaces', async () => {
+  const owners = await readFile('.github/CODEOWNERS', 'utf8');
+  for (const pattern of ['/.agents/', '/AGENTS.md', '/.github/workflows/', '/scripts/', '/apps/agent-service/', '/apps/mcp-server/']) {
+    assert.match(owners, new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '.*@Jeduardo622'));
+  }
 });
 
 test('CI resolves a safe Git base and enforces routing and verification', async () => {
@@ -38,6 +46,7 @@ test('CI resolves a safe Git base and enforces routing and verification', async 
   assert.match(workflow, /node scripts\/export-harness-classification\.mjs harness-route\.json >> "\$GITHUB_ENV"/);
   assert.match(workflow, /if: env\.HARNESS_CLASSIFICATION == 'review-only'\s+run: pnpm run verify:local/);
   assert.equal((workflow.match(/run: pnpm run verify:local/g) || []).length, 1);
+  assert.match(workflow, /if: env\.HARNESS_CLASSIFICATION != 'review-only'\s+run: pnpm run verify-change/);
   assert.match(workflow, /pnpm run verify-change -- --base "\$HARNESS_BASE"/);
   assert.doesNotMatch(workflow, /pnpm run smoke:(?:production|railway)/);
   for (const duplicatedStep of [

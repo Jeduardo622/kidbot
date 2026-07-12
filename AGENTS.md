@@ -24,4 +24,8 @@ Standard changes run the exact secret-free sequence: lint, typecheck, package an
 
 Review-only changes receive the full `verify:local` CI baseline through a fail-closed, parsed router classification. Standard and protected changes do not repeat this fallback because their selected verification already supplies the broad baseline.
 
+Review-only local verification runs `pnpm run test:harness`. Existing explicit directories are expanded to tracked and nonignored untracked files; Git-derived scope also includes nonignored untracked files. Route a planned new file through its existing containing directory.
+
+The human-review flag and CODEOWNERS entries provide evidence and ownership routing only. GitHub branch protection must require code-owner review to enforce approval; no repository script may self-approve or treat its own output as approval.
+
 Report verification in separate categories: executed, skipped, blocked, and secret-dependent. Include exact commands and outcomes, never describe an unexecuted check as passing, and identify residual risk or the next unblock step.

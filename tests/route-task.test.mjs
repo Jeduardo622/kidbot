@@ -93,14 +93,38 @@ test("rejects invalid options, repository-external paths, and mixed base mode", 
   }
 });
 
-test("rejects nonexistent, directory, and uncovered explicit paths with exit 2", async () => {
+test("rejects nonexistent and uncovered explicit paths with exit 2", async () => {
   const root = await createGitRepo();
   await mkdir(path.join(root, "docs"));
   await writeFile(path.join(root, "notes.txt"), "not covered\n");
-  for (const candidate of ["missing.mjs", "docs", "notes.txt"]) {
+  for (const candidate of ["missing.mjs", "notes.txt"]) {
     const result = await runCli([candidate], { cwd: root });
     assert.equal(result.code, 2, `${candidate}: ${result.stderr}`);
   }
+});
+
+test("expands explicit directories deterministically and excludes ignored content", async () => {
+  const root = await createGitRepo();
+  await mkdir(path.join(root, "docs"));
+  await mkdir(path.join(root, "docs", "node_modules"), { recursive: true });
+  await writeFile(path.join(root, "docs", "b.md"), "b\n");
+  await writeFile(path.join(root, "docs", "a.md"), "a\n");
+  await writeFile(path.join(root, ".gitignore"), "node_modules/\n");
+  await writeFile(path.join(root, "docs", "node_modules", "ignored.mjs"), "ignored\n");
+  const result = await runCli(["--json", "docs"], { cwd: root });
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout).paths, ["docs/a.md", "docs/b.md"]);
+});
+
+test("includes only-untracked and mixed untracked Git scope", async () => {
+  const root = await createGitRepo();
+  await writeFile(path.join(root, "new.mjs"), "export const fresh = true;\n");
+  let result = await runCli(["--json"], { cwd: root });
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout).paths, ["new.mjs"]);
+  await writeFile(path.join(root, "tracked.mjs"), "export const mixed = true;\n");
+  result = await runCli(["--json"], { cwd: root });
+  assert.deepEqual(JSON.parse(result.stdout).paths, ["new.mjs", "tracked.mjs"]);
 });
 
 test("reports missing bases and empty implicit scope as unresolved", async () => {

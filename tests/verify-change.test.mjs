@@ -26,8 +26,8 @@ function recordingRunner(statuses = []) {
 
 test("selects policy commands for review-only, standard, and protected scopes", async () => {
   for (const [candidate, classification, commands, requiresHumanReview] of [
-    ["README.md", "review-only", [], false],
-    ["scripts/route-task.mjs", "standard", ["pnpm run lint", "pnpm run typecheck", "pnpm test", "pnpm --filter @kidbot/mcp-server run test:compat"], false],
+    ["README.md", "review-only", ["pnpm run test:harness"], false],
+    ["apps/web-widget/src/main.tsx", "standard", ["pnpm run lint", "pnpm run typecheck", "pnpm test", "pnpm --filter @kidbot/mcp-server run test:compat"], false],
     ["package.json", "protected", ["pnpm run verify:local"], true],
   ]) {
     const runner = recordingRunner();
@@ -51,11 +51,19 @@ test("protected changes always escalate to verify:local and human review", async
   assert.equal(report.requiresHumanReview, true);
 });
 
+test("review-only runs focused verification and propagates failure", async () => {
+  const runner = recordingRunner([6]);
+  const report = await verifyChange({ repoRoot, explicitPaths: ["README.md"], runCommand: runner.run });
+  assert.deepEqual(runner.commands.map(({ command }) => command), ["pnpm run test:harness"]);
+  assert.equal(report.status, 6);
+  assert.equal(report.passed, false);
+});
+
 test("classification callback cannot append or replace validated commands or report fields", async () => {
   const runner = recordingRunner();
   const report = await verifyChange({
     repoRoot,
-    explicitPaths: ["scripts/route-task.mjs"],
+    explicitPaths: ["apps/web-widget/src/main.tsx"],
     runCommand: runner.run,
     onClassified(view) {
       for (const mutate of [
@@ -110,7 +118,7 @@ test("runner inherits stdio and environment without logging environment values",
   const secret = process.env.VERIFY_CHANGE_TEST_SECRET;
   process.env.VERIFY_CHANGE_TEST_SECRET = "do-not-print-this";
   try {
-    await verifyChange({ repoRoot, explicitPaths: ["scripts/route-task.mjs"], runCommand: runner.run });
+    await verifyChange({ repoRoot, explicitPaths: ["apps/web-widget/src/main.tsx"], runCommand: runner.run });
     assert.equal(runner.commands[0].options.shell, true);
     assert.equal(runner.commands[0].options.stdio, "inherit");
     assert.equal(runner.commands[0].options.env, process.env);
@@ -130,7 +138,7 @@ test("CLI reports classification, commands, status, human review, and propagates
   const stderr = capture();
   const runner = recordingRunner([9]);
   const status = await runCli({
-    argv: ["scripts/route-task.mjs"],
+    argv: ["apps/web-widget/src/main.tsx"],
     repoRoot,
     stdout,
     stderr,

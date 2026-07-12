@@ -39,6 +39,12 @@ Standard verification runs lint, typecheck, package and root tests, and MCP comp
 
 Documentation-only (`review-only`) changes still receive the full `verify:local` baseline in CI. CI parses the router's JSON into an exact classification and enables this fallback only for `review-only`; malformed or missing routing output fails closed.
 
+Explicit paths may be files or existing directories. Directories expand recursively and deterministically to tracked and nonignored untracked files; ignored generated content such as `node_modules` is excluded. A new file can be pre-routed by its existing containing directory, while nonexistent paths remain invalid. Git-derived routing also includes nonignored untracked files.
+
+Run the exact secret-free harness suite with `pnpm run test:harness`. Review-only verification selects this focused command locally; CI additionally supplies the full baseline.
+
+`CODEOWNERS` marks governance, CI, service boundaries, and deployment/data surfaces for `@Jeduardo622`. The verifier's `human review: required` flag is evidence only: enforcement requires GitHub branch protection configured to require code-owner review. Repository scripts cannot grant or self-approve that review.
+
 - Authoritative local verification: `pnpm run verify:local` (lint, typecheck, package and root tests, CI-safe provider preflight, and secured-posture smoke; no production secrets required)
 - Authoritative recursive test run (packages with a `test` script): `pnpm -r --if-present run test`
 - MCP compatibility smoke test (not included in recursive `test`): `pnpm --filter mcp-server run test:compat`

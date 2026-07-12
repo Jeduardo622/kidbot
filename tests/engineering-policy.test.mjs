@@ -34,12 +34,29 @@ test("classifies workflow, auth, and configuration paths as protected", async ()
     "apps/web-widget/tsconfig.app.json",
     "eslint.config.mjs",
     "package.json",
+    ".agents/engineering-policy.json",
+    "AGENTS.md",
+    "scripts/route-task.mjs",
+    "tests/verify-change.test.mjs",
+    "apps/agent-service/src/index.ts",
+    "apps/mcp-server/src/server.ts",
+    "apps/mcp-server/src/tools/story.ts",
+    "apps/agent-service/src/schemas/story.ts",
+    "supabase/migrations/001_storage.sql",
+    "apps/mcp-server/src/tenantRole.ts",
+    "Dockerfile",
   ]) {
     const result = classifyPaths({ repoRoot, paths: [candidate], policy });
     assert.equal(result.classification, "protected", candidate);
     assert.equal(result.requiresHumanReview, true, candidate);
     assert.ok(result.commands.includes("pnpm run verify:local"), candidate);
   }
+});
+
+test("review-only policy selects the focused harness", async () => {
+  const policy = await loadEngineeringPolicy({ repoRoot });
+  const result = classifyPaths({ repoRoot, paths: ["README.md"], policy });
+  assert.deepEqual(result.commands, ["pnpm run test:harness"]);
 });
 
 test("classifies Markdown-only scope as review-only", async () => {
