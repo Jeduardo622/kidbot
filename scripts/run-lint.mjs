@@ -3,7 +3,9 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
-const eslintBin = path.resolve('node_modules/.bin/eslint');
+const eslintBin = path.resolve(
+  process.platform === 'win32' ? 'node_modules/.bin/eslint.cmd' : 'node_modules/.bin/eslint',
+);
 const hasLocalLint = existsSync(eslintBin);
 const strictMode = process.env.STRICT_VERIFY === '1';
 const isShim = hasLocalLint
@@ -17,8 +19,15 @@ const isShim = hasLocalLint
   : false;
 
 if (hasLocalLint && !isShim) {
-  const result = spawnSync(eslintBin, ['.', '--max-warnings=0'], { stdio: 'inherit' });
-  process.exit(result.status ?? 0);
+  const result = spawnSync(eslintBin, ['.', '--max-warnings=0'], {
+    shell: process.platform === 'win32',
+    stdio: 'inherit',
+  });
+  if (result.error) {
+    console.error(`ESLint failed to start: ${result.error.message}`);
+    process.exit(1);
+  }
+  process.exit(result.status ?? 1);
 }
 
 if (strictMode) {

@@ -10,7 +10,7 @@ export default [
     languageOptions: {
       parser: tsParser,
       parserOptions: {
-        project: './tsconfig.json',
+        project: './tsconfig.eslint.json',
         ecmaVersion: 'latest',
         sourceType: 'module'
       }
@@ -26,12 +26,32 @@ export default [
       'react/react-in-jsx-scope': 'off',
       'import/no-default-export': 'error',
       '@typescript-eslint/no-floating-promises': 'error',
-      '@typescript-eslint/no-misused-promises': 'error'
+      '@typescript-eslint/no-misused-promises': 'error',
+      '@typescript-eslint/no-unused-vars': ['error', { varsIgnorePattern: '^_' }]
     },
     settings: {
       react: {
         version: '18.0'
       }
+    }
+  },
+  {
+    files: ['**/*.config.ts'],
+    rules: {
+      'import/no-default-export': 'off'
+    }
+  },
+  {
+    files: ['apps/mcp-server/src/server.ts'],
+    rules: {
+      '@typescript-eslint/no-misused-promises': [
+        'error',
+        {
+          checksVoidReturn: {
+            arguments: false
+          }
+        }
+      ]
     }
   },
   {

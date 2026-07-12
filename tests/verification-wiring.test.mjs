@@ -41,3 +41,25 @@ test('CI delegates root smoke-script tests to verify-change', async () => {
   assert.match(workflow, /name: Verify engineering change\s+run: pnpm run verify-change/);
   assert.doesNotMatch(workflow, /name: Run root smoke-script tests/);
 });
+
+test('typed linting uses a project that includes every linted TypeScript surface', async () => {
+  const eslintConfig = await readFile('eslint.config.js', 'utf8');
+  const lintProject = JSON.parse(await readFile('tsconfig.eslint.json', 'utf8'));
+
+  assert.match(eslintConfig, /project:\s*['"]\.\/tsconfig\.eslint\.json['"]/);
+  assert.deepEqual(lintProject.include, [
+    'apps/**/*.ts',
+    'apps/**/*.tsx',
+    'scripts/**/*.ts',
+    'scripts/**/*.tsx',
+  ]);
+});
+
+test('lint runner selects the platform executable and fails closed without an exit status', async () => {
+  const lintRunner = await readFile('scripts/run-lint.mjs', 'utf8');
+
+  assert.match(lintRunner, /process\.platform === ['"]win32['"]/);
+  assert.match(lintRunner, /eslint\.cmd/);
+  assert.doesNotMatch(lintRunner, /result\.status \?\? 0/);
+  assert.match(lintRunner, /result\.error/);
+});
