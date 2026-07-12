@@ -45,15 +45,27 @@ test('repository docs define deterministic evaluator thresholds and limitations'
     assert.match(document, /evals\/baselines\/ai-output-baseline\.json/);
     assert.match(document, /no timestamp.*provider.*network.*model judge/is);
     assert.match(document, /case-set drift.*review/i);
+    assert.match(document, /GitHub Actions.*job summary/is);
+    assert.match(document, /changed-only|changed metrics/i);
+    assert.match(document, /GITHUB_ACTIONS.*true.*GITHUB_STEP_SUMMARY/is);
+    assert.match(document, /32 KiB/i);
+    assert.match(document, /no (?:persistent|repository).*write.*(?:PR )?comment.*provider.*network/is);
+    assert.match(document, /summary error.*exit.*3/is);
   }
 });
 
-test('baseline surfaces are protected by engineering policy', async () => {
+test('AI evaluation and summary surfaces are protected by engineering policy', async () => {
   const policy = JSON.parse(await readFile('.agents/engineering-policy.json', 'utf8'));
   const protectedPatterns = policy.rules.find(rule => rule.id === 'protected-engineering-surfaces').patterns;
-  for (const pattern of ['evals/baselines/**', 'scripts/ai-evaluation-baseline.mjs', 'scripts/update-ai-evaluation-baseline.mjs', 'scripts/evaluate-ai-outputs.mjs', 'tests/ai-output-evaluator.test.mjs', 'tests/engineering-policy.test.mjs', 'tests/engineering-harness-wiring.test.mjs', 'tests/verification-wiring.test.mjs']) {
+  for (const pattern of ['evals/baselines/**', 'scripts/ai-evaluation-baseline.mjs', 'scripts/ai-evaluation-job-summary.mjs', 'scripts/update-ai-evaluation-baseline.mjs', 'scripts/evaluate-ai-outputs.mjs', 'tests/ai-output-evaluator.test.mjs', 'tests/engineering-policy.test.mjs', 'tests/engineering-harness-wiring.test.mjs', 'tests/verification-wiring.test.mjs']) {
     assert.ok(protectedPatterns.includes(pattern), pattern);
   }
+});
+
+test('canonical AI baseline bytes remain LF-only across Git checkouts', async () => {
+  const attributes = await readFile('.gitattributes', 'utf8');
+
+  assert.match(attributes, /^evals\/baselines\/\*\.json text eol=lf$/m);
 });
 
 test('README documents text and JSON specialist recommendations as advisory output', async () => {

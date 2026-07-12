@@ -12,6 +12,7 @@
         "scripts/engineering-policy.mjs",
         "scripts/evaluate-ai-outputs.mjs",
         "scripts/ai-evaluation-baseline.mjs",
+        "scripts/ai-evaluation-job-summary.mjs",
         "scripts/update-ai-evaluation-baseline.mjs",
         "evals/baselines/**",
         "scripts/route-task.mjs",
