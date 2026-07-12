@@ -27,7 +27,7 @@
       "instructions": ".agents/specialists/safety-reviewer.md",
       "description": "Review safety-sensitive and permission-sensitive boundaries.",
       "classifications": [],
-      "patterns": ["**/auth/**", "**/*auth*", "**/moderation/**", "**/*moderation*", "**/guardrails/**", "**/*guardrail*", "**/safety/**", "**/*safety*", "**/schemas/**", "**/*schema*", "**/storage/**", "**/*storage*", "**/*store*", "**/permissions/**", "**/*permission*", "**/*role*", "**/*tenant*", "supabase/**", "**/migrations/**", "Dockerfile", "**/Dockerfile", "railway.json", "netlify.toml"]
+      "patterns": ["**/auth/**", "**/auth.*", "**/*.auth.*", "**/auth-*.*", "**/*-auth.*", "**/moderation/**", "**/moderation.*", "**/*.moderation.*", "**/moderation-*.*", "**/*-moderation.*", "**/guardrails/**", "**/guardrail.*", "**/guardrails.*", "**/*.guardrail.*", "**/guardrail-*.*", "**/*-guardrail.*", "**/safety/**", "**/safety.*", "**/*.safety.*", "**/safety-*.*", "**/*-safety.*", "**/schemas/**", "**/schema.*", "**/*.schema.*", "**/schema-*.*", "**/*-schema.*", "**/storage/**", "**/storage.*", "**/*.storage.*", "**/storage-*.*", "**/*-storage.*", "**/permissions/**", "**/permission.*", "**/*.permission.*", "**/permission-*.*", "**/*-permission.*", "**/roles/**", "**/role.*", "**/*.role.*", "**/role-*.*", "**/*-role.*", "**/tenants/**", "**/tenant/**", "**/tenant.*", "**/*.tenant.*", "**/tenant-*.*", "**/*-tenant.*", "supabase/**", "**/migrations/**", "Dockerfile", "**/Dockerfile", "railway.json", "netlify.toml"]
     },
     {
       "id": "test-isolation",

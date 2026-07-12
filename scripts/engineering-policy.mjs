@@ -134,7 +134,13 @@ export async function loadSpecialistRegistry({ repoRoot, registryPath } = {}) {
 
     const ids = new Set();
     const instructionPaths = new Set();
+    const physicalRoot = await realpath(resolvedRoot);
     const instructionRoot = path.resolve(resolvedRoot, ".agents", "specialists");
+    const physicalInstructionRoot = await realpath(instructionRoot);
+    const expectedPhysicalInstructionRoot = path.resolve(physicalRoot, ".agents", "specialists");
+    if (path.relative(expectedPhysicalInstructionRoot, physicalInstructionRoot) !== "") {
+      throw new Error("specialist instructions directory does not resolve to the canonical repository location");
+    }
     for (const [index, specialist] of registry.specialists.entries()) {
       assertExactKeys(specialist, SPECIALIST_KEYS, `specialist registry entry ${index}`);
       if (typeof specialist.id !== "string" || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(specialist.id) || ids.has(specialist.id)) {
@@ -171,7 +177,7 @@ export async function loadSpecialistRegistry({ repoRoot, registryPath } = {}) {
       }
       if (!instructionStat.isFile()) throw new Error(`specialist instructions must be a regular file: ${portableInstructions}`);
       const realInstructions = await realpath(resolvedInstructions);
-      const realRelativeInstructions = path.relative(instructionRoot, realInstructions);
+      const realRelativeInstructions = path.relative(physicalInstructionRoot, realInstructions);
       if (realRelativeInstructions === "" || realRelativeInstructions === ".." || realRelativeInstructions.startsWith(`..${path.sep}`) || path.isAbsolute(realRelativeInstructions)) {
         throw new Error(`specialist instructions resolve outside .agents/specialists: ${portableInstructions}`);
       }

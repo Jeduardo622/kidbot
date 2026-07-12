@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -57,6 +57,34 @@ test("selects protected reviewer and path-sensitive safety reviewer", async () =
   for (const candidate of ["src/auth/token.ts", "src/moderation/check.ts", "src/story-schema.ts", "src/image-storage.ts", "src/permission-gate.ts"]) {
     assert.ok(selectSpecialists({ repoRoot, paths: [candidate], classification: "protected", registry }).some(({ id }) => id === "safety-reviewer"), candidate);
   }
+});
+
+test("safety reviewer selects explicit sensitive boundaries without substring near-matches", async () => {
+  const registry = await loadSpecialistRegistry({ repoRoot });
+  const safetySelected = (candidate) => selectSpecialists({
+    repoRoot,
+    paths: [candidate],
+    classification: "standard",
+    registry,
+  }).some(({ id }) => id === "safety-reviewer");
+
+  for (const candidate of [
+    "src/auth/token.ts",
+    "src/moderation/check.ts",
+    "src/guardrail.ts",
+    "src/story.schema.ts",
+    "src/storage/image.ts",
+    "src/permission.ts",
+    "src/tenant/context.ts",
+    "supabase/migrations/001.sql",
+    "Dockerfile",
+  ]) assert.equal(safetySelected(candidate), true, candidate);
+
+  for (const candidate of [
+    "src/authoring.ts",
+    "src/restore-state.ts",
+    "src/controller.ts",
+  ]) assert.equal(safetySelected(candidate), false, candidate);
 });
 
 test("selects test isolation for tests, fixtures, configuration, and CI wiring", async () => {
@@ -144,7 +172,7 @@ test("rejects an instruction symlink that escapes the specialist directory", asy
     await symlink(outsidePath, instructionPath, "file");
   } catch (error) {
     if (["EACCES", "EPERM"].includes(error.code)) {
-      const outsideDirectory = path.join(fixture.root, "outside-specialists");
+      const outsideDirectory = `${fixture.root}-outside-specialists`;
       const specialistDirectory = path.dirname(instructionPath);
       await mkdir(outsideDirectory);
       await writeFile(path.join(outsideDirectory, "tester.md"), "# Outside\n");
@@ -162,5 +190,51 @@ test("rejects an instruction symlink that escapes the specialist directory", asy
       throw error;
     }
   }
-  await assert.rejects(loadSpecialistRegistry({ repoRoot: fixture.root }), /instructions|symlink|escape/i);
+  try {
+    await assert.rejects(loadSpecialistRegistry({ repoRoot: fixture.root }), /instructions|symlink|escape/i);
+  } finally {
+    await rm(`${fixture.root}-outside-specialists`, { recursive: true, force: true });
+  }
+});
+
+test("loads valid instructions when the repository root is a symlink or junction", async (context) => {
+  const fixture = await createRegistryFixture();
+  const linkedRoot = `${fixture.root}-linked`;
+  try {
+    await symlink(fixture.root, linkedRoot, process.platform === "win32" ? "junction" : "dir");
+  } catch (error) {
+    if (["EACCES", "EPERM"].includes(error.code)) {
+      context.skip(`repository link creation denied by OS: ${error.code}`);
+      return;
+    }
+    throw error;
+  }
+
+  try {
+    const registry = await loadSpecialistRegistry({ repoRoot: linkedRoot });
+    assert.deepEqual(registry.specialists.map(({ id }) => id), ["tester"]);
+  } finally {
+    await rm(linkedRoot, { force: true });
+  }
+});
+
+test("rejects a specialist directory junction relocated elsewhere inside the repository", async (context) => {
+  const fixture = await createRegistryFixture();
+  const specialistDirectory = path.join(fixture.root, ".agents", "specialists");
+  const relocatedDirectory = path.join(fixture.root, "relocated-specialists");
+  await rename(specialistDirectory, relocatedDirectory);
+  try {
+    await symlink(relocatedDirectory, specialistDirectory, process.platform === "win32" ? "junction" : "dir");
+  } catch (error) {
+    if (["EACCES", "EPERM"].includes(error.code)) {
+      context.skip(`specialist directory link creation denied by OS: ${error.code}`);
+      return;
+    }
+    throw error;
+  }
+
+  await assert.rejects(
+    loadSpecialistRegistry({ repoRoot: fixture.root }),
+    /instructions directory|specialists|canonical|resolve/i,
+  );
 });
