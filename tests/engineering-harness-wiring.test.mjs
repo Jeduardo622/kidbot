@@ -39,11 +39,12 @@ test('CI resolves a safe Git base and enforces routing and verification', async 
   assert.match(workflow, /node scripts\/resolve-harness-base\.mjs/);
   assert.doesNotMatch(workflow, /run:\s*\|[^]*\$\{\{ github\./);
   assert.match(workflow, /HARNESS_BASE/);
-  assert.match(workflow, /node \.\/scripts\/route-task\.mjs --base "\$HARNESS_BASE" --json > harness-route\.json/);
+  assert.match(workflow, /HARNESS_ROUTE_REPORT="\$RUNNER_TEMP\/harness-route\.json"/);
+  assert.match(workflow, /node \.\/scripts\/route-task\.mjs --base "\$HARNESS_BASE" --json > "\$HARNESS_ROUTE_REPORT"/);
   assert.doesNotMatch(workflow, /pnpm run route-task[^\n]*>/);
-  assert.match(workflow, /> harness-route\.json/);
-  assert.match(workflow, /cat harness-route\.json/);
-  assert.match(workflow, /node scripts\/export-harness-classification\.mjs harness-route\.json >> "\$GITHUB_ENV"/);
+  assert.doesNotMatch(workflow, /> harness-route\.json/);
+  assert.match(workflow, /cat "\$HARNESS_ROUTE_REPORT"/);
+  assert.match(workflow, /node scripts\/export-harness-classification\.mjs "\$HARNESS_ROUTE_REPORT" >> "\$GITHUB_ENV"/);
   assert.match(workflow, /if: env\.HARNESS_CLASSIFICATION == 'review-only'\s+run: pnpm run verify:local/);
   assert.equal((workflow.match(/run: pnpm run verify:local/g) || []).length, 1);
   assert.match(workflow, /name: Verify engineering change\s+run: pnpm run verify-change/);

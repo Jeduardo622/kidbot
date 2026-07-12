@@ -56,9 +56,10 @@ jobs:
 
       - name: Route engineering change
         run: |
-          node ./scripts/route-task.mjs --base "$HARNESS_BASE" --json > harness-route.json
-          cat harness-route.json
-          node scripts/export-harness-classification.mjs harness-route.json >> "$GITHUB_ENV"
+          HARNESS_ROUTE_REPORT="$RUNNER_TEMP/harness-route.json"
+          node ./scripts/route-task.mjs --base "$HARNESS_BASE" --json > "$HARNESS_ROUTE_REPORT"
+          cat "$HARNESS_ROUTE_REPORT"
+          node scripts/export-harness-classification.mjs "$HARNESS_ROUTE_REPORT" >> "$GITHUB_ENV"
 
       - name: Verify review-only baseline
         if: env.HARNESS_CLASSIFICATION == 'review-only'

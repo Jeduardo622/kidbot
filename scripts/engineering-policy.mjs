@@ -25,6 +25,17 @@ const ALLOWED_VERIFICATION_COMMANDS = new Set([
   "pnpm --filter @kidbot/mcp-server run test:compat",
   "pnpm run verify:local",
 ]);
+const IMMUTABLE_GOVERNANCE_PATTERNS = [
+  ".agents/**",
+  ".github/CODEOWNERS",
+  ".github/workflows/**",
+  "AGENTS.md",
+  "scripts/engineering-policy.mjs",
+  "scripts/export-harness-classification.mjs",
+  "scripts/resolve-harness-base.mjs",
+  "scripts/route-task.mjs",
+  "scripts/verify-change.mjs",
+];
 
 function assertExactKeys(value, expected, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -206,10 +217,14 @@ export function classifyPaths({ repoRoot, paths, policy } = {}) {
     ...rule,
     expressions: rule.patterns.map(globToRegExp),
   }));
+  const immutableGovernanceExpressions = IMMUTABLE_GOVERNANCE_PATTERNS.map(globToRegExp);
   const matches = normalizedPaths.map((candidate) => {
-    const explicitMatches = compiledRules
+    const immutableMatches = immutableGovernanceExpressions.some((expression) => expression.test(candidate))
+      ? [{ id: "immutable-governance", classification: "protected", requiresHumanReview: true }]
+      : [];
+    const explicitMatches = [...immutableMatches, ...compiledRules
       .filter((rule) => rule.expressions.some((expression) => expression.test(candidate)))
-      .sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
+    ].sort((left, right) => left.id < right.id ? -1 : left.id > right.id ? 1 : 0);
     const matchingRules = explicitMatches.length > 0 ? explicitMatches : [{
       id: "default-standard",
       classification: "standard",

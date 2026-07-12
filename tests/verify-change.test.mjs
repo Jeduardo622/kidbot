@@ -51,6 +51,23 @@ test("protected changes always escalate to verify:local and human review", async
   assert.equal(report.requiresHumanReview, true);
 });
 
+test("policy edits cannot downgrade their own protected verification", async () => {
+  const root = await createRepo({
+    rules: [{ id: "markdown", classification: "review-only", patterns: ["*.md"], requiresHumanReview: false }],
+    commands: [],
+  });
+  const runner = recordingRunner();
+  const report = await verifyChange({
+    repoRoot: root,
+    explicitPaths: [".agents/engineering-policy.json"],
+    runCommand: runner.run,
+  });
+
+  assert.equal(report.classification, "protected");
+  assert.equal(report.requiresHumanReview, true);
+  assert.deepEqual(runner.commands.map(({ command }) => command), ["pnpm run verify:local"]);
+});
+
 test("review-only runs focused verification and propagates failure", async () => {
   const runner = recordingRunner([6]);
   const report = await verifyChange({ repoRoot, explicitPaths: ["README.md"], runCommand: runner.run });
@@ -180,13 +197,16 @@ function capture() {
   return { value: "", write(chunk) { this.value += chunk; } };
 }
 
-async function createRepo({ commands = ["pnpm test"] } = {}) {
+async function createRepo({
+  commands = ["pnpm test"],
+  rules = [{ id: "standard", classification: "standard", patterns: ["*.mjs"], requiresHumanReview: false }],
+} = {}) {
   const root = await mkdtemp(path.join(tmpdir(), "kidbot-verify-change-"));
   await mkdir(path.join(root, ".agents"));
   await writeFile(path.join(root, "change.mjs"), "export const changed = true;\n");
   await writeFile(path.join(root, ".agents", "engineering-policy.json"), JSON.stringify({
     version: 1,
-    rules: [{ id: "standard", classification: "standard", patterns: ["*.mjs"], requiresHumanReview: false }],
+    rules,
     verification: { "review-only": [], standard: commands, protected: ["pnpm run verify:local"] },
   }));
   return root;
