@@ -35,7 +35,7 @@ test('repository docs define deterministic evaluator thresholds and limitations'
     assert.match(document, /age-proxy.*deterministic proxy/is);
     assert.match(document, /no-provider/i);
     assert.match(document, /output.*symlink/i);
-    assert.match(document, /output.*filename.*repository root/is);
+    assert.match(document, /output.*direct child file.*repository root.*operating-system temporary directory/is);
     assert.match(document, /dev.*ino.*before.*temporary.*after.*rename/is);
     assert.match(document, /authorized malicious local actor.*after the final check.*outside.*no-secret report threat model/is);
     assert.doesNotMatch(document, /replaced (?:or )?linked parents are rejected/i);
