@@ -31,7 +31,7 @@ test('fails closed for malformed, missing, and injection-shaped classification',
 test('direct router capture is pure JSON accepted by the exporter CLI', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'kidbot-route-capture-'));
   const capturePath = path.join(directory, 'harness-route.json');
-  const routed = await execFileAsync(process.execPath, ['./scripts/route-task.mjs', '--base', 'main', '--json'], { cwd: repoRoot });
+  const routed = await execFileAsync(process.execPath, ['./scripts/route-task.mjs', '--base', 'origin/main', '--json'], { cwd: repoRoot });
   await writeFile(capturePath, routed.stdout);
 
   const captured = await readFile(capturePath, 'utf8');
