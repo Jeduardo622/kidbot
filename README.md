@@ -26,6 +26,36 @@ pnpm run route-task -- apps/web-widget/src tests --json
 pnpm run route-task -- --base main --json
 ```
 
+Text output includes each advisory recommendation and its reason:
+
+```text
+classification: standard
+specialist: tester (path:apps/web-widget/src/components/ComicBoard.tsx) -> .agents/specialists/tester.md
+specialist: ui-hardener (path:apps/web-widget/src/components/ComicBoard.tsx) -> .agents/specialists/ui-hardener.md
+```
+
+JSON output exposes the same deterministic recommendation data for tooling:
+
+```json
+{
+  "classification": "standard",
+  "specialists": [
+    {
+      "id": "tester",
+      "instructions": ".agents/specialists/tester.md",
+      "reasons": ["path:apps/web-widget/src/components/ComicBoard.tsx"]
+    },
+    {
+      "id": "ui-hardener",
+      "instructions": ".agents/specialists/ui-hardener.md",
+      "reasons": ["path:apps/web-widget/src/components/ComicBoard.tsx"]
+    }
+  ]
+}
+```
+
+These recommendations are advisory: engineers may follow a recommended contract manually or dispatch a matching specialist in an authorized interactive session. The router does not spawn or execute specialists, and a recommendation does not count as human approval. CI only logs recommendations from the existing `$RUNNER_TEMP/harness-route.json` report; it does not require specialist artifacts or perform provider-specific orchestration.
+
 Verify the same bounded scope before finalization:
 
 ```bash

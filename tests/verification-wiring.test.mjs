@@ -42,6 +42,15 @@ test('CI delegates root smoke-script tests to verify-change', async () => {
   assert.doesNotMatch(workflow, /name: Run root smoke-script tests/);
 });
 
+test('CI keeps specialist recommendations advisory-only', async () => {
+  const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
+
+  assert.match(workflow, /HARNESS_ROUTE_REPORT="\$RUNNER_TEMP\/harness-route\.json"/);
+  assert.match(workflow, /cat "\$HARNESS_ROUTE_REPORT"/);
+  assert.doesNotMatch(workflow, /spawn[^\n]*specialist|specialist[^\n]*(?:spawn|execute|dispatch)/i);
+  assert.doesNotMatch(workflow, /required[^\n]*specialist[^\n]*artifact|specialist[^\n]*artifact[^\n]*required/i);
+});
+
 test('MCP compatibility verification builds its required dist artifact first', async () => {
   const packageJson = JSON.parse(await readFile('apps/mcp-server/package.json', 'utf8'));
 

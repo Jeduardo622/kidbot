@@ -8,6 +8,8 @@
 
 Classification precedence is `protected` over `standard` over `review-only`. Protected work includes authentication, authorization, runtime configuration, API/server boundaries, deployment, CI, schemas, migrations, secrets, and tenant- or permission-sensitive behavior.
 
+Specialist recommendations from the router are advisory. They do not spawn agents or execute specialist instructions, and they do not count as approval. Engineers may follow a recommended contract manually or dispatch a matching specialist only in an authorized interactive session; CI only logs the recommendations.
+
 ## Making changes
 
 - Keep the diff minimal, reversible, and inside the routed scope.

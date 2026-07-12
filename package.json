@@ -26,7 +26,7 @@
     "typecheck": "node ./scripts/run-typecheck.mjs",
     "test": "node ./scripts/run-test.mjs",
     "test:root": "node ./scripts/run-test.mjs --root-only",
-    "test:harness": "node --test tests/engineering-policy.test.mjs tests/route-task.test.mjs tests/verify-change.test.mjs tests/resolve-harness-base.test.mjs tests/export-harness-classification.test.mjs tests/engineering-harness-wiring.test.mjs tests/verification-wiring.test.mjs tests/run-lint.test.mjs",
+    "test:harness": "node --test tests/engineering-policy.test.mjs tests/route-task.test.mjs tests/verify-change.test.mjs tests/specialist-routing.test.mjs tests/resolve-harness-base.test.mjs tests/export-harness-classification.test.mjs tests/engineering-harness-wiring.test.mjs tests/verification-wiring.test.mjs tests/run-lint.test.mjs",
     "test:all": "cross-env CI=1 pnpm -r --if-present run test && pnpm run test:root && pnpm --filter mcp-server run test:compat",
     "verify:local": "cross-env STRICT_VERIFY=1 pnpm run verify:local:strict",
     "verify:local:strict": "pnpm run lint && pnpm run typecheck && pnpm run test && pnpm --filter @kidbot/mcp-server run test:compat && pnpm run smoke:provider-preflight:ci && pnpm run smoke:secured-posture"
