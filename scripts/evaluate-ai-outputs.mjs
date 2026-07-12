@@ -33,6 +33,16 @@ const CORPUS_HYGIENE_PATTERNS = Object.freeze([
 ]);
 const COLORING_ELEMENTS = new Set(["svg", "g", "path", "circle", "ellipse", "rect", "line", "polyline", "polygon"]);
 
+export const EVALUATION_CONTRACT = freeze({
+  weights: { ...WEIGHTS },
+  thresholds: { case: 85, toolMean: 90, overallMean: 90 },
+  checks: Object.fromEntries(Object.entries(ALLOWED_CHECKS).map(([tool, checks]) => [tool, [...checks].sort().map(id => ({ id, category: CATEGORIES[id] ?? "contract" }))])),
+  implicitChecks: [
+    { id: "blocked-contract", category: "contract" },
+    ...Object.keys(WEIGHTS).sort().map(category => ({ id: `missing-category-${category}`, category })),
+  ],
+});
+
 function exactKeys(value, keys) {
   return value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).sort().join("|") === [...keys].sort().join("|");
 }

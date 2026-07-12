@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 
 import * as evaluator from "../scripts/evaluate-ai-outputs.mjs";
+import { buildBaselineManifest, buildEvaluationFingerprint, compareEvaluationToBaseline, formatBaselineManifest, loadBaselineManifest } from "../scripts/ai-evaluation-baseline.mjs";
 import { craftVoiceReply } from "../apps/agent-service/src/agents/voiceAgent.ts";
 import { planStory } from "../apps/agent-service/src/agents/storyAgent.ts";
 import { generateColoringOutline } from "../apps/agent-service/src/agents/imageAgent.ts";
@@ -13,6 +14,40 @@ import { planExperiment } from "../apps/agent-service/src/agents/experimentAgent
 import { validateColoringSvg } from "../apps/agent-service/src/svgSafety.ts";
 
 const { evaluateCase, evaluateDatasets, formatEvaluationReport, loadEvaluationDatasets } = evaluator;
+
+test("baseline schema rejects malformed and noncanonical manifests", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "kidbot-baseline-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(path.join(root, "evals", "baselines"), { recursive: true });
+  await assert.rejects(loadBaselineManifest({ repoRoot: root }), /baseline/i);
+  await writeFile(path.join(root, "evals", "baselines", "ai-output-baseline.json"), "{}\n");
+  await assert.rejects(loadBaselineManifest({ repoRoot: root }), /keys|version/i);
+});
+
+test("baseline containment rejects lexical escape", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kidbot-baseline-"));
+  try { await assert.rejects(loadBaselineManifest({ repoRoot: root, baselinePath: path.join(root, "..", "escape.json") }), /canonical|contain/i); }
+  finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("baseline fingerprint is stable and excludes order noise", async () => {
+  const datasets = await loadEvaluationDatasets({ repoRoot: path.resolve(".") });
+  const reversed = [...datasets].reverse().map(d => ({ ...d, cases: [...d.cases].reverse().map(c => ({ ...c, checks: [...c.checks].reverse() })) }));
+  assert.equal(buildEvaluationFingerprint({ datasets }), buildEvaluationFingerprint({ datasets: reversed }));
+  const changed = structuredClone(datasets); changed[0].cases[0].checks = [...changed[0].cases[0].checks, "new-check"];
+  assert.notEqual(buildEvaluationFingerprint({ datasets }), buildEvaluationFingerprint({ datasets: changed }));
+});
+
+test("baseline delta blocks an exact regression", async () => {
+  const datasets = await loadEvaluationDatasets({ repoRoot: path.resolve(".") });
+  const result = { version: 1, cases: [{ id: "voice-clouds-4-6", tool: "voice_chat", ageBand: "4-6", score: 100, hardFailures: [], passed: true }], tools: [{ tool: "voice_chat", mean: 100, passed: true }], overallMean: 100, passed: true, thresholds: { case: 85, toolMean: 90, overallMean: 90 } };
+  const baseline = buildBaselineManifest({ datasets, result });
+  const current = structuredClone(result); current.cases[0].score = 99; current.tools[0].mean = 99; current.overallMean = 99;
+  const comparison = compareEvaluationToBaseline({ baseline, datasets, result: current });
+  assert.equal(comparison.passed, false);
+  assert.deepEqual(comparison.regressions[0], { scope: "case", id: "voice-clouds-4-6", baseline: 100, current: 99, delta: -1 });
+  assert.equal(formatBaselineManifest(baseline), `${JSON.stringify(baseline, null, 2)}\n`);
+});
 
 test("CLI parser accepts JSON and one explicit output path", () => {
   assert.deepEqual(evaluator.parseArguments([]), { json: false, output: undefined });
