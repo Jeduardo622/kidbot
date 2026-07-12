@@ -4,7 +4,9 @@ import { pathToFileURL } from "node:url";
 import {
   classifyPaths,
   loadEngineeringPolicy,
+  loadSpecialistRegistry,
   resolveScope,
+  selectSpecialists,
   TaskInputError,
 } from "./engineering-policy.mjs";
 
@@ -42,6 +44,7 @@ export function formatResult(result, { json = false } = {}) {
     matchedRuleIds: [...new Set(result.matches.flatMap((match) => match.rules))].sort(),
     commands: result.commands,
     requiresHumanReview: result.requiresHumanReview,
+    specialists: result.specialists,
   };
   if (json) return `${JSON.stringify(output, null, 2)}\n`;
   return [
@@ -50,6 +53,9 @@ export function formatResult(result, { json = false } = {}) {
     `matched rules: ${output.matchedRuleIds.join(", ")}`,
     `commands: ${output.commands.length ? output.commands.join(", ") : "none"}`,
     `human review: ${output.requiresHumanReview ? "required" : "not required"}`,
+    ...(output.specialists.length
+      ? output.specialists.map((specialist) => `specialist: ${specialist.id} (${specialist.reasons.join(",")}) -> ${specialist.instructions}`)
+      : ["specialists: none"]),
     "",
   ].join("\n");
 }
@@ -62,8 +68,21 @@ export async function routeTask({ argv = [], repoRoot = process.cwd() } = {}) {
     explicitPaths: options.explicitPaths.length ? options.explicitPaths : undefined,
   });
   const policy = await loadEngineeringPolicy({ repoRoot });
+  const registry = await loadSpecialistRegistry({ repoRoot });
   try {
-    return { result: classifyPaths({ repoRoot, paths, policy }), json: options.json };
+    const result = classifyPaths({ repoRoot, paths, policy });
+    return {
+      result: {
+        ...result,
+        specialists: selectSpecialists({
+          repoRoot,
+          paths: result.paths,
+          classification: result.classification,
+          registry,
+        }),
+      },
+      json: options.json,
+    };
   } catch (error) {
     if (options.explicitPaths.length > 0) throw new TaskInputError(error.message, { cause: error });
     throw error;

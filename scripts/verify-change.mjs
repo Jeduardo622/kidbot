@@ -5,7 +5,9 @@ import { pathToFileURL } from "node:url";
 import {
   classifyPaths,
   loadEngineeringPolicy,
+  loadSpecialistRegistry,
   resolveScope,
+  selectSpecialists,
   TaskInputError,
 } from "./engineering-policy.mjs";
 
@@ -49,6 +51,12 @@ function immutableClassification(source) {
     }))),
     commands: Object.freeze([...source.commands]),
     requiresHumanReview: source.requiresHumanReview,
+    specialists: Object.freeze(source.specialists.map((specialist) => Object.freeze({
+      id: specialist.id,
+      description: specialist.description,
+      instructions: specialist.instructions,
+      reasons: Object.freeze([...specialist.reasons]),
+    }))),
   });
 }
 
@@ -56,9 +64,19 @@ export async function verifyChange({ repoRoot, base, explicitPaths, runCommand =
   const resolvedRoot = path.resolve(repoRoot ?? process.cwd());
   const paths = await resolveScope({ repoRoot: resolvedRoot, base, explicitPaths });
   const policy = await loadEngineeringPolicy({ repoRoot: resolvedRoot });
+  const registry = await loadSpecialistRegistry({ repoRoot: resolvedRoot });
   let routed;
   try {
-    routed = classifyPaths({ repoRoot: resolvedRoot, paths, policy });
+    const result = classifyPaths({ repoRoot: resolvedRoot, paths, policy });
+    routed = {
+      ...result,
+      specialists: selectSpecialists({
+        repoRoot: resolvedRoot,
+        paths: result.paths,
+        classification: result.classification,
+        registry,
+      }),
+    };
   } catch (error) {
     if (explicitPaths?.length) throw new TaskInputError(error.message, { cause: error });
     throw error;
@@ -105,6 +123,10 @@ export async function runCli({
       runCommand,
       onClassified(routed) {
         stdout.write(`classification: ${routed.classification}\npaths: ${routed.paths.join(", ")}\n`);
+        if (routed.specialists.length === 0) stdout.write("specialists: none\n");
+        for (const specialist of routed.specialists) {
+          stdout.write(`specialist: ${specialist.id} (${specialist.reasons.join(",")}) -> ${specialist.instructions}\n`);
+        }
         if (routed.commands.length === 0) stdout.write("command: none\n");
       },
       onCommand(command) {

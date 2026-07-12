@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "specialists": [
+    {
+      "id": "reviewer",
+      "instructions": ".agents/specialists/reviewer.md",
+      "description": "Review non-trivial protected changes for correctness and containment.",
+      "classifications": ["protected"],
+      "patterns": []
+    },
+    {
+      "id": "tester",
+      "instructions": ".agents/specialists/tester.md",
+      "description": "Plan regression coverage and assess verification evidence.",
+      "classifications": [],
+      "patterns": ["apps/**/src/**", "tests/**", "scripts/**", "package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml"]
+    },
+    {
+      "id": "ui-hardener",
+      "instructions": ".agents/specialists/ui-hardener.md",
+      "description": "Review browser-facing UI for resilience, accessibility, and defensive rendering.",
+      "classifications": [],
+      "patterns": ["apps/web-widget/**", "**/components/**", "**/*.css", "**/*.scss", "**/*.html"]
+    },
+    {
+      "id": "safety-reviewer",
+      "instructions": ".agents/specialists/safety-reviewer.md",
+      "description": "Review safety-sensitive and permission-sensitive boundaries.",
+      "classifications": [],
+      "patterns": ["**/auth/**", "**/auth.*", "**/*.auth.*", "**/auth-*.*", "**/*-auth.*", "**/moderation/**", "**/moderation.*", "**/*.moderation.*", "**/moderation-*.*", "**/*-moderation.*", "**/guardrails/**", "**/guardrail.*", "**/guardrails.*", "**/*.guardrail.*", "**/guardrail-*.*", "**/*-guardrail.*", "**/safety/**", "**/safety.*", "**/*.safety.*", "**/safety-*.*", "**/*-safety.*", "**/schemas/**", "**/schema.*", "**/*.schema.*", "**/schema-*.*", "**/*-schema.*", "**/storage/**", "**/storage.*", "**/*.storage.*", "**/storage-*.*", "**/*-storage.*", "**/permissions/**", "**/permission.*", "**/*.permission.*", "**/permission-*.*", "**/*-permission.*", "**/roles/**", "**/role.*", "**/*.role.*", "**/role-*.*", "**/*-role.*", "**/tenants/**", "**/tenant/**", "**/tenant.*", "**/*.tenant.*", "**/tenant-*.*", "**/*-tenant.*", "supabase/**", "**/migrations/**", "Dockerfile", "**/Dockerfile", "railway.json", "netlify.toml"]
+    },
+    {
+      "id": "test-isolation",
+      "instructions": ".agents/specialists/test-isolation.md",
+      "description": "Review tests for isolation, deterministic fixtures, and reliable cleanup.",
+      "classifications": [],
+      "patterns": ["tests/**", "**/*.test.*", "**/*.spec.*", "**/fixtures/**", "**/*test*config*", ".github/workflows/**"]
+    }
+  ]
+}

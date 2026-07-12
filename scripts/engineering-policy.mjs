@@ -1,4 +1,4 @@
-import { readFile, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -17,6 +17,8 @@ const CLASSIFICATIONS = ["review-only", "standard", "protected"];
 const PRECEDENCE = new Map(CLASSIFICATIONS.map((value, index) => [value, index]));
 const RULE_KEYS = ["classification", "id", "patterns", "requiresHumanReview"];
 const POLICY_KEYS = ["rules", "verification", "version"];
+const SPECIALIST_REGISTRY_KEYS = ["specialists", "version"];
+const SPECIALIST_KEYS = ["classifications", "description", "id", "instructions", "patterns"];
 const ALLOWED_VERIFICATION_COMMANDS = new Set([
   "pnpm run test:harness",
   "pnpm run lint",
@@ -118,6 +120,94 @@ export async function loadEngineeringPolicy({ repoRoot, policyPath } = {}) {
   } catch (error) {
     throw new Error(`Unable to load engineering policy at ${resolvedPath}: ${error.message}`, { cause: error });
   }
+}
+
+export async function loadSpecialistRegistry({ repoRoot, registryPath } = {}) {
+  if (typeof repoRoot !== "string" || repoRoot.length === 0) throw new Error("repoRoot is required");
+  const resolvedRoot = path.resolve(repoRoot);
+  const resolvedPath = registryPath ? path.resolve(registryPath) : path.resolve(resolvedRoot, ".agents", "specialists.json");
+  try {
+    const registry = JSON.parse(await readFile(resolvedPath, "utf8"));
+    assertExactKeys(registry, SPECIALIST_REGISTRY_KEYS, "specialist registry");
+    if (!Number.isInteger(registry.version) || registry.version < 1) throw new Error("specialist registry version must be a positive integer");
+    if (!Array.isArray(registry.specialists) || registry.specialists.length === 0) throw new Error("specialist registry specialists must be a non-empty array");
+
+    const ids = new Set();
+    const instructionPaths = new Set();
+    const physicalRoot = await realpath(resolvedRoot);
+    const instructionRoot = path.resolve(resolvedRoot, ".agents", "specialists");
+    const physicalInstructionRoot = await realpath(instructionRoot);
+    const expectedPhysicalInstructionRoot = path.resolve(physicalRoot, ".agents", "specialists");
+    if (path.relative(expectedPhysicalInstructionRoot, physicalInstructionRoot) !== "") {
+      throw new Error("specialist instructions directory does not resolve to the canonical repository location");
+    }
+    for (const [index, specialist] of registry.specialists.entries()) {
+      assertExactKeys(specialist, SPECIALIST_KEYS, `specialist registry entry ${index}`);
+      if (typeof specialist.id !== "string" || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(specialist.id) || ids.has(specialist.id)) {
+        throw new Error(`specialist registry entry ${index} id must be unique kebab-case`);
+      }
+      ids.add(specialist.id);
+      if (typeof specialist.description !== "string" || specialist.description.trim().length === 0 || /[\r\n]/u.test(specialist.description)) {
+        throw new Error(`specialist registry entry ${specialist.id} description must be a non-empty single line`);
+      }
+      validateStringArray(specialist.classifications, `classifications for ${specialist.id}`);
+      if (specialist.classifications.some((classification) => !CLASSIFICATIONS.includes(classification))) {
+        throw new Error(`invalid specialist classification for ${specialist.id}`);
+      }
+      validateStringArray(specialist.patterns, `patterns for ${specialist.id}`);
+      specialist.patterns.forEach(globToRegExp);
+      if (specialist.classifications.length === 0 && specialist.patterns.length === 0) throw new Error(`specialist ${specialist.id} must define a routing signal`);
+
+      if (typeof specialist.instructions !== "string" || !specialist.instructions.startsWith(".agents/specialists/") || !specialist.instructions.endsWith(".md") || path.isAbsolute(specialist.instructions)) {
+        throw new Error(`instructions for ${specialist.id} must be a repository-relative Markdown path under .agents/specialists`);
+      }
+      const resolvedInstructions = path.resolve(resolvedRoot, specialist.instructions);
+      const relativeInstructions = path.relative(instructionRoot, resolvedInstructions);
+      if (relativeInstructions === "" || relativeInstructions === ".." || relativeInstructions.startsWith(`..${path.sep}`) || path.isAbsolute(relativeInstructions)) {
+        throw new Error(`instructions for ${specialist.id} escape .agents/specialists`);
+      }
+      const portableInstructions = path.relative(resolvedRoot, resolvedInstructions).split(path.sep).join("/");
+      if (instructionPaths.has(portableInstructions)) throw new Error(`duplicate specialist instructions: ${portableInstructions}`);
+      instructionPaths.add(portableInstructions);
+      let instructionStat;
+      try {
+        instructionStat = await stat(resolvedInstructions);
+      } catch (error) {
+        throw new Error(`specialist instructions file is missing or unreadable: ${portableInstructions}`, { cause: error });
+      }
+      if (!instructionStat.isFile()) throw new Error(`specialist instructions must be a regular file: ${portableInstructions}`);
+      const realInstructions = await realpath(resolvedInstructions);
+      const realRelativeInstructions = path.relative(physicalInstructionRoot, realInstructions);
+      if (realRelativeInstructions === "" || realRelativeInstructions === ".." || realRelativeInstructions.startsWith(`..${path.sep}`) || path.isAbsolute(realRelativeInstructions)) {
+        throw new Error(`specialist instructions resolve outside .agents/specialists: ${portableInstructions}`);
+      }
+    }
+    return registry;
+  } catch (error) {
+    throw new Error(`Unable to load specialist registry at ${resolvedPath}: ${error.message}`, { cause: error });
+  }
+}
+
+export function selectSpecialists({ repoRoot, paths, classification, registry } = {}) {
+  if (typeof repoRoot !== "string" || repoRoot.length === 0) throw new Error("repoRoot is required");
+  if (!CLASSIFICATIONS.includes(classification)) throw new Error(`invalid specialist selection classification: ${classification}`);
+  if (!Array.isArray(paths) || paths.length === 0) throw new Error("specialist selection paths must be a non-empty array");
+  if (!registry || !Array.isArray(registry.specialists)) throw new Error("validated specialist registry is required");
+  const normalizedPaths = [...new Set(paths.map((candidate) => normalizeRepoPath(repoRoot, candidate)))].sort();
+  return registry.specialists.flatMap((specialist) => {
+    const expressions = specialist.patterns.map(globToRegExp);
+    const reasons = [];
+    if (specialist.classifications.includes(classification)) reasons.push(`classification:${classification}`);
+    for (const candidate of normalizedPaths) {
+      if (expressions.some((expression) => expression.test(candidate))) reasons.push(`path:${candidate}`);
+    }
+    return reasons.length === 0 ? [] : [{
+      id: specialist.id,
+      description: specialist.description,
+      instructions: specialist.instructions,
+      reasons: reasons.sort(),
+    }];
+  }).sort((left, right) => left.id.localeCompare(right.id));
 }
 
 function normalizeRepoPath(repoRoot, candidate) {

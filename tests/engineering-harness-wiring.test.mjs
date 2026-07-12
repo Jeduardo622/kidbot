@@ -11,6 +11,9 @@ test('repository instructions enforce the engineering harness', async () => {
   assert.match(instructions, /protected.*contain/is);
   assert.match(instructions, /verify-change.*before final/i);
   assert.match(instructions, /executed.*skipped.*blocked.*secret-dependent/is);
+  assert.match(instructions, /specialist recommendations.*advisory/i);
+  assert.match(instructions, /do not spawn agents/i);
+  assert.match(instructions, /do not count as approval/i);
 });
 
 test('package exposes routing and verification commands', async () => {
@@ -19,7 +22,15 @@ test('package exposes routing and verification commands', async () => {
   assert.equal(packageJson.scripts['route-task'], 'node ./scripts/route-task.mjs');
   assert.equal(packageJson.scripts['verify-change'], 'node ./scripts/verify-change.mjs');
   assert.ok(packageJson.scripts['verify:local']);
-  assert.equal(packageJson.scripts['test:harness'], 'node --test tests/engineering-policy.test.mjs tests/route-task.test.mjs tests/verify-change.test.mjs tests/resolve-harness-base.test.mjs tests/export-harness-classification.test.mjs tests/engineering-harness-wiring.test.mjs tests/verification-wiring.test.mjs tests/run-lint.test.mjs');
+  assert.equal(packageJson.scripts['test:harness'], 'node --test tests/engineering-policy.test.mjs tests/route-task.test.mjs tests/verify-change.test.mjs tests/specialist-routing.test.mjs tests/resolve-harness-base.test.mjs tests/export-harness-classification.test.mjs tests/engineering-harness-wiring.test.mjs tests/verification-wiring.test.mjs tests/run-lint.test.mjs');
+});
+
+test('README documents text and JSON specialist recommendations as advisory output', async () => {
+  const readme = await readFile('README.md', 'utf8');
+
+  assert.match(readme, /specialist:\s*tester.*specialist:\s*ui-hardener/is);
+  assert.match(readme, /"specialists"\s*:\s*\[/);
+  assert.match(readme, /CI only logs recommendations/i);
 });
 
 test('CODEOWNERS requires the repository owner on protected governance surfaces', async () => {
@@ -61,6 +72,9 @@ test('CI resolves a safe Git base and enforces routing and verification', async 
   assert.match(workflow, /name: Test agent-service with Redis limiter smoke[^]*RATE_LIMIT_STORE: redis/);
   assert.match(workflow, /name: Run parent store Redis deploy smoke/);
   assert.match(workflow, /name: Run MCP auth\/startup matrix/);
+  assert.doesNotMatch(workflow, /spawn[^\n]*specialist|specialist[^\n]*(?:spawn|execute|dispatch)/i);
+  assert.doesNotMatch(workflow, /required[^\n]*specialist[^\n]*artifact|specialist[^\n]*artifact[^\n]*required/i);
+  assert.doesNotMatch(workflow, /openai|anthropic|gemini|provider[^\n]*orchestrat/i);
 });
 
 test('agent service retains service documentation ownership', async () => {

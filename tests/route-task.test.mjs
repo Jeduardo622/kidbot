@@ -41,6 +41,18 @@ async function createGitRepo() {
       protected: ["pnpm run verify:local"],
     },
   }));
+  await mkdir(path.join(root, ".agents", "specialists"));
+  await writeFile(path.join(root, ".agents", "specialists", "reviewer.md"), "# Reviewer\n");
+  await writeFile(path.join(root, ".agents", "specialists.json"), JSON.stringify({
+    version: 1,
+    specialists: [{
+      id: "reviewer",
+      instructions: ".agents/specialists/reviewer.md",
+      description: "Review protected changes.",
+      classifications: ["protected"],
+      patterns: [],
+    }],
+  }));
   await git(root, "init");
   await git(root, "config", "user.email", "router@example.test");
   await git(root, "config", "user.name", "Router Test");
@@ -64,6 +76,17 @@ test("classifies explicit protected scope and emits stable JSON", async () => {
     matchedRuleIds: ["protected-engineering-surfaces", "standard-repository-content"],
     commands: ["pnpm run verify:local"],
     requiresHumanReview: true,
+    specialists: [{
+      id: "reviewer",
+      description: "Review non-trivial protected changes for correctness and containment.",
+      instructions: ".agents/specialists/reviewer.md",
+      reasons: ["classification:protected"],
+    }, {
+      id: "tester",
+      description: "Plan regression coverage and assess verification evidence.",
+      instructions: ".agents/specialists/tester.md",
+      reasons: ["path:package.json"],
+    }],
   });
 });
 
@@ -73,6 +96,14 @@ test("classifies explicit review-only scope", async () => {
   assert.match(result.stdout, /classification: review-only/);
   assert.match(result.stdout, /paths: README\.md/);
   assert.match(result.stdout, /human review: not required/);
+  assert.match(result.stdout, /specialists: none/);
+});
+
+test("text output emits one stable line per specialist", async () => {
+  const result = await runCli(["package.json"]);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, /specialist: reviewer \(classification:protected\) -> \.agents\/specialists\/reviewer\.md/);
+  assert.match(result.stdout, /specialist: tester \(path:package\.json\) -> \.agents\/specialists\/tester\.md/);
 });
 
 test("accepts the pnpm argument separator before options", async () => {

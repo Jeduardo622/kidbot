@@ -9,6 +9,7 @@ import {
   runCli,
   verifyChange,
 } from "../scripts/verify-change.mjs";
+import { routeTask } from "../scripts/route-task.mjs";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 
@@ -121,6 +122,24 @@ test("classification callback cannot clear protected verification or human revie
   assert.equal(report.requiresHumanReview, true);
 });
 
+test("verifier recommendations match router output and are deeply immutable", async () => {
+  const runner = recordingRunner();
+  const routed = await routeTask({ repoRoot, argv: ["package.json"] });
+  const report = await verifyChange({
+    repoRoot,
+    explicitPaths: ["package.json"],
+    runCommand: runner.run,
+    onClassified(view) {
+      assert.throws(() => view.specialists.push({ id: "fake" }), TypeError);
+      assert.throws(() => view.specialists[0].reasons.push("fake"), TypeError);
+      assert.throws(() => { view.specialists[0].description = "fake"; }, TypeError);
+    },
+  });
+  assert.deepEqual(report.specialists, routed.result.specialists);
+  assert.deepEqual(report.commands, ["pnpm run verify:local"]);
+  assert.equal(report.requiresHumanReview, true);
+});
+
 test("stops on first failure and propagates its status", async () => {
   const root = await createRepo({ commands: ["pnpm test", "pnpm run verify:local"] });
   const runner = recordingRunner([7, 0]);
@@ -163,6 +182,7 @@ test("CLI reports classification, commands, status, human review, and propagates
   });
   assert.equal(status, 9);
   assert.match(stdout.value, /classification: standard/);
+  assert.ok(stdout.value.indexOf("specialist: tester") < stdout.value.indexOf("command: pnpm run lint"));
   assert.match(stdout.value, /command: pnpm run lint/);
   assert.match(stdout.value, /status: failed \(9\)/);
   assert.match(stdout.value, /human review: not required/);
@@ -208,6 +228,18 @@ async function createRepo({
     version: 1,
     rules,
     verification: { "review-only": [], standard: commands, protected: ["pnpm run verify:local"] },
+  }));
+  await mkdir(path.join(root, ".agents", "specialists"));
+  await writeFile(path.join(root, ".agents", "specialists", "reviewer.md"), "# Reviewer\n");
+  await writeFile(path.join(root, ".agents", "specialists.json"), JSON.stringify({
+    version: 1,
+    specialists: [{
+      id: "reviewer",
+      instructions: ".agents/specialists/reviewer.md",
+      description: "Review protected changes.",
+      classifications: ["protected"],
+      patterns: [],
+    }],
   }));
   return root;
 }
