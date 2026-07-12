@@ -8,7 +8,7 @@
     "start": "node --enable-source-maps dist/server.js",
     "build": "tsc -p tsconfig.json",
     "lint": "eslint src --max-warnings=0",
-    "test:compat": "node --test test/mcp-compat.test.mjs",
+    "test:compat": "pnpm run build && node --test test/mcp-compat.test.mjs",
     "test:parent-store": "node --test test/parent-store.test.mjs",
     "test:auth-matrix": "node --test test/auth-startup-matrix.test.mjs"
   },

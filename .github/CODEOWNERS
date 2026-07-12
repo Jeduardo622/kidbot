@@ -1,0 +1,13 @@
+/.agents/ @Jeduardo622
+/AGENTS.md @Jeduardo622
+/.github/workflows/ @Jeduardo622
+/.github/CODEOWNERS @Jeduardo622
+/scripts/ @Jeduardo622
+/tests/ @Jeduardo622
+/apps/agent-service/ @Jeduardo622
+/apps/mcp-server/ @Jeduardo622
+/supabase/ @Jeduardo622
+/Dockerfile @Jeduardo622
+/docker-compose*.yml @Jeduardo622
+/railway.json @Jeduardo622
+/netlify.toml @Jeduardo622

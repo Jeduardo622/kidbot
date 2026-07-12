@@ -35,8 +35,54 @@ test('test:all delegates root test discovery to test:root', async () => {
   assert.doesNotMatch(packageJson.scripts['test:all'], /tests\/[^ ]+\.test\.mjs/);
 });
 
-test('CI explicitly runs the root smoke-script tests', async () => {
+test('CI delegates root smoke-script tests to verify-change', async () => {
   const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
 
-  assert.match(workflow, /name: Run root smoke-script tests\s+run: pnpm run test:root/);
+  assert.match(workflow, /name: Verify engineering change\s+run: pnpm run verify-change/);
+  assert.doesNotMatch(workflow, /name: Run root smoke-script tests/);
+});
+
+test('MCP compatibility verification builds its required dist artifact first', async () => {
+  const packageJson = JSON.parse(await readFile('apps/mcp-server/package.json', 'utf8'));
+
+  assert.equal(packageJson.scripts['test:compat'], 'pnpm run build && node --test test/mcp-compat.test.mjs');
+});
+
+test('secured posture verification builds its required agent-service artifact first', async () => {
+  const packageJson = JSON.parse(await readFile('package.json', 'utf8'));
+
+  assert.equal(
+    packageJson.scripts['smoke:secured-posture'],
+    'pnpm --filter @kidbot/agent-service run build && node ./scripts/smoke-secured-posture.mjs',
+  );
+});
+
+test('typed linting uses a project that includes every linted TypeScript surface', async () => {
+  const eslintConfig = await readFile('eslint.config.js', 'utf8');
+  const lintProject = JSON.parse(await readFile('tsconfig.eslint.json', 'utf8'));
+
+  assert.match(eslintConfig, /project:\s*['"]\.\/tsconfig\.eslint\.json['"]/);
+  assert.deepEqual(lintProject.include, [
+    'apps/**/*.ts',
+    'apps/**/*.tsx',
+    'scripts/**/*.ts',
+    'scripts/**/*.tsx',
+  ]);
+});
+
+test('lint runner exposes injectable behavior and fails closed without an exit status', async () => {
+  const lintRunner = await readFile('scripts/run-lint.mjs', 'utf8');
+
+  assert.match(lintRunner, /export const runLint/);
+  assert.match(lintRunner, /eslint\.cmd/);
+  assert.doesNotMatch(lintRunner, /result\.status \?\? 0/);
+  assert.match(lintRunner, /result\.error/);
+});
+
+test('lint policy does not broadly suppress promise or underscore-variable findings', async () => {
+  const eslintConfig = await readFile('eslint.config.js', 'utf8');
+
+  assert.doesNotMatch(eslintConfig, /varsIgnorePattern/);
+  assert.doesNotMatch(eslintConfig, /apps\/mcp-server\/src\/server\.ts/);
+  assert.match(eslintConfig, /ignoreRestSiblings:\s*true/);
 });
