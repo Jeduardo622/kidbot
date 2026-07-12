@@ -127,10 +127,10 @@ test("baseline refresh creates only the canonical target and is byte stable", as
   const passing = await evaluator.evaluateLocally(path.resolve("."));
   const first = await refreshEvaluationBaseline({ repoRoot: root, datasets, evaluate: async () => structuredClone(passing) });
   assert.equal(first.path, path.join(root, "evals", "baselines", "ai-output-baseline.json"));
-  assert.equal(first.previous, null); assert.equal(first.bytesChanged, true);
+  assert.equal(first.previous, null); assert.equal(first.bytesChanged, true); assert.equal(first.fingerprintStatus, "changed");
   const bytes = await readFile(first.path, "utf8");
   const second = await refreshEvaluationBaseline({ repoRoot: root, datasets, evaluate: async () => structuredClone(passing) });
-  assert.equal(second.bytesChanged, false);
+  assert.equal(second.bytesChanged, false); assert.equal(second.fingerprintStatus, "unchanged");
   assert.equal(await readFile(first.path, "utf8"), bytes);
 });
 
@@ -139,7 +139,7 @@ test("baseline refresh CLI always prints stable before and after summary and nor
   const before = await readFile(target, "utf8");
   let stdout = "";
   assert.equal(await runRefreshCli([], { stdout: value => { stdout += value; } }), 0);
-  assert.match(stdout, /^baseline refresh: passed \(unchanged\)\nbefore: overall=100\.00 cases=17 tools=4\nafter: overall=100\.00 cases=17 tools=4\ndeltas: positive=0 negative=0 added=0 removed=0\n$/);
+  assert.equal(stdout, `baseline refresh: passed (unchanged)\nbefore: overall=100.00 cases=17 tools=4\nafter: overall=100.00 cases=17 tools=4\ndeltas: positive=0 negative=0 added=0 removed=0\nfingerprint: unchanged\nwritten: ${target}\n`);
   await evaluator.runCli([], { stdout: () => {} });
   assert.equal(await readFile(target, "utf8"), before);
 });
@@ -217,6 +217,8 @@ test("baseline refresh replacement reports stable positive negative add and remo
   assert.equal(await runRefreshCli([], { repoRoot: root, datasets: changedDatasets, evaluate: async () => structuredClone(changed), stdout: value => { stdout += value; } }), 0);
   assert.match(stdout, /baseline refresh: passed \(updated\)/);
   assert.match(stdout, /deltas: positive=1 negative=1 added=1 removed=1/);
+  assert.match(stdout, /fingerprint: changed\n/);
+  assert.ok(stdout.endsWith(`written: ${path.join(root, "evals", "baselines", "ai-output-baseline.json")}\n`));
 });
 
 test("baseline refresh package and policy wiring is exact", async () => {

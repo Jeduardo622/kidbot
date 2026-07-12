@@ -96,9 +96,11 @@ export async function refreshEvaluationBaseline({ repoRoot, evaluate = evaluateL
   catch (error) { if (error.code !== "ENOENT") throw error; }
   const comparison = previous ? compareEvaluationToBaseline({ baseline: previous, datasets: corpus, result: first }) : null;
   const bytesChanged = previousBytes !== bytes;
+  const fingerprintStatus = previous?.fingerprint === current.fingerprint ? "unchanged" : "changed";
   if (bytesChanged) await install(paths, bytes, testHooks);
-  io?.write?.({ previous, current, comparison, bytesChanged });
-  return { path: paths.destination, previous, current, comparison, bytesChanged };
+  const result = { path: paths.destination, previous, current, comparison, bytesChanged, fingerprintStatus };
+  io?.write?.(result);
+  return result;
 }
 
 function formatSummary(result) {
@@ -109,7 +111,7 @@ function formatSummary(result) {
   const negative = entries.filter(item => item.delta < 0).length;
   const added = result.comparison?.regressions.filter(item => item.reason === "extra current identity").length ?? result.current.cases.length + result.current.tools.length;
   const removed = result.comparison?.regressions.filter(item => item.reason === "missing current identity").length ?? 0;
-  return `baseline refresh: passed (${result.bytesChanged ? "updated" : "unchanged"})\nbefore: ${before}\nafter: ${after}\ndeltas: positive=${positive} negative=${negative} added=${added} removed=${removed}\n`;
+  return `baseline refresh: passed (${result.bytesChanged ? "updated" : "unchanged"})\nbefore: ${before}\nafter: ${after}\ndeltas: positive=${positive} negative=${negative} added=${added} removed=${removed}\nfingerprint: ${result.fingerprintStatus}\nwritten: ${result.path}\n`;
 }
 
 export async function runCli(args = process.argv.slice(2), options = {}) {
