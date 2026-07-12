@@ -22,6 +22,7 @@ const SPECIALIST_KEYS = ["classifications", "description", "id", "instructions",
 const ALLOWED_VERIFICATION_COMMANDS = new Set([
   "pnpm run test:harness",
   "pnpm run eval:ai",
+  "pnpm run eval:ai:update-baseline",
   "pnpm run lint",
   "pnpm run typecheck",
   "pnpm test",

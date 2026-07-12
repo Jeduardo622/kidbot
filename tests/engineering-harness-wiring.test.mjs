@@ -23,6 +23,7 @@ test('package exposes routing and verification commands', async () => {
   assert.equal(packageJson.scripts['verify-change'], 'node ./scripts/verify-change.mjs');
   assert.ok(packageJson.scripts['verify:local']);
   assert.equal(packageJson.scripts['test:harness'], 'node --import tsx --test tests/ai-output-evaluator.test.mjs tests/engineering-policy.test.mjs tests/route-task.test.mjs tests/verify-change.test.mjs tests/specialist-routing.test.mjs tests/resolve-harness-base.test.mjs tests/export-harness-classification.test.mjs tests/engineering-harness-wiring.test.mjs tests/verification-wiring.test.mjs tests/run-lint.test.mjs');
+  assert.equal((packageJson.scripts['test:harness'].match(/tests\/ai-output-evaluator\.test\.mjs/g) ?? []).length, 1);
 });
 
 test('repository docs define deterministic evaluator thresholds and limitations', async () => {
@@ -39,6 +40,19 @@ test('repository docs define deterministic evaluator thresholds and limitations'
     assert.match(document, /dev.*ino.*before.*temporary.*after.*rename/is);
     assert.match(document, /authorized malicious local actor.*after the final check.*outside.*no-secret report threat model/is);
     assert.doesNotMatch(document, /replaced (?:or )?linked parents are rejected/i);
+    assert.match(document, /negative delta.*block/is);
+    assert.match(document, /eval:ai:update-baseline.*explicit/is);
+    assert.match(document, /evals\/baselines\/ai-output-baseline\.json/);
+    assert.match(document, /no timestamp.*provider.*network.*model judge/is);
+    assert.match(document, /case-set drift.*review/i);
+  }
+});
+
+test('baseline surfaces are protected by engineering policy', async () => {
+  const policy = JSON.parse(await readFile('.agents/engineering-policy.json', 'utf8'));
+  const protectedPatterns = policy.rules.find(rule => rule.id === 'protected-engineering-surfaces').patterns;
+  for (const pattern of ['evals/baselines/**', 'scripts/ai-evaluation-baseline.mjs', 'scripts/update-ai-evaluation-baseline.mjs', 'scripts/evaluate-ai-outputs.mjs', 'tests/ai-output-evaluator.test.mjs', 'tests/engineering-policy.test.mjs', 'tests/engineering-harness-wiring.test.mjs', 'tests/verification-wiring.test.mjs']) {
+    assert.ok(protectedPatterns.includes(pattern), pattern);
   }
 });
 
