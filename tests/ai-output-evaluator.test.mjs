@@ -36,8 +36,9 @@ test("CLI text and JSON output are deterministic and JSON remains pure", async (
   assert.equal(formatEvaluationReport(result, { json: true }), `${JSON.stringify(result, null, 2)}\n`);
 });
 
-test("CLI explicit output is contained, replaces a file, and prints only its status", async () => {
+test("CLI explicit output is contained, replaces a file, and prints only its status", async t => {
   const root = await mkdtemp(path.join(tmpdir(), "kidbot-cli-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
   const report = { passed: true, cases: [], tools: [], overallMean: 100, thresholds: { case: 85, toolMean: 90, overallMean: 90 } };
   const stdout = []; const stderr = [];
   await writeFile(path.join(root, "report.txt"), "old");
@@ -47,9 +48,11 @@ test("CLI explicit output is contained, replaces a file, and prints only its sta
   assert.match(await readFile(path.join(root, "report.txt"), "utf8"), /evaluation: passed/);
 });
 
-test("CLI output path rejects lexical escapes and unsafe symlink destinations", async () => {
+test("CLI output path rejects lexical escapes and unsafe symlink destinations", async t => {
   const root = await mkdtemp(path.join(tmpdir(), "kidbot-cli-"));
-  const outside = path.join(await mkdtemp(path.join(tmpdir(), "kidbot-outside-")), "report.txt");
+  const outsideRoot = await mkdtemp(path.join(tmpdir(), "kidbot-outside-"));
+  t.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(outsideRoot, { recursive: true, force: true })]));
+  const outside = path.join(outsideRoot, "report.txt");
   const outputs = ["../escape.txt"];
   try { await symlink(outside, path.join(root, "linked.txt")); outputs.push("linked.txt"); } catch (error) { if (error?.code !== "EPERM") throw error; }
   for (const output of outputs) {
@@ -59,27 +62,47 @@ test("CLI output path rejects lexical escapes and unsafe symlink destinations", 
   }
 });
 
-test("CLI output path rejects a linked ancestor even when it resolves inside the repository", async () => {
+test("CLI output path rejects nested destinations and a linked ancestor", async t => {
   const root = await mkdtemp(path.join(tmpdir(), "kidbot-cli-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
   const actual = path.join(root, "actual"); await mkdir(path.join(actual, "nested"), { recursive: true });
   const linked = path.join(root, "linked");
   if (process.platform === "win32") execFileSync("cmd.exe", ["/d", "/c", "mklink", "/J", linked, actual]);
   else await symlink(actual, linked, "dir");
-  const stderr = [];
-  const code = await evaluator.runCli(["--output", "linked/nested/report.txt"], { repoRoot: root, evaluate: async () => ({ passed: true }), stdout: () => {}, stderr: value => stderr.push(value) });
-  assert.equal(code, 2); assert.match(stderr.join(""), /output path/i);
+  for (const selected of ["actual/nested/report.txt", "linked/nested/report.txt"]) {
+    const stderr = [];
+    const code = await evaluator.runCli(["--output", selected], { repoRoot: root, evaluate: async () => ({ passed: true }), stdout: () => {}, stderr: value => stderr.push(value) });
+    assert.equal(code, 2); assert.match(stderr.join(""), /output path/i);
+  }
 });
 
-test("CLI revalidates an explicitly selected file after evaluation before replacement", async () => {
+test("CLI revalidates an explicitly selected file after evaluation before replacement", async t => {
   const root = await mkdtemp(path.join(tmpdir(), "kidbot-cli-"));
+  const outsideRoot = await mkdtemp(path.join(tmpdir(), "kidbot-outside-"));
+  t.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(outsideRoot, { recursive: true, force: true })]));
   const destination = path.join(root, "report.txt"); await writeFile(destination, "safe");
-  const outside = path.join(await mkdtemp(path.join(tmpdir(), "kidbot-outside-")), "outside.txt"); await writeFile(outside, "outside");
+  const outside = path.join(outsideRoot, "outside.txt"); await writeFile(outside, "outside");
   const stderr = [];
   const code = await evaluator.runCli(["--output", "report.txt"], {
     repoRoot: root, stdout: () => {}, stderr: value => stderr.push(value),
     evaluate: async () => { await rm(destination); await link(outside, destination); return { passed: true, cases: [], tools: [], overallMean: 100, thresholds: {} }; },
   });
   assert.equal(code, 2); assert.equal(await readFile(outside, "utf8"), "outside");
+});
+
+test("CLI rejects a temporary-file hard-link anomaly after writing and cleans the temp", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "kidbot-cli-"));
+  const outsideRoot = await mkdtemp(path.join(tmpdir(), "kidbot-outside-"));
+  t.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(outsideRoot, { recursive: true, force: true })]));
+  const linked = path.join(outsideRoot, "linked-report.txt");
+  const stderr = [];
+  const code = await evaluator.runCli(["--output", "report.txt"], {
+    repoRoot: root, stdout: () => {}, stderr: value => stderr.push(value),
+    evaluate: async () => ({ passed: true, cases: [], tools: [], overallMean: 100, thresholds: {} }),
+    testHooks: { afterTemporaryWrite: temporary => link(temporary, linked) },
+  });
+  assert.equal(code, 3);
+  assert.deepEqual((await (await import("node:fs/promises")).readdir(root)).filter(name => name.includes(".tmp")), []);
 });
 
 test("CLI exit codes are exact and errors redact environment and case payload", async () => {

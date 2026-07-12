@@ -203,22 +203,13 @@ export function parseArguments(args) {
 
 async function resolveSafeOutput(repoRoot, selected) {
   const root = path.resolve(repoRoot);
+  if (!nonempty(selected) || path.basename(selected) !== selected || selected === "." || selected === "..") throw new Error("output path must be a filename in the repository root");
   const destination = path.resolve(root, selected);
   assertInside(root, destination, "output path");
+  const rootStat = await lstat(root);
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error("repository root must be a real directory");
   const physicalRoot = await realpath(root);
-  const parent = path.dirname(destination);
-  const relativeParent = path.relative(root, parent);
-  let ancestor = root;
-  for (const segment of relativeParent.split(path.sep).filter(Boolean)) {
-    ancestor = path.join(ancestor, segment);
-    const ancestorStat = await lstat(ancestor);
-    if (!ancestorStat.isDirectory() || ancestorStat.isSymbolicLink()) throw new Error("output path parent must not be linked");
-    if (await realpath(ancestor) !== path.join(physicalRoot, path.relative(root, ancestor))) throw new Error("output path parent physical path mismatch");
-  }
-  let parentStat;
-  try { parentStat = await lstat(parent); } catch { throw new Error("output path parent must already exist"); }
-  if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) throw new Error("output path parent must be a real directory");
-  assertInside(physicalRoot, await realpath(parent), "output path");
+  if (path.resolve(physicalRoot) !== root) throw new Error("repository root physical path mismatch");
   try {
     const targetStat = await lstat(destination);
     if (!targetStat.isFile() || targetStat.isSymbolicLink() || targetStat.nlink !== 1) throw new Error("output path must select a regular file");
@@ -229,29 +220,30 @@ async function resolveSafeOutput(repoRoot, selected) {
   return destination;
 }
 
-async function writeSafeReport(repoRoot, destination, report) {
+async function writeSafeReport(repoRoot, destination, report, testHooks) {
   const parent = path.dirname(destination);
   const temporary = path.join(parent, `.${path.basename(destination)}.${process.pid}.${randomUUID()}.tmp`);
   let handle;
+  let replaced = false;
   try {
     handle = await open(temporary, "wx", 0o600);
-    const opened = await handle.stat();
-    if (!opened.isFile() || opened.nlink !== 1) throw new Error("temporary output must be a single regular file");
+    const before = await handle.stat();
+    if (!before.isFile() || before.nlink !== 1) throw new Error("temporary output must be a single regular file");
     const physicalRoot = await realpath(repoRoot);
     assertInside(physicalRoot, await realpath(temporary), "temporary output");
     await handle.writeFile(report, { encoding: "utf8" });
+    await testHooks?.afterTemporaryWrite?.(temporary);
+    const after = await handle.stat();
+    if (!after.isFile() || after.nlink !== 1 || after.dev !== before.dev || after.ino !== before.ino) throw new Error("temporary output link anomaly");
     await handle.sync();
-  } finally {
     await handle?.close();
-  }
-  try {
-    // Removing a leaf unlinks a symlink or hard link rather than following it.
-    // A concurrent replacement can make the final rename fail, but cannot redirect report bytes.
-    await rm(destination, { force: true });
     await rename(temporary, destination);
+    replaced = true;
   } catch (error) {
-    await rm(temporary, { force: true });
     throw error;
+  } finally {
+    await handle?.close().catch(() => {});
+    if (!replaced) await rm(temporary, { force: true }).catch(() => {});
   }
 }
 
@@ -283,7 +275,7 @@ export async function runCli(args = process.argv.slice(2), options = {}) {
   try {
     const report = formatEvaluationReport(result, { json: parsed.json });
     if (destination) {
-      await writeSafeReport(repoRoot, destination, report);
+      await writeSafeReport(repoRoot, destination, report, options.testHooks);
       stdout(`evaluation: ${result.passed ? "passed" : "failed"} -> ${destination}\n`);
     } else stdout(report);
     return result.passed ? 0 : 1;

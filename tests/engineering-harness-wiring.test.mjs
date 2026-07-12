@@ -35,6 +35,7 @@ test('repository docs define deterministic evaluator thresholds and limitations'
     assert.match(document, /age-proxy.*deterministic proxy/is);
     assert.match(document, /no-provider/i);
     assert.match(document, /output.*symlink/i);
+    assert.match(document, /output.*filename.*repository root/is);
   }
 });
 

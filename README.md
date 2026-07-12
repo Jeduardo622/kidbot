@@ -79,7 +79,7 @@ Run the exact secret-free harness suite with `pnpm run test:harness`. Review-onl
 
 Use `pnpm run eval:ai` for a readable report or `pnpm run eval:ai -- --json` for pure stable JSON. The no-provider evaluator calls only local agent functions: it uses no API key, provider, network request, or model judge. Every case must score at least 85, every tool mean at least 90, and the overall mean at least 90. Contract and safety failures are always hard failures regardless of score. `age-proxy` is a deterministic proxy based on length and word complexity, not a semantic or developmental judgment.
 
-The CLI does not write by default. `--output <path>` explicitly selects a report file inside the repository; lexical escapes and symlink, hard-link, junction, or linked-parent destinations are rejected. Add `--json` to write the stable JSON report instead of text.
+The CLI does not write by default. `--output <filename>` explicitly selects a directly contained filename in the canonical repository root; nested destinations, lexical escapes, symlinks, hard links, junctions, and replaced or linked parents are rejected. Add `--json` to write the stable JSON report instead of text.
 
 `CODEOWNERS` marks governance, CI, service boundaries, and deployment/data surfaces for `@Jeduardo622`. The verifier's `human review: required` flag is evidence only: enforcement requires GitHub branch protection configured to require code-owner review. Repository scripts cannot grant or self-approve that review.
 
