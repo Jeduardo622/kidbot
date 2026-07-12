@@ -148,16 +148,21 @@ export async function appendEvaluationJobSummary({ summaryPath, markdown, testHo
   const pinnedDestination = identity(destinationBefore);
   const pinnedParent = objectIdentity(parentBefore);
 
-  const verify = async handle => {
+  const verify = async (handle, statHandle = () => handle.stat()) => {
     const parentNow = await lstat(lexicalParent);
     if (objectIdentity(parentNow) !== pinnedParent || !parentNow.isDirectory() || parentNow.isSymbolicLink() || await realpath(lexicalParent) !== path.resolve(lexicalParent)) throw new Error("summary parent identity changed");
     const destinationNow = await lstat(summaryPath);
-    const handleNow = await handle.stat();
+    const handleNow = await statHandle();
     if (!destinationNow.isFile() || destinationNow.isSymbolicLink() || destinationNow.nlink !== 1 || identity(destinationNow) !== pinnedDestination || identity(handleNow) !== pinnedDestination) throw new Error("summary identity or link state changed");
   };
 
   await invokeHook(testHooks, "before-open");
-  const handle = await open(summaryPath, constants.O_APPEND | constants.O_RDWR | (constants.O_NOFOLLOW ?? 0));
+  const handle = await open(summaryPath, constants.O_RDWR | (constants.O_NOFOLLOW ?? 0));
+  const rollbackTruncate = handle.truncate.bind(handle);
+  const rollbackSync = handle.sync.bind(handle);
+  const rollbackStat = handle.stat.bind(handle);
+  let appendStarted = false;
+  let appendFailed = false;
   try {
     await invokeHook(testHooks, "after-open");
     await verify(handle);
@@ -172,10 +177,12 @@ export async function appendEvaluationJobSummary({ summaryPath, markdown, testHo
     await verify(handle);
     const appendBuffer = separator.length ? Buffer.concat([separator, buffer]) : buffer;
     let offset = 0;
+    appendStarted = true;
     while (offset < appendBuffer.length) {
       const writer = testHooks?.write;
       if (writer !== undefined && typeof writer !== "function") throw new Error("summary write test hook is invalid");
-      const written = await (writer ? writer(handle, appendBuffer, offset) : handle.write(appendBuffer, offset, appendBuffer.length - offset, null));
+      const writePosition = destinationBefore.size + offset;
+      const written = await (writer ? writer(handle, appendBuffer, offset, writePosition) : handle.write(appendBuffer, offset, appendBuffer.length - offset, writePosition));
       if (!Number.isInteger(written?.bytesWritten) || written.bytesWritten <= 0 || written.bytesWritten > appendBuffer.length - offset) throw new Error("summary append made no progress");
       offset += written.bytesWritten;
     }
@@ -186,8 +193,27 @@ export async function appendEvaluationJobSummary({ summaryPath, markdown, testHo
     await verify(handle);
     await invokeHook(testHooks, "before-final-verify");
     await verify(handle);
+  } catch (error) {
+    if (!appendStarted) throw error;
+    appendFailed = true;
+    try {
+      await rollbackTruncate(destinationBefore.size);
+      await rollbackSync();
+      await verify(handle, rollbackStat);
+      const restoredDestination = await lstat(summaryPath);
+      const restoredHandle = await rollbackStat();
+      if (restoredDestination.size !== destinationBefore.size || restoredHandle.size !== destinationBefore.size) throw new Error("summary rollback size mismatch");
+      try { await invokeHook(testHooks, "after-rollback"); } catch {}
+    } catch {
+      // The caller receives one stable error whether append or rollback failed.
+    }
+    throw new Error("summary append failed");
   } finally {
-    await handle.close();
+    try {
+      await handle.close();
+    } catch (error) {
+      if (!appendFailed) throw error;
+    }
   }
 }
 
