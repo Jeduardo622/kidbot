@@ -531,7 +531,7 @@ test("baseline refresh CLI always prints stable before and after summary and nor
   let stdout = "";
   assert.equal(await runRefreshCli([], { stdout: value => { stdout += value; } }), 0);
   assert.equal(stdout, `baseline refresh: passed (unchanged)\nbefore: overall=100.00 cases=17 tools=4\nafter: overall=100.00 cases=17 tools=4\ndeltas: positive=0 negative=0 added=0 removed=0\nfingerprint: unchanged\nwritten: ${target}\n`);
-  await evaluator.runCli([], { stdout: () => {} });
+  await evaluator.runCli([], { summaryEnv: {}, stdout: () => {} });
   assert.equal(await readFile(target, "utf8"), before);
 });
 
@@ -632,7 +632,7 @@ test("baseline CLI emits stable delta report and blocks regressions read-only", 
   const result = structuredClone(await evaluator.evaluateLocally(repoRoot));
   result.cases[0].score -= 1;
   let stdout = ""; let stderr = "";
-  const code = await evaluator.runCli([], { repoRoot, evaluate: async () => result, stdout: value => { stdout += value; }, stderr: value => { stderr += value; } });
+  const code = await evaluator.runCli([], { repoRoot, evaluate: async () => result, summaryEnv: {}, stdout: value => { stdout += value; }, stderr: value => { stderr += value; } });
   assert.equal(code, 1);
   assert.match(stdout, /baseline deltas:\n.*delta=-1\.00/s);
   assert.match(stdout, /unchanged: 21/);
@@ -641,14 +641,14 @@ test("baseline CLI emits stable delta report and blocks regressions read-only", 
   assert.equal(stderr, "");
   assert.equal(await readFile(target, "utf8"), before);
   let json = "";
-  assert.equal(await evaluator.runCli(["--json"], { repoRoot, evaluate: async () => result, stdout: value => { json += value; } }), 1);
+  assert.equal(await evaluator.runCli(["--json"], { repoRoot, evaluate: async () => result, summaryEnv: {}, stdout: value => { json += value; } }), 1);
   assert.equal(JSON.parse(json).passed, false);
 });
 
 test("baseline CLI JSON is canonical, byte-stable, and includes comparison", async () => {
   const repoRoot = path.resolve(".");
   const result = await evaluator.evaluateLocally(repoRoot);
-  const invoke = async () => { let stdout = ""; const code = await evaluator.runCli(["--json"], { repoRoot, evaluate: async () => structuredClone(result), stdout: value => { stdout += value; } }); return { code, stdout }; };
+  const invoke = async () => { let stdout = ""; const code = await evaluator.runCli(["--json"], { repoRoot, evaluate: async () => structuredClone(result), summaryEnv: {}, stdout: value => { stdout += value; } }); return { code, stdout }; };
   const first = await invoke(); const second = await invoke();
   assert.equal(first.code, 0); assert.equal(first.stdout, second.stdout);
   const parsed = JSON.parse(first.stdout);
