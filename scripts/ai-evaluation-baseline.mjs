@@ -80,8 +80,7 @@ export async function loadBaselineManifest({ repoRoot, baselinePath } = {}) {
 }
 
 export function compareEvaluationToBaseline({ baseline, datasets, result }) {
-  validateBaselineManifest(baseline); const fingerprint = buildEvaluationFingerprint({ datasets }); const regressions = [];
-  assertUniqueCurrent(result.cases, "id", "case"); assertUniqueCurrent(result.tools, "tool", "tool");
+  validateBaselineManifest(baseline); validateCurrentResult(result); const fingerprint = buildEvaluationFingerprint({ datasets }); const regressions = [];
   if (baseline.fingerprint !== fingerprint) regressions.push({ scope: "fingerprint", baseline: baseline.fingerprint, current: fingerprint });
   const cases = compareList("case", baseline.cases, result.cases, "id", "score", regressions, x => ({ tool:x.tool, ageBand:x.ageBand }));
   const tools = compareList("tool", baseline.tools, result.tools, "tool", "mean", regressions);
@@ -93,7 +92,20 @@ export function compareEvaluationToBaseline({ baseline, datasets, result }) {
   const unchangedCount = [...cases,...tools,overall].filter(x => x.delta === 0).length;
   return { fingerprint, cases, tools, overall, unchangedCount, regressions, passed: regressions.length === 0 };
 }
-function assertUniqueCurrent(items,key,label) { if (!Array.isArray(items)) throw new Error(`current ${label} results are invalid`); const seen=new Set(); for(const item of items) { if(seen.has(item?.[key])) throw new Error(`duplicate current ${label} identity`); seen.add(item?.[key]); } }
+function invalidCurrent(reason) { throw new Error(`current evaluation is invalid: ${reason}`); }
+function validateCurrentResult(result) {
+  if (!result || typeof result!=="object" || Array.isArray(result) || !Array.isArray(result.cases) || !Array.isArray(result.tools) || typeof result.passed!=="boolean") invalidCurrent("result shape");
+  if (!exactKeys(result.thresholds,["case","toolMean","overallMean"]) || !Object.values(result.thresholds).every(Number.isFinite)) invalidCurrent("threshold shape");
+  const caseIds=new Set(); for(const item of result.cases) {
+    if (!item || typeof item!=="object" || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(item.id) || !TOOLS.has(item.tool) || !AGES.has(item.ageBand) || !Number.isInteger(item.score) || item.score<0 || item.score>100 || !Array.isArray(item.hardFailures) || item.hardFailures.some(x=>typeof x!=="string") || typeof item.passed!=="boolean") invalidCurrent("case shape or value");
+    if(caseIds.has(item.id)) invalidCurrent("duplicate current case identity"); caseIds.add(item.id);
+  }
+  const toolIds=new Set(); for(const item of result.tools) {
+    if (!item || typeof item!=="object" || !TOOLS.has(item.tool) || !normalized(item.mean) || typeof item.passed!=="boolean") invalidCurrent("tool shape or value");
+    if(toolIds.has(item.tool)) invalidCurrent("duplicate current tool identity"); toolIds.add(item.tool);
+  }
+  if(!normalized(result.overallMean)) invalidCurrent("overall mean");
+}
 function deltaEntry(scope,id,baseline,current) { return { scope, ...(id === undefined ? {} : { id }), baseline, current, delta: Number((current-baseline).toFixed(2)) }; }
 function compareList(scope, base, current, key, metric, regressions, identity) {
   const bm = new Map(base.map(x => [x[key],x])), cm = new Map(current.map(x => [x[key],x])); const out=[];

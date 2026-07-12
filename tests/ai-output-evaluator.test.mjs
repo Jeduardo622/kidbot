@@ -124,6 +124,20 @@ test("baseline containment rejects a relocated baseline-directory junction", asy
   await assert.rejects(loadBaselineManifest({repoRoot:root}),/directory|physical|linked/i);
 });
 
+test("baseline comparison rejects malformed current result values before delta math", async () => {
+  const datasets=await loadEvaluationDatasets({repoRoot:path.resolve(".")});
+  const result={cases:[{id:"a",tool:"voice_chat",ageBand:"4-6",score:100,hardFailures:[],passed:true}],tools:[{tool:"voice_chat",mean:100,passed:true}],overallMean:100,passed:true,thresholds:{case:85,toolMean:90,overallMean:90}};
+  const baseline=buildBaselineManifest({datasets,result});
+  const invalid=[
+    {...result,cases:[{...result.cases[0],score:NaN}]}, {...result,cases:[{...result.cases[0],score:99.5}]}, {...result,cases:[{...result.cases[0],score:-1}]}, {...result,cases:[{...result.cases[0],score:101}]},
+    {...result,cases:[{...result.cases[0],id:"Bad"}]}, {...result,cases:[{...result.cases[0],tool:"bad"}]}, {...result,cases:[{...result.cases[0],ageBand:"3-4"}]}, {...result,cases:[{...result.cases[0],hardFailures:"none"}]}, {...result,cases:[{...result.cases[0],passed:"yes"}]},
+    {...result,tools:[{...result.tools[0],mean:NaN}]}, {...result,tools:[{...result.tools[0],mean:-1}]}, {...result,tools:[{...result.tools[0],mean:101}]}, {...result,tools:[{...result.tools[0],mean:99.999}]}, {...result,tools:[{...result.tools[0],tool:"bad"}]}, {...result,tools:[{...result.tools[0],passed:"yes"}]},
+    {...result,overallMean:NaN}, {...result,overallMean:-1}, {...result,overallMean:101}, {...result,overallMean:99.999}, {...result,passed:"yes"}, {...result,thresholds:null},
+  ];
+  for(const current of invalid) assert.throws(()=>compareEvaluationToBaseline({baseline,datasets,result:current}),/current evaluation/i);
+  assert.doesNotThrow(()=>compareEvaluationToBaseline({baseline,datasets,result:{...result,tools:[{...result.tools[0],mean:99.99}],overallMean:99.99}}));
+});
+
 test("CLI parser accepts JSON and one explicit output path", () => {
   assert.deepEqual(evaluator.parseArguments([]), { json: false, output: undefined });
   assert.deepEqual(evaluator.parseArguments(["--", "--json"]), { json: true, output: undefined });
