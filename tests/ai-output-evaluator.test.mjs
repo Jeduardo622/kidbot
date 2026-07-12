@@ -31,13 +31,61 @@ test("baseline refresh refusal rejects failed and nondeterministic evaluations",
   } }), /deterministic/i);
 });
 
+test("baseline refresh refusal rejects a sparse six-case result despite passing flags", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "kidbot-refresh-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(path.join(root, "evals", "baselines"), { recursive: true });
+  const datasets = await loadEvaluationDatasets({ repoRoot: path.resolve(".") });
+  const passing = await evaluator.evaluateLocally(path.resolve("."));
+  const sparse = structuredClone(passing);
+  sparse.cases = [passing.cases[0], passing.cases[1], passing.cases[2], passing.cases[4], passing.cases[5], passing.cases[8]];
+  assert.deepEqual([...new Set(sparse.cases.map(item => item.ageBand))].sort(), ["10-12", "4-6", "7-9"]);
+  await assert.rejects(refreshEvaluationBaseline({ repoRoot: root, datasets, evaluate: async () => structuredClone(sparse) }), /identity|coverage|case/i);
+});
+
 test("baseline refresh refusal CLI uses generic exit codes", async () => {
   let stderr = "";
   assert.equal(await runRefreshCli(["--unexpected"], { stderr: value => { stderr += value; } }), 2);
   assert.equal(stderr, "baseline refresh: invalid invocation\n");
   stderr = "";
-  assert.equal(await runRefreshCli([], { repoRoot: "Z:/definitely-missing", stderr: value => { stderr += value; } }), 3);
-  assert.equal(stderr, "baseline refresh: runtime error\n");
+  assert.equal(await runRefreshCli([], { repoRoot: "Z:/definitely-missing", stderr: value => { stderr += value; } }), 2);
+  assert.equal(stderr, "baseline refresh: invalid path\n");
+});
+
+test("baseline refresh refusal covers identity, hard failure, threshold, tool, and age matrices", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "kidbot-refresh-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(path.join(root, "evals", "baselines"), { recursive: true });
+  const datasets = await loadEvaluationDatasets({ repoRoot: path.resolve(".") });
+  const passing = await evaluator.evaluateLocally(path.resolve("."));
+  const mutations = [
+    value => value.cases.pop(),
+    value => value.cases.push({ ...value.cases[0], id: "extra-case" }),
+    value => { value.cases[0].id = "renamed-case"; },
+    value => { value.cases[1] = structuredClone(value.cases[0]); },
+    value => { value.cases[0].hardFailures = ["safety:probe"]; },
+    value => { value.cases[0].score = 84; },
+    value => { value.tools[0].mean = 89.99; },
+    value => { value.overallMean = 89.99; },
+    value => value.tools.pop(),
+    value => value.tools.push(structuredClone(value.tools[0])),
+    value => { value.cases[0].ageBand = "7-9"; },
+  ];
+  for (const mutate of mutations) {
+    const value = structuredClone(passing); mutate(value);
+    await assert.rejects(refreshEvaluationBaseline({ repoRoot: root, datasets, evaluate: async () => structuredClone(value) }), /passing|identit|coverage/i);
+  }
+});
+
+test("baseline refresh refusal detects fingerprint instability between evaluations", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "kidbot-refresh-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(path.join(root, "evals", "baselines"), { recursive: true });
+  const datasets = structuredClone(await loadEvaluationDatasets({ repoRoot: path.resolve(".") }));
+  const passing = await evaluator.evaluateLocally(path.resolve("."));
+  await assert.rejects(refreshEvaluationBaseline({ repoRoot: root, datasets, evaluate: async () => structuredClone(passing), testHooks: {
+    afterFirstEvaluation: () => { datasets[0].cases[0].request = { ...datasets[0].cases[0].request, prompt: "fingerprint changed" }; },
+  } }), /deterministic/i);
 });
 
 test("baseline refresh creates only the canonical target and is byte stable", async t => {
@@ -55,11 +103,102 @@ test("baseline refresh creates only the canonical target and is byte stable", as
   assert.equal(await readFile(first.path, "utf8"), bytes);
 });
 
+test("baseline refresh CLI always prints stable before and after summary and normal eval does not mutate", async () => {
+  const target = path.resolve("evals/baselines/ai-output-baseline.json");
+  const before = await readFile(target, "utf8");
+  let stdout = "";
+  assert.equal(await runRefreshCli([], { stdout: value => { stdout += value; } }), 0);
+  assert.match(stdout, /^baseline refresh: passed \(unchanged\)\nbefore: overall=100\.00 cases=17 tools=4\nafter: overall=100\.00 cases=17 tools=4\ndeltas: positive=0 negative=0 added=0 removed=0\n$/);
+  await evaluator.runCli([], { stdout: () => {} });
+  assert.equal(await readFile(target, "utf8"), before);
+});
+
+test("baseline refresh rejects target and temporary link anomalies and cleans failed installs", async t => {
+  const datasets = await loadEvaluationDatasets({ repoRoot: path.resolve(".") });
+  const passing = await evaluator.evaluateLocally(path.resolve("."));
+  const makeRoot = async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "kidbot-refresh-links-"));
+    await mkdir(path.join(root, "evals", "baselines"), { recursive: true });
+    t.after(() => rm(root, { recursive: true, force: true }));
+    return root;
+  };
+  for (const kind of ["symlink", "hardlink"]) {
+    const root = await makeRoot();
+    const target = path.join(root, "evals", "baselines", "ai-output-baseline.json");
+    const external = path.join(root, "external.json");
+    await writeFile(external, formatBaselineManifest(buildBaselineManifest({ datasets, result: passing })));
+    if (kind === "symlink") {
+      try { await symlink(external, target, "file"); } catch (error) { if (error.code === "EPERM") continue; throw error; }
+    } else await link(external, target);
+    await assert.rejects(refreshEvaluationBaseline({ repoRoot: root, datasets, evaluate: async () => structuredClone(passing) }), /link|baseline/i);
+  }
+  for (const hookName of ["afterTemporaryOpen", "afterTemporaryWrite"]) {
+    const root = await makeRoot(); let extra;
+    await assert.rejects(refreshEvaluationBaseline({ repoRoot: root, datasets, evaluate: async () => structuredClone(passing), testHooks: {
+      [hookName]: async temporary => { extra = `${temporary}.hardlink`; await link(temporary, extra); },
+    } }), /temporary|link|identity/i);
+    assert.equal(await lstat(extra).then(() => true, () => false), true);
+    await rm(extra, { force: true });
+    assert.equal(await lstat(path.join(root, "evals", "baselines", "ai-output-baseline.json")).then(() => true, () => false), false);
+  }
+  const root = await makeRoot(); let installedLink;
+  await assert.rejects(refreshEvaluationBaseline({ repoRoot: root, datasets, evaluate: async () => structuredClone(passing), testHooks: {
+    afterRename: async destination => { installedLink = `${destination}.hardlink`; await link(destination, installedLink); },
+  } }), /installed|link|identity/i);
+  assert.equal(await lstat(path.join(root, "evals", "baselines", "ai-output-baseline.json")).then(() => true, () => false), false);
+  await rm(installedLink, { force: true });
+});
+
+test("baseline refresh detects repository and baseline-directory replacement phases", async t => {
+  const datasets = await loadEvaluationDatasets({ repoRoot: path.resolve(".") });
+  const passing = await evaluator.evaluateLocally(path.resolve("."));
+  for (const [kind, hookName] of [["directory", "afterFirstEvaluation"], ["root", "afterSecondEvaluation"], ["directory", "beforeRename"]]) {
+    const parent = await mkdtemp(path.join(tmpdir(), "kidbot-refresh-race-"));
+    const root = path.join(parent, "repo");
+    await mkdir(path.join(root, "evals", "baselines"), { recursive: true });
+    t.after(() => rm(parent, { recursive: true, force: true }));
+    const hooks = { [hookName]: async () => {
+      const selected = kind === "root" ? root : path.join(root, "evals", "baselines");
+      await rename(selected, `${selected}.moved`);
+      await mkdir(selected, { recursive: true });
+    } };
+    await assert.rejects(refreshEvaluationBaseline({ repoRoot: root, datasets, evaluate: async () => structuredClone(passing), testHooks: hooks }), /identity|baseline|ENOENT/i, `${kind}:${hookName}`);
+  }
+});
+
+test("baseline refresh replacement reports stable positive negative add and remove deltas", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "kidbot-refresh-deltas-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(path.join(root, "evals", "baselines"), { recursive: true });
+  const datasets = structuredClone(await loadEvaluationDatasets({ repoRoot: path.resolve(".") }));
+  const initial = structuredClone(await evaluator.evaluateLocally(path.resolve(".")));
+  initial.cases[0].score = 90; initial.cases[1].score = 90;
+  await refreshEvaluationBaseline({ repoRoot: root, datasets, evaluate: async () => structuredClone(initial) });
+  const changedDatasets = structuredClone(datasets);
+  const removed = changedDatasets[0].cases.shift();
+  changedDatasets[0].cases.push({ ...structuredClone(removed), id: "coloring-added-probe" });
+  const changed = structuredClone(initial);
+  const removedResult = changed.cases.find(item => item.id === removed.id);
+  changed.cases = changed.cases.filter(item => item.id !== removed.id);
+  changed.cases.push({ ...removedResult, id: "coloring-added-probe" });
+  changed.cases[0].score = 91; changed.cases[1].score = 99;
+  let stdout = "";
+  assert.equal(await runRefreshCli([], { repoRoot: root, datasets: changedDatasets, evaluate: async () => structuredClone(changed), stdout: value => { stdout += value; } }), 0);
+  assert.match(stdout, /baseline refresh: passed \(updated\)/);
+  assert.match(stdout, /deltas: positive=1 negative=1 added=1 removed=1/);
+});
+
 test("baseline refresh package and policy wiring is exact", async () => {
   const pkg = JSON.parse(await readFile(path.resolve("package.json"), "utf8"));
   assert.equal(pkg.scripts["eval:ai:update-baseline"], "tsx ./scripts/update-ai-evaluation-baseline.mjs");
   const policy = await readFile(path.resolve("scripts/engineering-policy.mjs"), "utf8");
   assert.match(policy, /"pnpm run eval:ai:update-baseline"/);
+  assert.equal((policy.match(/"pnpm run eval:ai:update-baseline"/g) ?? []).length, 1);
+  assert.doesNotMatch(pkg.scripts["eval:ai"], /update-baseline/);
+  assert.doesNotMatch(pkg.scripts["verify:local:strict"], /update-baseline/);
+  for (const workflow of [".github/workflows/ci.yml", ".github/workflows/production-smoke.yml"]) {
+    try { assert.doesNotMatch(await readFile(path.resolve(workflow), "utf8"), /eval:ai:update-baseline/); } catch (error) { if (error.code !== "ENOENT") throw error; }
+  }
 });
 
 test("baseline schema rejects malformed and noncanonical manifests", async t => {
