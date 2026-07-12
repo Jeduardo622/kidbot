@@ -22,7 +22,7 @@
     "smoke:production-widget-dist-preflight": "node ./scripts/smoke-production-widget-dist-preflight.mjs",
     "smoke:production-widget-story-panels": "tsx ./scripts/smoke-production-widget-story-panels.tsx",
     "smoke:railway-provider-roundtrip": "node ./scripts/smoke-railway-provider-roundtrip.mjs",
-    "smoke:secured-posture": "node ./scripts/smoke-secured-posture.mjs",
+    "smoke:secured-posture": "pnpm --filter @kidbot/agent-service run build && node ./scripts/smoke-secured-posture.mjs",
     "typecheck": "node ./scripts/run-typecheck.mjs",
     "test": "node ./scripts/run-test.mjs",
     "test:root": "node ./scripts/run-test.mjs --root-only",

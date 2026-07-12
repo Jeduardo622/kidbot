@@ -48,6 +48,15 @@ test('MCP compatibility verification builds its required dist artifact first', a
   assert.equal(packageJson.scripts['test:compat'], 'pnpm run build && node --test test/mcp-compat.test.mjs');
 });
 
+test('secured posture verification builds its required agent-service artifact first', async () => {
+  const packageJson = JSON.parse(await readFile('package.json', 'utf8'));
+
+  assert.equal(
+    packageJson.scripts['smoke:secured-posture'],
+    'pnpm --filter @kidbot/agent-service run build && node ./scripts/smoke-secured-posture.mjs',
+  );
+});
+
 test('typed linting uses a project that includes every linted TypeScript surface', async () => {
   const eslintConfig = await readFile('eslint.config.js', 'utf8');
   const lintProject = JSON.parse(await readFile('tsconfig.eslint.json', 'utf8'));

@@ -56,7 +56,7 @@ test('CI resolves a safe Git base and enforces routing and verification', async 
     'name: Test web-widget',
     'name: Run MCP compatibility tests',
   ]) assert.doesNotMatch(workflow, new RegExp(duplicatedStep));
-  assert.match(workflow, /name: Build agent-service/);
+  assert.doesNotMatch(workflow, /name: Build agent-service/);
   assert.match(workflow, /name: Test agent-service with Redis limiter smoke[^]*RATE_LIMIT_STORE: redis/);
   assert.match(workflow, /name: Run parent store Redis deploy smoke/);
   assert.match(workflow, /name: Run MCP auth\/startup matrix/);

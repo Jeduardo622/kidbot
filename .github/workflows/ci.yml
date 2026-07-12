@@ -67,9 +67,6 @@ jobs:
       - name: Verify engineering change
         run: pnpm run verify-change -- --base "$HARNESS_BASE"
 
-      - name: Build agent-service
-        run: pnpm --filter @kidbot/agent-service run build
-
       - name: Test agent-service with Redis limiter smoke
         env:
           RATE_LIMIT_STORE: redis
