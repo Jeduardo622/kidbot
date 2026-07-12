@@ -56,6 +56,12 @@ test('baseline surfaces are protected by engineering policy', async () => {
   }
 });
 
+test('canonical AI baseline bytes remain LF-only across Git checkouts', async () => {
+  const attributes = await readFile('.gitattributes', 'utf8');
+
+  assert.match(attributes, /^evals\/baselines\/\*\.json text eol=lf$/m);
+});
+
 test('README documents text and JSON specialist recommendations as advisory output', async () => {
   const readme = await readFile('README.md', 'utf8');
 
