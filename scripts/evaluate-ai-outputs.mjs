@@ -79,8 +79,7 @@ function isSingleSvgDocument(value) {
 }
 function hasOnlyOutlineElements(svg) {
   for (const match of String(svg ?? "").matchAll(/<\/?\s*([a-zA-Z][\w:-]*)\b/g)) if (!COLORING_ELEMENTS.has(match[1].toLowerCase())) return false;
-  const fills = String(svg ?? "").match(/\sfill\s*=\s*(["'])(.*?)\1/gi) ?? [];
-  return fills.every(fill => /\sfill\s*=\s*(["'])none\1/i.test(fill));
+  return true;
 }
 function ageProxyPasses(ageBand, request, output, expectedBlocked) {
   if (expectedBlocked) return output?.blocked === true;
@@ -107,7 +106,7 @@ function check(tool, id, request, output, expectedBlocked, ageBand) {
   if (id === "story-null-image-urls") return outcome(id, output?.panels?.every(p => p.imageUrl == null) === true, "local image URLs must be null");
   if (id === "coloring-svg") return outcome(id, isSingleSvgDocument(output?.svg), "exactly one complete SVG document is required; an XML declaration and whitespace are allowed");
   if (id === "coloring-viewbox") return outcome(id, /<svg\b[^>]*\bviewBox=["']0\s+0\s+1024\s+1024["']/i.test(String(output?.svg ?? "")), "SVG root requires viewBox 0 0 1024 1024");
-  if (id === "coloring-forbidden-elements") return outcome(id, !/<\s*(?:script|foreignObject|image|style|a|iframe|object|embed|audio|video|canvas|animate|set)\b|\son[a-z]+\s*=|\b(?:href|xlink:href)\s*=|url\s*\(|\sstyle\s*=/i.test(String(output?.svg ?? "")) && hasOnlyOutlineElements(output?.svg), "only service-allowed outline elements with fill none and no unsafe references are permitted");
+  if (id === "coloring-forbidden-elements") return outcome(id, !/<\s*(?:script|foreignObject|image|style|a|iframe|object|embed|audio|video|canvas|animate|set)\b|\son[a-z]+\s*=|\b(?:href|xlink:href)\s*=|url\s*\(|\sstyle\s*=/i.test(String(output?.svg ?? "")) && hasOnlyOutlineElements(output?.svg), "only service-allowed elements without unsafe references are permitted; explicit fills are normalized by the service");
   if (id === "science-fields") return outcome(id, ["title","objective","materials","steps","prediction","explanation","supervision"].every(k => output?.[k] != null), "complete science fields required");
   if (id === "science-bounds") return outcome(id, Array.isArray(output?.materials) && output.materials.length <= 20 && Array.isArray(output?.steps) && output.steps.length <= 20, "science lists bounded");
   if (id === "science-prediction") return outcome(id, output?.prediction && typeof output.prediction === "object", "prediction object required");
