@@ -119,7 +119,7 @@ export function formatEvaluationJobSummary({ result, baseline }) {
     ...(changed.length ? changed.map(metricLine) : ["  - none"]),
     `- Drift reasons: ${reasons.length ? "" : "none"}`,
     ...reasons,
-    `- Unchanged metrics: ${baseline.unchangedCount}`,
+    `- **Baseline:** ${baseline.unchangedCount} unchanged; ${baseline.regressions.length} regressions`,
   ];
   const markdown = `${lines.join("\n")}\n`;
   if (Buffer.byteLength(markdown) > MAX_BYTES) throw new Error("evaluation summary exceeds 32 KiB");
@@ -157,16 +157,26 @@ export async function appendEvaluationJobSummary({ summaryPath, markdown, testHo
   };
 
   await invokeHook(testHooks, "before-open");
-  const handle = await open(summaryPath, constants.O_APPEND | constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0));
+  const handle = await open(summaryPath, constants.O_APPEND | constants.O_RDWR | (constants.O_NOFOLLOW ?? 0));
   try {
     await invokeHook(testHooks, "after-open");
     await verify(handle);
+    const opened = await handle.stat();
+    let separator = Buffer.alloc(0);
+    if (opened.size > 0) {
+      const finalByte = Buffer.alloc(1);
+      const read = await handle.read(finalByte, 0, 1, opened.size - 1);
+      if (read.bytesRead !== 1) throw new Error("summary final byte could not be read");
+      if (finalByte[0] !== 10) separator = Buffer.from("\n");
+    }
+    await verify(handle);
+    const appendBuffer = separator.length ? Buffer.concat([separator, buffer]) : buffer;
     let offset = 0;
-    while (offset < buffer.length) {
+    while (offset < appendBuffer.length) {
       const writer = testHooks?.write;
       if (writer !== undefined && typeof writer !== "function") throw new Error("summary write test hook is invalid");
-      const written = await (writer ? writer(handle, buffer, offset) : handle.write(buffer, offset, buffer.length - offset, null));
-      if (!Number.isInteger(written?.bytesWritten) || written.bytesWritten <= 0 || written.bytesWritten > buffer.length - offset) throw new Error("summary append made no progress");
+      const written = await (writer ? writer(handle, appendBuffer, offset) : handle.write(appendBuffer, offset, appendBuffer.length - offset, null));
+      if (!Number.isInteger(written?.bytesWritten) || written.bytesWritten <= 0 || written.bytesWritten > appendBuffer.length - offset) throw new Error("summary append made no progress");
       offset += written.bytesWritten;
     }
     await invokeHook(testHooks, "after-write");

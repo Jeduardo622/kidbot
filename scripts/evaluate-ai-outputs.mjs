@@ -350,16 +350,16 @@ export async function runCli(args = process.argv.slice(2), options = {}) {
       catch { stderr("evaluation: runtime error\n"); return 3; }
     }
   }
+  let outputSelection;
+  if (parsed.output !== undefined) {
+    try { outputSelection = await resolveSafeOutput(repoRoot, parsed.output); } catch { stderr("evaluation: invalid output path\n"); return 2; }
+  }
   const summaryEnv = options.summaryEnv ?? process.env;
   if (baseline && summaryEnv?.GITHUB_ACTIONS === "true" && typeof summaryEnv.GITHUB_STEP_SUMMARY === "string" && summaryEnv.GITHUB_STEP_SUMMARY.length > 0 && path.isAbsolute(summaryEnv.GITHUB_STEP_SUMMARY)) {
     try {
       const writeSummary = options.writeSummary ?? (await import("./ai-evaluation-job-summary.mjs")).writeEvaluationJobSummary;
       await writeSummary({ result, baseline, env: summaryEnv, testHooks: options.summaryTestHooks });
     } catch { stderr("evaluation: summary error\n"); return 3; }
-  }
-  let outputSelection;
-  if (parsed.output !== undefined) {
-    try { outputSelection = await resolveSafeOutput(repoRoot, parsed.output); } catch { stderr("evaluation: invalid output path\n"); return 2; }
   }
   try {
     const report = formatEvaluationReport(result, { json: parsed.json, baseline });
