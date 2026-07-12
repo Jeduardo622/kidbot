@@ -61,7 +61,8 @@ test("job summary markdown covers zero, positive, regression, fingerprint, ident
   const zero = summaryComparison({ cases: summaryComparison().cases.map(item => ({ ...item, baseline: item.current, delta: 0 })), tools: summaryComparison().tools.map(item => ({ ...item, baseline: item.current, delta: 0 })), overall: { scope: "overall", baseline: 92.5, current: 92.5, delta: 0 }, unchangedCount: 5, regressions: [], passed: true });
   assert.match(formatEvaluationJobSummary({ result: summaryResult, baseline: zero }), /^## AI output evaluation: Passed/m);
   assert.doesNotMatch(formatEvaluationJobSummary({ result: summaryResult, baseline: zero }), /baseline=92\.50/);
-  const drift = summaryComparison({ regressions: [
+  const drift = summaryComparison({ cases: summaryComparison().cases.filter(item => item.id !== "alpha-case"), regressions: [
+    structuredClone(summaryComparison().regressions[0]),
     { scope: "fingerprint", baseline: "b".repeat(64), current: fp },
     { scope: "case", id: "alpha-case", reason: "identity drift" },
   ] });
@@ -124,13 +125,43 @@ test("job summary format rejects malformed semantic comparison state and unsafe 
 
 test("job summary format orders cases before tools regardless of cross-scope identities", () => {
   const value = summaryComparison({
-    cases: [{ scope: "case", id: "zeta-case", baseline: 94, current: 95, delta: 1 }],
-    tools: [{ scope: "tool", id: "voice_chat", baseline: 91, current: 90, delta: -1 }],
-    unchangedCount: 0,
+    cases: [{ scope: "case", id: "zeta-case", baseline: 94, current: 95, delta: 1 }, { scope: "case", id: "alpha-case", baseline: 90, current: 90, delta: 0 }],
+    tools: [{ scope: "tool", id: "voice_chat", baseline: 91, current: 90, delta: -1 }, { scope: "tool", id: "story_panels", baseline: 95, current: 95, delta: 0 }],
+    unchangedCount: 2,
   });
   const text = formatEvaluationJobSummary({ result: summaryResult, baseline: value });
   assert.ok(text.indexOf("case/zeta") < text.indexOf("tool/voice"));
   assert.ok(text.indexOf("tool/voice") < text.indexOf("  - overall:"));
+});
+
+test("job summary format accepts the real evaluator result and baseline comparison", async () => {
+  const datasets = await loadEvaluationDatasets({ repoRoot: path.resolve(".") });
+  const result = await evaluator.evaluateLocally(path.resolve("."));
+  const manifest = buildBaselineManifest({ datasets, result });
+  const comparison = compareEvaluationToBaseline({ baseline: manifest, datasets, result });
+  const markdown = formatEvaluationJobSummary({ result, baseline: comparison });
+  assert.match(markdown, /^## AI output evaluation: Passed/);
+  assert.match(markdown, /- Unchanged metrics: 22\n$/);
+});
+
+test("job summary format cross-binds comparison metrics identities regressions and pass state", () => {
+  const mutations = [
+    value => { value.regressions = []; },
+    value => { value.regressions.push(structuredClone(value.regressions[0])); },
+    value => { value.regressions[0] = { ...value.cases[0], delta: 1 }; },
+    value => { value.cases[0].current = 91; value.cases[0].delta = 2; },
+    value => { value.tools[0].current = 89; value.tools[0].delta = -2; value.regressions[0] = structuredClone(value.tools[0]); },
+    value => { value.overall.current = 93; value.overall.delta = 1; },
+    value => { value.cases.pop(); value.unchangedCount -= 1; },
+    value => { value.tools.pop(); value.unchangedCount -= 1; },
+    value => { value.passed = true; },
+  ];
+  for (const mutate of mutations) {
+    const value = structuredClone(summaryComparison()); mutate(value);
+    assert.throws(() => formatEvaluationJobSummary({ result: summaryResult, baseline: value }), /summary|comparison/i);
+  }
+  const fabricated = summaryComparison({ regressions: [{ scope: "case", id: "alpha-case", reason: "identity drift" }] });
+  assert.throws(() => formatEvaluationJobSummary({ result: summaryResult, baseline: fabricated }), /summary|comparison/i);
 });
 
 test("job summary activation requires exact GitHub environment", async t => {

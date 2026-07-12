@@ -28,7 +28,7 @@ function validateResult(result) {
   if (!exactKeys(result, ["version", "cases", "tools", "overallMean", "passed", "thresholds"]) || result.version !== 1) throw new Error("summary result has invalid exact keys");
   const caseIds = new Set();
   for (const item of result.cases) {
-    if (!exactKeys(item, ["id", "tool", "ageBand", "categoryScores", "score", "hardFailures", "passed", "checks"]) || !ID.test(item.id) || !TOOLS.has(item.tool) || !AGES.has(item.ageBand) || caseIds.has(item.id) || !exactKeys(item.categoryScores, ["contract", "safety", "completeness", "age-proxy"]) || !Object.values(item.categoryScores).every(Number.isFinite) || !Array.isArray(item.checks) || item.checks.some(value => typeof value !== "string")) throw new Error("summary result case is invalid");
+    if (!exactKeys(item, ["id", "tool", "ageBand", "categoryScores", "score", "hardFailures", "passed", "checks"]) || !ID.test(item.id) || !TOOLS.has(item.tool) || !AGES.has(item.ageBand) || caseIds.has(item.id) || !exactKeys(item.categoryScores, ["contract", "safety", "completeness", "age-proxy"]) || !Object.values(item.categoryScores).every(Number.isFinite) || !Array.isArray(item.checks) || item.checks.some(value => !exactKeys(value, ["id", "category", "passed", "message"]) || !ID.test(value.id) || !["contract", "safety", "completeness", "age-proxy"].includes(value.category) || typeof value.passed !== "boolean" || typeof value.message !== "string")) throw new Error("summary result case is invalid");
     if (Object.values(item.categoryScores).reduce((sum, value) => sum + value, 0) !== item.score || item.passed !== (item.score >= result.thresholds.case && item.hardFailures.length === 0)) throw new Error("summary result case totals are inconsistent");
     caseIds.add(item.id);
   }
@@ -53,27 +53,42 @@ function validateDelta(item, scope, requireId) {
   if (item.delta !== Number((item.current - item.baseline).toFixed(2))) throw new Error("summary comparison delta is inconsistent");
 }
 
-function validateComparison(value) {
+function validateComparison(value, result) {
   if (!exactKeys(value, ["fingerprint", "cases", "tools", "overall", "unchangedCount", "regressions", "passed"]) || !FINGERPRINT.test(value.fingerprint) || !Array.isArray(value.cases) || !Array.isArray(value.tools) || !Array.isArray(value.regressions) || !Number.isInteger(value.unchangedCount) || value.unchangedCount < 0 || typeof value.passed !== "boolean") throw new Error("summary comparison is invalid");
   const caseIds = new Set(); for (const item of value.cases) { validateDelta(item, "case", true); if (!ID.test(item.id) || caseIds.has(item.id)) throw new Error("summary comparison duplicate or invalid case"); caseIds.add(item.id); }
   const toolIds = new Set(); for (const item of value.tools) { validateDelta(item, "tool", true); if (!TOOLS.has(item.id) || toolIds.has(item.id)) throw new Error("summary comparison duplicate or invalid tool"); toolIds.add(item.id); }
   validateDelta(value.overall, "overall", false);
+  const deltaRegressions = new Map();
+  const identityRegressions = { case: new Map(), tool: new Map() };
+  let fingerprintRegressions = 0; let absoluteRegressions = 0;
   for (const item of value.regressions) {
     if (item?.delta !== undefined) {
       validateDelta(item, item.scope, item.scope !== "overall");
       if (!['case','tool','overall'].includes(item.scope) || item.delta >= 0) throw new Error("summary comparison regression delta is invalid");
       const source = item.scope === "overall" ? value.overall : value[`${item.scope}s`].find(entry => entry.id === item.id);
       if (!source || JSON.stringify(source) !== JSON.stringify(item)) throw new Error("summary comparison regression delta is inconsistent");
+      const key = `${item.scope}:${item.id ?? ""}`; if (deltaRegressions.has(key)) throw new Error("summary comparison duplicate regression"); deltaRegressions.set(key, item);
     } else if (item?.scope === "fingerprint") {
-      if (!exactKeys(item, ["scope", "baseline", "current"]) || !FINGERPRINT.test(item.baseline) || item.current !== value.fingerprint) throw new Error("summary comparison fingerprint regression is invalid");
+      if (!exactKeys(item, ["scope", "baseline", "current"]) || !FINGERPRINT.test(item.baseline) || item.current !== value.fingerprint || item.baseline === item.current || ++fingerprintRegressions > 1) throw new Error("summary comparison fingerprint regression is invalid");
     } else if (item?.scope === "absolute") {
-      if (!exactKeys(item, ["scope", "reason"]) || item.reason !== "current evaluation failed") throw new Error("summary comparison absolute regression is invalid");
+      if (!exactKeys(item, ["scope", "reason"]) || item.reason !== "current evaluation failed" || ++absoluteRegressions > 1) throw new Error("summary comparison absolute regression is invalid");
     } else if (item?.scope === "case" || item?.scope === "tool") {
       if (!exactKeys(item, ["scope", "id", "reason"]) || !ID.test(item.id) || !["identity drift", "missing current identity", "extra current identity"].includes(item.reason)) throw new Error("summary comparison identity regression is invalid");
+      if (identityRegressions[item.scope].has(item.id)) throw new Error("summary comparison duplicate identity regression"); identityRegressions[item.scope].set(item.id, item.reason);
     } else throw new Error("summary comparison regression is invalid");
   }
   const unchanged = [...value.cases, ...value.tools, value.overall].filter(item => item.delta === 0).length;
-  if (value.unchangedCount !== unchanged || value.passed !== (value.regressions.length === 0)) throw new Error("summary comparison totals are inconsistent");
+  const negative = [...value.cases, ...value.tools, value.overall].filter(item => item.delta < 0);
+  if (negative.length !== deltaRegressions.size || negative.some(item => !deltaRegressions.has(`${item.scope}:${item.id ?? ""}`))) throw new Error("summary comparison regression coverage is inconsistent");
+  if (absoluteRegressions !== (result.passed ? 0 : 1)) throw new Error("summary comparison absolute state is inconsistent");
+  const resultCases = new Map(result.cases.map(item => [item.id, item])); const resultTools = new Map(result.tools.map(item => [item.tool, item]));
+  for (const item of value.cases) if (resultCases.get(item.id)?.score !== item.current || identityRegressions.case.has(item.id)) throw new Error("summary comparison case current is inconsistent");
+  for (const item of value.tools) if (resultTools.get(item.id)?.mean !== item.current || identityRegressions.tool.has(item.id)) throw new Error("summary comparison tool current is inconsistent");
+  for (const id of resultCases.keys()) if (!caseIds.has(id) && !["identity drift", "extra current identity"].includes(identityRegressions.case.get(id))) throw new Error("summary comparison case identities are inconsistent");
+  for (const id of resultTools.keys()) if (!toolIds.has(id) && !["identity drift", "extra current identity"].includes(identityRegressions.tool.get(id))) throw new Error("summary comparison tool identities are inconsistent");
+  for (const [id, reason] of identityRegressions.case) if ((reason === "missing current identity") === resultCases.has(id)) throw new Error("summary comparison case identity reason is inconsistent");
+  for (const [id, reason] of identityRegressions.tool) if ((reason === "missing current identity") === resultTools.has(id)) throw new Error("summary comparison tool identity reason is inconsistent");
+  if (value.overall.current !== result.overallMean || value.unchangedCount !== unchanged || value.passed !== (result.passed && value.regressions.length === 0)) throw new Error("summary comparison totals are inconsistent");
 }
 
 const metricLine = item => {
@@ -84,7 +99,7 @@ const metricLine = item => {
 
 export function formatEvaluationJobSummary({ result, baseline }) {
   validateResult(result);
-  validateComparison(baseline);
+  validateComparison(baseline, result);
   const changed = [
     ...baseline.cases.filter(item => item.delta !== 0).sort((a, b) => a.id.localeCompare(b.id)),
     ...baseline.tools.filter(item => item.delta !== 0).sort((a, b) => a.id.localeCompare(b.id)),
