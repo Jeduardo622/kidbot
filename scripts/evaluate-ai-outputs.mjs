@@ -298,7 +298,7 @@ async function writeSafeReport(repoRoot, destination, rootIdentity, report, test
   }
 }
 
-async function evaluateLocally(repoRoot) {
+export async function evaluateLocally(repoRoot) {
   const [{ craftVoiceReply }, { planStory }, { generateColoringOutline }, { planExperiment }] = await Promise.all([
     import("../apps/agent-service/src/agents/voiceAgent.ts"),
     import("../apps/agent-service/src/agents/storyAgent.ts"),

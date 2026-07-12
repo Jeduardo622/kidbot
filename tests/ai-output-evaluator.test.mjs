@@ -7,6 +7,7 @@ import test from "node:test";
 
 import * as evaluator from "../scripts/evaluate-ai-outputs.mjs";
 import { buildBaselineManifest, buildEvaluationFingerprint, buildEvaluationFingerprintForContract, compareEvaluationToBaseline, formatBaselineManifest, loadBaselineManifest, validateBaselineManifest } from "../scripts/ai-evaluation-baseline.mjs";
+import { refreshEvaluationBaseline, runCli as runRefreshCli } from "../scripts/update-ai-evaluation-baseline.mjs";
 import { craftVoiceReply } from "../apps/agent-service/src/agents/voiceAgent.ts";
 import { planStory } from "../apps/agent-service/src/agents/storyAgent.ts";
 import { generateColoringOutline } from "../apps/agent-service/src/agents/imageAgent.ts";
@@ -14,6 +15,52 @@ import { planExperiment } from "../apps/agent-service/src/agents/experimentAgent
 import { validateColoringSvg } from "../apps/agent-service/src/svgSafety.ts";
 
 const { evaluateCase, evaluateDatasets, formatEvaluationReport, loadEvaluationDatasets } = evaluator;
+
+test("baseline refresh refusal rejects failed and nondeterministic evaluations", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "kidbot-refresh-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(path.join(root, "evals", "baselines"), { recursive: true });
+  const datasets = await loadEvaluationDatasets({ repoRoot: path.resolve(".") });
+  const passing = await evaluator.evaluateLocally(path.resolve("."));
+  await assert.rejects(refreshEvaluationBaseline({ repoRoot: root, datasets, evaluate: async () => ({ ...passing, passed: false }) }), /failed|passing/i);
+  let call = 0;
+  await assert.rejects(refreshEvaluationBaseline({ repoRoot: root, datasets, evaluate: async () => {
+    const value = structuredClone(passing);
+    if (call++ === 1) value.cases[0].score -= 1;
+    return value;
+  } }), /deterministic/i);
+});
+
+test("baseline refresh refusal CLI uses generic exit codes", async () => {
+  let stderr = "";
+  assert.equal(await runRefreshCli(["--unexpected"], { stderr: value => { stderr += value; } }), 2);
+  assert.equal(stderr, "baseline refresh: invalid invocation\n");
+  stderr = "";
+  assert.equal(await runRefreshCli([], { repoRoot: "Z:/definitely-missing", stderr: value => { stderr += value; } }), 3);
+  assert.equal(stderr, "baseline refresh: runtime error\n");
+});
+
+test("baseline refresh creates only the canonical target and is byte stable", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "kidbot-refresh-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(path.join(root, "evals", "baselines"), { recursive: true });
+  const datasets = await loadEvaluationDatasets({ repoRoot: path.resolve(".") });
+  const passing = await evaluator.evaluateLocally(path.resolve("."));
+  const first = await refreshEvaluationBaseline({ repoRoot: root, datasets, evaluate: async () => structuredClone(passing) });
+  assert.equal(first.path, path.join(root, "evals", "baselines", "ai-output-baseline.json"));
+  assert.equal(first.previous, null); assert.equal(first.bytesChanged, true);
+  const bytes = await readFile(first.path, "utf8");
+  const second = await refreshEvaluationBaseline({ repoRoot: root, datasets, evaluate: async () => structuredClone(passing) });
+  assert.equal(second.bytesChanged, false);
+  assert.equal(await readFile(first.path, "utf8"), bytes);
+});
+
+test("baseline refresh package and policy wiring is exact", async () => {
+  const pkg = JSON.parse(await readFile(path.resolve("package.json"), "utf8"));
+  assert.equal(pkg.scripts["eval:ai:update-baseline"], "tsx ./scripts/update-ai-evaluation-baseline.mjs");
+  const policy = await readFile(path.resolve("scripts/engineering-policy.mjs"), "utf8");
+  assert.match(policy, /"pnpm run eval:ai:update-baseline"/);
+});
 
 test("baseline schema rejects malformed and noncanonical manifests", async t => {
   const root = await mkdtemp(path.join(tmpdir(), "kidbot-baseline-"));
