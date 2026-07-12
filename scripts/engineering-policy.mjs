@@ -21,6 +21,7 @@ const SPECIALIST_REGISTRY_KEYS = ["specialists", "version"];
 const SPECIALIST_KEYS = ["classifications", "description", "id", "instructions", "patterns"];
 const ALLOWED_VERIFICATION_COMMANDS = new Set([
   "pnpm run test:harness",
+  "pnpm run eval:ai",
   "pnpm run lint",
   "pnpm run typecheck",
   "pnpm test",

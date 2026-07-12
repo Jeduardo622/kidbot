@@ -33,3 +33,7 @@ Unmatched application extensions receive the internal `default-standard` classif
 The human-review flag and CODEOWNERS entries provide evidence and ownership routing only. GitHub branch protection must require code-owner review to enforce approval; no repository script may self-approve or treat its own output as approval.
 
 Report verification in separate categories: executed, skipped, blocked, and secret-dependent. Include exact commands and outcomes, never describe an unexecuted check as passing, and identify residual risk or the next unblock step.
+
+## Deterministic AI output evaluation
+
+Run `pnpm run eval:ai` for text or `pnpm run eval:ai -- --json` for pure stable JSON. This is a no-provider evaluation: it uses local agent functions without credentials, network calls, or a model judge. Each case must score at least 85, each tool mean at least 90, and the overall mean at least 90; any contract or safety failure is a hard failure. The `age-proxy` check is only a deterministic proxy for output length and word complexity, not a developmental or semantic assessment. Reports are written only with explicit `--output <path>`; the destination must remain inside the repository and must not be a symlink, hard link, junction, or traverse a linked parent.

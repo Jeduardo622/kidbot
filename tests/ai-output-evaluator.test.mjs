@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { link, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { execFileSync, spawnSync } from "node:child_process";
+import { link, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -13,6 +13,86 @@ import { planExperiment } from "../apps/agent-service/src/agents/experimentAgent
 import { validateColoringSvg } from "../apps/agent-service/src/svgSafety.ts";
 
 const { evaluateCase, evaluateDatasets, formatEvaluationReport, loadEvaluationDatasets } = evaluator;
+
+test("CLI parser accepts JSON and one explicit output path", () => {
+  assert.deepEqual(evaluator.parseArguments([]), { json: false, output: undefined });
+  assert.deepEqual(evaluator.parseArguments(["--", "--json"]), { json: true, output: undefined });
+  assert.deepEqual(evaluator.parseArguments(["--json", "--output", "reports/eval.json"]), { json: true, output: "reports/eval.json" });
+});
+
+for (const args of [["--wat"], ["--json", "--json"], ["--output"], ["--output", "a", "--output", "b"]]) {
+  test(`CLI parser rejects invalid arguments: ${args.join(" ")}`, () => assert.throws(() => evaluator.parseArguments(args), /argument/i));
+}
+
+test("CLI text and JSON output are deterministic and JSON remains pure", async () => {
+  const result = { version: 1, cases: [{ id: "safe-case", tool: "voice_chat", ageBand: "7-9", categoryScores: { contract: 30, safety: 35, completeness: 20, "age-proxy": 15 }, score: 100, hardFailures: [], passed: true, checks: [] }], tools: [{ tool: "voice_chat", mean: 100, passed: true }], overallMean: 100, passed: true, thresholds: { case: 85, toolMean: 90, overallMean: 90 } };
+  const text = formatEvaluationReport(result);
+  assert.match(text, /safe-case.*100/);
+  assert.match(text, /contract=30.*safety=35.*completeness=20.*age-proxy=15/);
+  assert.match(text, /voice_chat mean: 100\.00/);
+  assert.match(text, /overall mean: 100\.00/);
+  assert.match(text, /age-proxy.*deterministic proxy/i);
+  assert.match(text, /evaluation: passed/);
+  assert.equal(formatEvaluationReport(result, { json: true }), `${JSON.stringify(result, null, 2)}\n`);
+});
+
+test("CLI explicit output is contained, replaces a file, and prints only its status", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kidbot-cli-"));
+  const report = { passed: true, cases: [], tools: [], overallMean: 100, thresholds: { case: 85, toolMean: 90, overallMean: 90 } };
+  const stdout = []; const stderr = [];
+  await writeFile(path.join(root, "report.txt"), "old");
+  const code = await evaluator.runCli(["--output", "report.txt"], { repoRoot: root, evaluate: async () => report, stdout: value => stdout.push(value), stderr: value => stderr.push(value) });
+  assert.equal(code, 0); assert.deepEqual(stderr, []);
+  assert.equal(stdout.join(""), `evaluation: passed -> ${path.join(root, "report.txt")}\n`);
+  assert.match(await readFile(path.join(root, "report.txt"), "utf8"), /evaluation: passed/);
+});
+
+test("CLI output path rejects lexical escapes and unsafe symlink destinations", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kidbot-cli-"));
+  const outside = path.join(await mkdtemp(path.join(tmpdir(), "kidbot-outside-")), "report.txt");
+  const outputs = ["../escape.txt"];
+  try { await symlink(outside, path.join(root, "linked.txt")); outputs.push("linked.txt"); } catch (error) { if (error?.code !== "EPERM") throw error; }
+  for (const output of outputs) {
+    const stderr = [];
+    assert.equal(await evaluator.runCli(["--output", output], { repoRoot: root, evaluate: async () => ({ passed: true }), stdout: () => {}, stderr: value => stderr.push(value) }), 2);
+    assert.match(stderr.join(""), /output path/i);
+  }
+});
+
+test("CLI output path rejects a linked ancestor even when it resolves inside the repository", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kidbot-cli-"));
+  const actual = path.join(root, "actual"); await mkdir(path.join(actual, "nested"), { recursive: true });
+  const linked = path.join(root, "linked");
+  if (process.platform === "win32") execFileSync("cmd.exe", ["/d", "/c", "mklink", "/J", linked, actual]);
+  else await symlink(actual, linked, "dir");
+  const stderr = [];
+  const code = await evaluator.runCli(["--output", "linked/nested/report.txt"], { repoRoot: root, evaluate: async () => ({ passed: true }), stdout: () => {}, stderr: value => stderr.push(value) });
+  assert.equal(code, 2); assert.match(stderr.join(""), /output path/i);
+});
+
+test("CLI revalidates an explicitly selected file after evaluation before replacement", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "kidbot-cli-"));
+  const destination = path.join(root, "report.txt"); await writeFile(destination, "safe");
+  const outside = path.join(await mkdtemp(path.join(tmpdir(), "kidbot-outside-")), "outside.txt"); await writeFile(outside, "outside");
+  const stderr = [];
+  const code = await evaluator.runCli(["--output", "report.txt"], {
+    repoRoot: root, stdout: () => {}, stderr: value => stderr.push(value),
+    evaluate: async () => { await rm(destination); await link(outside, destination); return { passed: true, cases: [], tools: [], overallMean: 100, thresholds: {} }; },
+  });
+  assert.equal(code, 2); assert.equal(await readFile(outside, "utf8"), "outside");
+});
+
+test("CLI exit codes are exact and errors redact environment and case payload", async () => {
+  const secret = "DO_NOT_LEAK_ENV"; process.env.KIDBOT_CLI_TEST_SECRET = secret;
+  const payload = "DO_NOT_LEAK_CASE_PAYLOAD";
+  const invoke = async (args, evaluate) => { const stdout = []; const stderr = []; const code = await evaluator.runCli(args, { repoRoot: process.cwd(), evaluate, stdout: x => stdout.push(x), stderr: x => stderr.push(x) }); return { code, stdout: stdout.join(""), stderr: stderr.join("") }; };
+  assert.equal((await invoke([], async () => ({ passed: true, cases: [], tools: [], overallMean: 100, thresholds: {} }))).code, 0);
+  assert.equal((await invoke([], async () => ({ passed: false, cases: [], tools: [], overallMean: 0, thresholds: {} }))).code, 1);
+  assert.equal((await invoke(["--unknown"], async () => ({ passed: true }))).code, 2);
+  const runtime = await invoke([], async () => { throw new Error(`${secret} ${payload}`); });
+  assert.equal(runtime.code, 3); assert.doesNotMatch(runtime.stderr, new RegExp(`${secret}|${payload}`));
+  delete process.env.KIDBOT_CLI_TEST_SECRET;
+});
 
 const realAgentFunctions = {
   voice_chat: craftVoiceReply,

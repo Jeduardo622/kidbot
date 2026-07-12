@@ -21,8 +21,11 @@ test('verify:local is authoritative and remains secret-free', async () => {
   assert.equal(verifyLocal, 'cross-env STRICT_VERIFY=1 pnpm run verify:local:strict');
   assert.equal(
     strictVerify,
-    'pnpm run lint && pnpm run typecheck && pnpm run test && pnpm --filter @kidbot/mcp-server run test:compat && pnpm run smoke:provider-preflight:ci && pnpm run smoke:secured-posture',
+    'pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run eval:ai && pnpm --filter @kidbot/mcp-server run test:compat && pnpm run smoke:provider-preflight:ci && pnpm run smoke:secured-posture',
   );
+  assert.equal(packageJson.scripts['eval:ai'], 'tsx ./scripts/evaluate-ai-outputs.mjs');
+  assert.match(strictVerify, /pnpm run test && pnpm run eval:ai &&/);
+  assert.equal((strictVerify.match(/pnpm run eval:ai/g) ?? []).length, 1);
   assert.match(lintRunner, /process\.env\.STRICT_VERIFY === '1'/);
   assert.match(typecheckRunner, /process\.env\.STRICT_VERIFY === '1'/);
   assert.doesNotMatch(strictVerify, /production|railway|OPENAI_API_KEY|KIDBOT_REMOTE_MCP_URL/);
@@ -40,6 +43,12 @@ test('CI delegates root smoke-script tests to verify-change', async () => {
 
   assert.match(workflow, /name: Verify engineering change\s+run: pnpm run verify-change/);
   assert.doesNotMatch(workflow, /name: Run root smoke-script tests/);
+  assert.doesNotMatch(workflow, /pnpm run eval:ai|evaluate-ai-outputs|OPENAI_API_KEY/);
+});
+
+test('deterministic evaluator command is allowlisted by engineering policy', async () => {
+  const policy = await readFile('scripts/engineering-policy.mjs', 'utf8');
+  assert.match(policy, /"pnpm run eval:ai"/);
 });
 
 test('CI keeps specialist recommendations advisory-only', async () => {

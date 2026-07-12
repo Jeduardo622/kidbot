@@ -22,7 +22,20 @@ test('package exposes routing and verification commands', async () => {
   assert.equal(packageJson.scripts['route-task'], 'node ./scripts/route-task.mjs');
   assert.equal(packageJson.scripts['verify-change'], 'node ./scripts/verify-change.mjs');
   assert.ok(packageJson.scripts['verify:local']);
-  assert.equal(packageJson.scripts['test:harness'], 'node --test tests/engineering-policy.test.mjs tests/route-task.test.mjs tests/verify-change.test.mjs tests/specialist-routing.test.mjs tests/resolve-harness-base.test.mjs tests/export-harness-classification.test.mjs tests/engineering-harness-wiring.test.mjs tests/verification-wiring.test.mjs tests/run-lint.test.mjs');
+  assert.equal(packageJson.scripts['test:harness'], 'node --import tsx --test tests/ai-output-evaluator.test.mjs tests/engineering-policy.test.mjs tests/route-task.test.mjs tests/verify-change.test.mjs tests/specialist-routing.test.mjs tests/resolve-harness-base.test.mjs tests/export-harness-classification.test.mjs tests/engineering-harness-wiring.test.mjs tests/verification-wiring.test.mjs tests/run-lint.test.mjs');
+});
+
+test('repository docs define deterministic evaluator thresholds and limitations', async () => {
+  const instructions = await readFile('AGENTS.md', 'utf8');
+  const readme = await readFile('README.md', 'utf8');
+  for (const document of [instructions, readme]) {
+    assert.match(document, /eval:ai/);
+    assert.match(document, /case.*85.*tool mean.*90.*overall mean.*90/is);
+    assert.match(document, /contract.*safety.*hard failure/is);
+    assert.match(document, /age-proxy.*deterministic proxy/is);
+    assert.match(document, /no-provider/i);
+    assert.match(document, /output.*symlink/i);
+  }
 });
 
 test('README documents text and JSON specialist recommendations as advisory output', async () => {

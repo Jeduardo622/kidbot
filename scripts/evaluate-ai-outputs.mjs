@@ -1,5 +1,7 @@
-import { lstat, readFile, readdir, realpath } from "node:fs/promises";
+import { lstat, open, readFile, readdir, realpath, rename, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const FILES = Object.freeze({ voice_chat: "voice.json", story_panels: "story.json", coloring_outline: "coloring.json", science_sim: "science.json" });
 const AGE_BANDS = new Set(["4-6", "7-9", "10-12"]);
@@ -174,5 +176,120 @@ export async function evaluateDatasets({ datasets, agentFunctions = {} }) {
 
 export function formatEvaluationReport(result, { json = false } = {}) {
   if (json) return `${JSON.stringify(result, null, 2)}\n`;
-  return `evaluation: ${result?.passed === true ? "passed" : "failed"}\n`;
+  const lines = ["AI output evaluation (deterministic, no-provider)"];
+  for (const item of result?.cases ?? []) {
+    const categories = Object.entries(item.categoryScores ?? {}).map(([name, score]) => `${name}=${score}`).join(" ");
+    lines.push(`${item.tool}/${item.id} [${item.ageBand}] score=${item.score} ${categories}`);
+    if (item.hardFailures?.length) lines.push(`  hard failures: ${item.hardFailures.join(", ")}`);
+  }
+  for (const item of result?.tools ?? []) lines.push(`${item.tool} mean: ${Number(item.mean).toFixed(2)}`);
+  lines.push(`overall mean: ${Number(result?.overallMean ?? 0).toFixed(2)}`);
+  lines.push("age-proxy limitation: deterministic proxy for length and word complexity; it is not a model judge.");
+  lines.push(`evaluation: ${result?.passed === true ? "passed" : "failed"}`);
+  return `${lines.join("\n")}\n`;
+}
+
+export function parseArguments(args) {
+  const parsed = { json: false, output: undefined };
+  const values = args[0] === "--" ? args.slice(1) : args;
+  for (let index = 0; index < values.length; index += 1) {
+    const value = values[index];
+    if (value === "--json" && !parsed.json) parsed.json = true;
+    else if (value === "--output" && parsed.output === undefined && nonempty(values[index + 1]) && !values[index + 1].startsWith("--")) parsed.output = values[++index];
+    else throw new Error("invalid CLI argument");
+  }
+  return parsed;
+}
+
+async function resolveSafeOutput(repoRoot, selected) {
+  const root = path.resolve(repoRoot);
+  const destination = path.resolve(root, selected);
+  assertInside(root, destination, "output path");
+  const physicalRoot = await realpath(root);
+  const parent = path.dirname(destination);
+  const relativeParent = path.relative(root, parent);
+  let ancestor = root;
+  for (const segment of relativeParent.split(path.sep).filter(Boolean)) {
+    ancestor = path.join(ancestor, segment);
+    const ancestorStat = await lstat(ancestor);
+    if (!ancestorStat.isDirectory() || ancestorStat.isSymbolicLink()) throw new Error("output path parent must not be linked");
+    if (await realpath(ancestor) !== path.join(physicalRoot, path.relative(root, ancestor))) throw new Error("output path parent physical path mismatch");
+  }
+  let parentStat;
+  try { parentStat = await lstat(parent); } catch { throw new Error("output path parent must already exist"); }
+  if (!parentStat.isDirectory() || parentStat.isSymbolicLink()) throw new Error("output path parent must be a real directory");
+  assertInside(physicalRoot, await realpath(parent), "output path");
+  try {
+    const targetStat = await lstat(destination);
+    if (!targetStat.isFile() || targetStat.isSymbolicLink() || targetStat.nlink !== 1) throw new Error("output path must select a regular file");
+    assertInside(physicalRoot, await realpath(destination), "output path");
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+  return destination;
+}
+
+async function writeSafeReport(repoRoot, destination, report) {
+  const parent = path.dirname(destination);
+  const temporary = path.join(parent, `.${path.basename(destination)}.${process.pid}.${randomUUID()}.tmp`);
+  let handle;
+  try {
+    handle = await open(temporary, "wx", 0o600);
+    const opened = await handle.stat();
+    if (!opened.isFile() || opened.nlink !== 1) throw new Error("temporary output must be a single regular file");
+    const physicalRoot = await realpath(repoRoot);
+    assertInside(physicalRoot, await realpath(temporary), "temporary output");
+    await handle.writeFile(report, { encoding: "utf8" });
+    await handle.sync();
+  } finally {
+    await handle?.close();
+  }
+  try {
+    // Removing a leaf unlinks a symlink or hard link rather than following it.
+    // A concurrent replacement can make the final rename fail, but cannot redirect report bytes.
+    await rm(destination, { force: true });
+    await rename(temporary, destination);
+  } catch (error) {
+    await rm(temporary, { force: true });
+    throw error;
+  }
+}
+
+async function evaluateLocally(repoRoot) {
+  const [{ craftVoiceReply }, { planStory }, { generateColoringOutline }, { planExperiment }] = await Promise.all([
+    import("../apps/agent-service/src/agents/voiceAgent.ts"),
+    import("../apps/agent-service/src/agents/storyAgent.ts"),
+    import("../apps/agent-service/src/agents/imageAgent.ts"),
+    import("../apps/agent-service/src/agents/experimentAgent.ts"),
+  ]);
+  const datasets = await loadEvaluationDatasets({ repoRoot });
+  return evaluateDatasets({ datasets, agentFunctions: { voice_chat: craftVoiceReply, story_panels: planStory, coloring_outline: generateColoringOutline, science_sim: planExperiment } });
+}
+
+export async function runCli(args = process.argv.slice(2), options = {}) {
+  const stdout = options.stdout ?? (value => process.stdout.write(value));
+  const stderr = options.stderr ?? (value => process.stderr.write(value));
+  const repoRoot = path.resolve(options.repoRoot ?? path.join(import.meta.dirname, ".."));
+  let parsed;
+  try { parsed = parseArguments(args); } catch { stderr("evaluation: invalid arguments\n"); return 2; }
+  let result;
+  try {
+    result = await (options.evaluate ?? evaluateLocally)(repoRoot);
+  } catch { stderr("evaluation: runtime error\n"); return 3; }
+  let destination;
+  if (parsed.output !== undefined) {
+    try { destination = await resolveSafeOutput(repoRoot, parsed.output); } catch { stderr("evaluation: invalid output path\n"); return 2; }
+  }
+  try {
+    const report = formatEvaluationReport(result, { json: parsed.json });
+    if (destination) {
+      await writeSafeReport(repoRoot, destination, report);
+      stdout(`evaluation: ${result.passed ? "passed" : "failed"} -> ${destination}\n`);
+    } else stdout(report);
+    return result.passed ? 0 : 1;
+  } catch { stderr("evaluation: runtime error\n"); return 3; }
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
+  process.exitCode = await runCli();
 }
