@@ -164,7 +164,7 @@ The evaluator validates all datasets before executing any case. It stops without
 Add package command:
 
 ```json
-"eval:ai": "node ./scripts/evaluate-ai-outputs.mjs"
+"eval:ai": "tsx ./scripts/evaluate-ai-outputs.mjs"
 ```
 
 Append `pnpm run eval:ai` to `verify:local:strict` after unit tests and before smoke checks. Protected changes already select `verify:local`, so CI gains the evaluation gate without duplicating workflow steps.
