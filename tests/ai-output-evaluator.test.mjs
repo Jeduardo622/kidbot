@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 
 import * as evaluator from "../scripts/evaluate-ai-outputs.mjs";
-import { buildBaselineManifest, buildEvaluationFingerprint, compareEvaluationToBaseline, formatBaselineManifest, loadBaselineManifest } from "../scripts/ai-evaluation-baseline.mjs";
+import { buildBaselineManifest, buildEvaluationFingerprint, buildEvaluationFingerprintForContract, compareEvaluationToBaseline, formatBaselineManifest, loadBaselineManifest, validateBaselineManifest } from "../scripts/ai-evaluation-baseline.mjs";
 import { craftVoiceReply } from "../apps/agent-service/src/agents/voiceAgent.ts";
 import { planStory } from "../apps/agent-service/src/agents/storyAgent.ts";
 import { generateColoringOutline } from "../apps/agent-service/src/agents/imageAgent.ts";
@@ -47,6 +47,81 @@ test("baseline delta blocks an exact regression", async () => {
   assert.equal(comparison.passed, false);
   assert.deepEqual(comparison.regressions[0], { scope: "case", id: "voice-clouds-4-6", baseline: 100, current: 99, delta: -1 });
   assert.equal(formatBaselineManifest(baseline), `${JSON.stringify(baseline, null, 2)}\n`);
+});
+
+test("baseline schema canonicalizes fixed top-level and nested key order", () => {
+  const permuted = { overallMean: 100, tools: [{ mean: 100, tool: "voice_chat" }], cases: [{ score: 100, ageBand: "4-6", tool: "voice_chat", id: "voice-clouds-4-6" }], thresholds: { overallMean: 90, toolMean: 90, case: 85 }, fingerprint: "a".repeat(64), version: 1 };
+  const formatted = formatBaselineManifest(permuted);
+  assert.match(formatted, /^\{\n  "version": 1,\n  "fingerprint"/);
+  assert.match(formatted, /"thresholds": \{\n    "case": 85,\n    "toolMean": 90,\n    "overallMean": 90/);
+  assert.match(formatted, /"id": "voice-clouds-4-6",\n      "tool": "voice_chat",\n      "ageBand": "4-6",\n      "score": 100/);
+});
+
+test("baseline schema rejects the full malformed value matrix", () => {
+  const valid = { version: 1, fingerprint: "a".repeat(64), thresholds: { case:85, toolMean:90, overallMean:90 }, cases:[{id:"a",tool:"voice_chat",ageBand:"4-6",score:100}], tools:[{tool:"voice_chat",mean:100}], overallMean:100 };
+  const mutations = [
+    { ...valid, extra:true }, { ...valid, version:2 }, { ...valid, thresholds:{...valid.thresholds,case:84} },
+    { ...valid, cases:[valid.cases[0],valid.cases[0]] }, { ...valid, cases:[{...valid.cases[0],id:"Bad"}] }, { ...valid, cases:[{...valid.cases[0],tool:"bad"}] }, { ...valid, cases:[{...valid.cases[0],ageBand:"3-4"}] }, { ...valid, cases:[{...valid.cases[0],score:99.5}] },
+    { ...valid, tools:[{tool:"voice_chat",mean:99.999}] }, { ...valid, tools:[valid.tools[0],valid.tools[0]] }, { ...valid, overallMean:99.999 },
+  ];
+  for (const value of mutations) assert.throws(() => validateBaselineManifest(value), /baseline/i);
+});
+
+test("baseline fingerprint contract seam detects each contract dimension", async () => {
+  const datasets = structuredClone(await loadEvaluationDatasets({ repoRoot:path.resolve(".") }));
+  const base = { datasets, contractMetadata: structuredClone(evaluator.EVALUATION_CONTRACT), schemaVersion:1 };
+  const hash = buildEvaluationFingerprintForContract(base);
+  for (const mutate of [
+    x => { x.datasets[0].cases[0].request = { ...x.datasets[0].cases[0].request, scene:"changed" }; },
+    x => { x.contractMetadata.checks.coloring_outline[0].category = "safety"; },
+    x => { x.contractMetadata.weights.contract = 29; }, x => { x.contractMetadata.thresholds.case = 84; }, x => { x.schemaVersion = 2; },
+  ]) { const changed=structuredClone(base); mutate(changed); assert.notEqual(buildEvaluationFingerprintForContract(changed),hash); }
+  process.env.KIDBOT_FINGERPRINT_NOISE="ignored"; assert.equal(buildEvaluationFingerprintForContract({ ...base, repoRoot:"Z:/noise" }),hash);
+});
+
+test("baseline comparison rejects duplicate current identities and orders regressions", async () => {
+  const datasets=await loadEvaluationDatasets({repoRoot:path.resolve(".")});
+  const result={cases:[{id:"a",tool:"voice_chat",ageBand:"4-6",score:100,hardFailures:[],passed:true}],tools:[{tool:"voice_chat",mean:100,passed:true}],overallMean:100,passed:true,thresholds:{case:85,toolMean:90,overallMean:90}};
+  const baseline=buildBaselineManifest({datasets,result});
+  assert.throws(() => compareEvaluationToBaseline({baseline,datasets,result:{...result,cases:[...result.cases,...result.cases]}}),/duplicate current case/i);
+  assert.throws(() => compareEvaluationToBaseline({baseline,datasets,result:{...result,tools:[...result.tools,...result.tools]}}),/duplicate current tool/i);
+  const positive=compareEvaluationToBaseline({baseline:{...baseline,cases:[{...baseline.cases[0],score:99}],tools:[{...baseline.tools[0],mean:99.99}],overallMean:99.99},datasets,result});
+  assert.equal(positive.passed,true); assert.equal(positive.regressions.length,0);
+});
+
+test("baseline delta covers exact case tool overall identity and absolute failures", async () => {
+  const datasets=await loadEvaluationDatasets({repoRoot:path.resolve(".")});
+  const result={cases:[{id:"a",tool:"voice_chat",ageBand:"4-6",score:100,hardFailures:[],passed:true}],tools:[{tool:"voice_chat",mean:100,passed:true}],overallMean:100,passed:true,thresholds:{case:85,toolMean:90,overallMean:90}};
+  const baseline=buildBaselineManifest({datasets,result});
+  const regressed={...result,cases:[{...result.cases[0],score:99}],tools:[{...result.tools[0],mean:99.99}],overallMean:99.99};
+  const compare=compareEvaluationToBaseline({baseline,datasets,result:regressed});
+  assert.deepEqual(compare.regressions.filter(x=>x.delta!==undefined),[
+    {scope:"case",id:"a",baseline:100,current:99,delta:-1},
+    {scope:"overall",baseline:100,current:99.99,delta:-0.01},
+    {scope:"tool",id:"voice_chat",baseline:100,current:99.99,delta:-0.01},
+  ]);
+  for (const changed of [
+    {...result,cases:[]}, {...result,cases:[...result.cases,{...result.cases[0],id:"b"}]},
+    {...result,tools:[]}, {...result,tools:[...result.tools,{tool:"science_sim",mean:100,passed:true}]},
+    {...result,cases:[{...result.cases[0],ageBand:"7-9"}]}, {...result,passed:false},
+    {...result,thresholds:{case:84,toolMean:90,overallMean:90}},
+  ]) assert.equal(compareEvaluationToBaseline({baseline,datasets,result:changed}).passed,false);
+  assert.equal(compareEvaluationToBaseline({baseline,datasets,result}).unchangedCount,3);
+});
+
+test("baseline loader rejects malformed JSON and linked filesystem state", async t => {
+  const root=await mkdtemp(path.join(tmpdir(),"kidbot-baseline-links-")); const dir=path.join(root,"evals","baselines"); await mkdir(dir,{recursive:true}); t.after(()=>rm(root,{recursive:true,force:true}));
+  const target=path.join(dir,"ai-output-baseline.json"); await writeFile(target,"{"); await assert.rejects(loadBaselineManifest({repoRoot:root}),/malformed JSON/i);
+  await rm(target); const outside=path.join(root,"outside.json"); await writeFile(outside,"{}\n");
+  await link(outside,target); await assert.rejects(loadBaselineManifest({repoRoot:root}),/single-link/i); await rm(target);
+  try { await symlink(outside,target); await assert.rejects(loadBaselineManifest({repoRoot:root}),/single-link/i); } catch(error) { if(error?.code!=="EPERM") throw error; }
+});
+
+test("baseline containment rejects a relocated baseline-directory junction", async t => {
+  const root=await mkdtemp(path.join(tmpdir(),"kidbot-baseline-junction-")); const outside=await mkdtemp(path.join(tmpdir(),"kidbot-baseline-outside-")); t.after(()=>Promise.all([rm(root,{recursive:true,force:true}),rm(outside,{recursive:true,force:true})]));
+  await mkdir(path.join(root,"evals"),{recursive:true}); await writeFile(path.join(outside,"ai-output-baseline.json"),"{}\n"); const linked=path.join(root,"evals","baselines");
+  if(process.platform==="win32") execFileSync("cmd.exe",["/d","/c","mklink","/J",linked,outside]); else await symlink(outside,linked,"dir");
+  await assert.rejects(loadBaselineManifest({repoRoot:root}),/directory|physical|linked/i);
 });
 
 test("CLI parser accepts JSON and one explicit output path", () => {

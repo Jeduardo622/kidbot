@@ -16,14 +16,19 @@ const canonical = value => {
   return value;
 };
 
-function fingerprintInput(datasets) {
+function fingerprintInput(datasets, contractMetadata, schemaVersion) {
   const corpus = [...datasets].map(dataset => ({ version: dataset.version, tool: dataset.tool, cases: [...dataset.cases].map(item => ({ id: item.id, request: canonical(item.request), expectedBlocked: item.expectedBlocked, ageBand: item.ageBand, checks: [...item.checks].sort() })).sort((a,b) => a.id.localeCompare(b.id)) })).sort((a,b) => a.tool.localeCompare(b.tool));
-  return canonical({ baselineSchemaVersion: BASELINE_VERSION, contract: EVALUATION_CONTRACT, datasets: corpus });
+  return canonical({ baselineSchemaVersion: schemaVersion, contract: contractMetadata, datasets: corpus });
 }
 
 export function buildEvaluationFingerprint({ datasets }) {
+  return buildEvaluationFingerprintForContract({ datasets, contractMetadata: EVALUATION_CONTRACT, schemaVersion: BASELINE_VERSION });
+}
+
+export function buildEvaluationFingerprintForContract({ datasets, contractMetadata, schemaVersion }) {
   if (!Array.isArray(datasets) || datasets.length === 0) throw new Error("validated datasets are required");
-  return createHash("sha256").update(JSON.stringify(fingerprintInput(datasets))).digest("hex");
+  if (!contractMetadata || !Number.isInteger(schemaVersion)) throw new Error("fingerprint contract metadata is required");
+  return createHash("sha256").update(JSON.stringify(fingerprintInput(datasets, contractMetadata, schemaVersion))).digest("hex");
 }
 
 export function buildBaselineManifest({ datasets, result }) {
@@ -32,12 +37,23 @@ export function buildBaselineManifest({ datasets, result }) {
   return { version: BASELINE_VERSION, fingerprint: buildEvaluationFingerprint({ datasets }), thresholds: { ...THRESHOLDS }, cases, tools, overallMean: Number(result.overallMean.toFixed(2)) };
 }
 
-export function formatBaselineManifest(manifest) { validateBaselineManifest(manifest); return `${JSON.stringify(manifest, null, 2)}\n`; }
+export function formatBaselineManifest(manifest) {
+  validateBaselineManifest(manifest);
+  const ordered = {
+    version: manifest.version,
+    fingerprint: manifest.fingerprint,
+    thresholds: { case: manifest.thresholds.case, toolMean: manifest.thresholds.toolMean, overallMean: manifest.thresholds.overallMean },
+    cases: manifest.cases.map(x => ({ id:x.id, tool:x.tool, ageBand:x.ageBand, score:x.score })),
+    tools: manifest.tools.map(x => ({ tool:x.tool, mean:x.mean })),
+    overallMean: manifest.overallMean,
+  };
+  return `${JSON.stringify(ordered, null, 2)}\n`;
+}
 
 export function validateBaselineManifest(value) {
   if (!exactKeys(value, ["version","fingerprint","thresholds","cases","tools","overallMean"])) throw new Error("baseline has invalid exact keys");
   if (value.version !== BASELINE_VERSION || !/^[0-9a-f]{64}$/.test(value.fingerprint)) throw new Error("baseline has invalid version or fingerprint");
-  if (!exactKeys(value.thresholds, ["case","toolMean","overallMean"]) || JSON.stringify(value.thresholds) !== JSON.stringify(THRESHOLDS)) throw new Error("baseline threshold drift");
+  if (!exactKeys(value.thresholds, ["case","toolMean","overallMean"]) || value.thresholds.case !== THRESHOLDS.case || value.thresholds.toolMean !== THRESHOLDS.toolMean || value.thresholds.overallMean !== THRESHOLDS.overallMean) throw new Error("baseline threshold drift");
   if (!Array.isArray(value.cases) || !Array.isArray(value.tools) || !normalized(value.overallMean)) throw new Error("baseline collections or mean invalid");
   let previous = ""; const ids = new Set();
   for (const item of value.cases) {
@@ -65,15 +81,19 @@ export async function loadBaselineManifest({ repoRoot, baselinePath } = {}) {
 
 export function compareEvaluationToBaseline({ baseline, datasets, result }) {
   validateBaselineManifest(baseline); const fingerprint = buildEvaluationFingerprint({ datasets }); const regressions = [];
+  assertUniqueCurrent(result.cases, "id", "case"); assertUniqueCurrent(result.tools, "tool", "tool");
   if (baseline.fingerprint !== fingerprint) regressions.push({ scope: "fingerprint", baseline: baseline.fingerprint, current: fingerprint });
   const cases = compareList("case", baseline.cases, result.cases, "id", "score", regressions, x => ({ tool:x.tool, ageBand:x.ageBand }));
   const tools = compareList("tool", baseline.tools, result.tools, "tool", "mean", regressions);
   const overall = deltaEntry("overall", undefined, baseline.overallMean, Number(result.overallMean.toFixed(2))); if (overall.delta < 0) regressions.push(overall);
-  const absoluteFailures = result.passed === true ? [] : [{ scope:"absolute", reason:"current evaluation failed" }];
+  const thresholdsMatch = exactKeys(result.thresholds,["case","toolMean","overallMean"]) && result.thresholds.case===THRESHOLDS.case && result.thresholds.toolMean===THRESHOLDS.toolMean && result.thresholds.overallMean===THRESHOLDS.overallMean;
+  const hasHardFailure = result.cases.some(x => Array.isArray(x.hardFailures) && x.hardFailures.length > 0);
+  const absoluteFailures = result.passed === true && thresholdsMatch && !hasHardFailure ? [] : [{ scope:"absolute", reason:"current evaluation failed" }];
   regressions.push(...absoluteFailures); regressions.sort((a,b) => `${a.scope}:${a.id??""}`.localeCompare(`${b.scope}:${b.id??""}`));
   const unchangedCount = [...cases,...tools,overall].filter(x => x.delta === 0).length;
   return { fingerprint, cases, tools, overall, unchangedCount, regressions, passed: regressions.length === 0 };
 }
+function assertUniqueCurrent(items,key,label) { if (!Array.isArray(items)) throw new Error(`current ${label} results are invalid`); const seen=new Set(); for(const item of items) { if(seen.has(item?.[key])) throw new Error(`duplicate current ${label} identity`); seen.add(item?.[key]); } }
 function deltaEntry(scope,id,baseline,current) { return { scope, ...(id === undefined ? {} : { id }), baseline, current, delta: Number((current-baseline).toFixed(2)) }; }
 function compareList(scope, base, current, key, metric, regressions, identity) {
   const bm = new Map(base.map(x => [x[key],x])), cm = new Map(current.map(x => [x[key],x])); const out=[];
