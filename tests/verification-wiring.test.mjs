@@ -55,11 +55,19 @@ test('typed linting uses a project that includes every linted TypeScript surface
   ]);
 });
 
-test('lint runner selects the platform executable and fails closed without an exit status', async () => {
+test('lint runner exposes injectable behavior and fails closed without an exit status', async () => {
   const lintRunner = await readFile('scripts/run-lint.mjs', 'utf8');
 
-  assert.match(lintRunner, /process\.platform === ['"]win32['"]/);
+  assert.match(lintRunner, /export const runLint/);
   assert.match(lintRunner, /eslint\.cmd/);
   assert.doesNotMatch(lintRunner, /result\.status \?\? 0/);
   assert.match(lintRunner, /result\.error/);
+});
+
+test('lint policy does not broadly suppress promise or underscore-variable findings', async () => {
+  const eslintConfig = await readFile('eslint.config.js', 'utf8');
+
+  assert.doesNotMatch(eslintConfig, /varsIgnorePattern/);
+  assert.doesNotMatch(eslintConfig, /apps\/mcp-server\/src\/server\.ts/);
+  assert.match(eslintConfig, /ignoreRestSiblings:\s*true/);
 });

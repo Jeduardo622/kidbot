@@ -19,7 +19,7 @@ test('package exposes routing and verification commands', async () => {
   assert.equal(packageJson.scripts['route-task'], 'node ./scripts/route-task.mjs');
   assert.equal(packageJson.scripts['verify-change'], 'node ./scripts/verify-change.mjs');
   assert.ok(packageJson.scripts['verify:local']);
-  assert.equal(packageJson.scripts['test:harness'], 'node --test tests/engineering-policy.test.mjs tests/route-task.test.mjs tests/verify-change.test.mjs tests/resolve-harness-base.test.mjs tests/export-harness-classification.test.mjs tests/engineering-harness-wiring.test.mjs tests/verification-wiring.test.mjs');
+  assert.equal(packageJson.scripts['test:harness'], 'node --test tests/engineering-policy.test.mjs tests/route-task.test.mjs tests/verify-change.test.mjs tests/resolve-harness-base.test.mjs tests/export-harness-classification.test.mjs tests/engineering-harness-wiring.test.mjs tests/verification-wiring.test.mjs tests/run-lint.test.mjs');
 });
 
 test('CODEOWNERS requires the repository owner on protected governance surfaces', async () => {

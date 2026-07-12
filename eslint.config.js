@@ -27,7 +27,7 @@ export default [
       'import/no-default-export': 'error',
       '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/no-misused-promises': 'error',
-      '@typescript-eslint/no-unused-vars': ['error', { varsIgnorePattern: '^_' }]
+      '@typescript-eslint/no-unused-vars': ['error', { ignoreRestSiblings: true }]
     },
     settings: {
       react: {
@@ -39,19 +39,6 @@ export default [
     files: ['**/*.config.ts'],
     rules: {
       'import/no-default-export': 'off'
-    }
-  },
-  {
-    files: ['apps/mcp-server/src/server.ts'],
-    rules: {
-      '@typescript-eslint/no-misused-promises': [
-        'error',
-        {
-          checksVoidReturn: {
-            arguments: false
-          }
-        }
-      ]
     }
   },
   {
