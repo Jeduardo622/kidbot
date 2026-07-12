@@ -217,33 +217,53 @@ async function resolveSafeOutput(repoRoot, selected) {
   } catch (error) {
     if (error?.code !== "ENOENT") throw error;
   }
-  return destination;
+  return { destination, rootIdentity: { dev: rootStat.dev, ino: rootStat.ino, physicalRoot } };
 }
 
-async function writeSafeReport(repoRoot, destination, report, testHooks) {
+async function assertRootIdentity(repoRoot, expected) {
+  const current = await lstat(repoRoot);
+  if (!current.isDirectory() || current.isSymbolicLink() || current.dev !== expected.dev || current.ino !== expected.ino) throw new Error("repository root identity changed");
+  if (await realpath(repoRoot) !== expected.physicalRoot) throw new Error("repository root physical path changed");
+}
+
+async function writeSafeReport(repoRoot, destination, rootIdentity, report, testHooks) {
   const parent = path.dirname(destination);
   const temporary = path.join(parent, `.${path.basename(destination)}.${process.pid}.${randomUUID()}.tmp`);
   let handle;
-  let replaced = false;
+  let renamed = false;
+  let verified = false;
   try {
+    await testHooks?.beforeTemporaryOpen?.();
+    await assertRootIdentity(repoRoot, rootIdentity);
     handle = await open(temporary, "wx", 0o600);
     const before = await handle.stat();
     if (!before.isFile() || before.nlink !== 1) throw new Error("temporary output must be a single regular file");
-    const physicalRoot = await realpath(repoRoot);
-    assertInside(physicalRoot, await realpath(temporary), "temporary output");
+    await assertRootIdentity(repoRoot, rootIdentity);
+    assertInside(rootIdentity.physicalRoot, await realpath(temporary), "temporary output");
     await handle.writeFile(report, { encoding: "utf8" });
     await testHooks?.afterTemporaryWrite?.(temporary);
     const after = await handle.stat();
     if (!after.isFile() || after.nlink !== 1 || after.dev !== before.dev || after.ino !== before.ino) throw new Error("temporary output link anomaly");
+    await assertRootIdentity(repoRoot, rootIdentity);
     await handle.sync();
+    await testHooks?.beforeRename?.(temporary);
+    await assertRootIdentity(repoRoot, rootIdentity);
+    const beforeRename = await handle.stat();
+    if (!beforeRename.isFile() || beforeRename.nlink !== 1 || beforeRename.dev !== before.dev || beforeRename.ino !== before.ino) throw new Error("temporary output changed before rename");
     await handle?.close();
     await rename(temporary, destination);
-    replaced = true;
+    renamed = true;
+    await testHooks?.afterRename?.(destination);
+    await assertRootIdentity(repoRoot, rootIdentity);
+    const installed = await lstat(destination);
+    if (!installed.isFile() || installed.isSymbolicLink() || installed.nlink !== 1 || installed.dev !== before.dev || installed.ino !== before.ino) throw new Error("installed output identity or link anomaly");
+    verified = true;
   } catch (error) {
     throw error;
   } finally {
     await handle?.close().catch(() => {});
-    if (!replaced) await rm(temporary, { force: true }).catch(() => {});
+    if (!renamed) await rm(temporary, { force: true }).catch(() => {});
+    if (renamed && !verified) await rm(destination, { force: true }).catch(() => {});
   }
 }
 
@@ -268,15 +288,15 @@ export async function runCli(args = process.argv.slice(2), options = {}) {
   try {
     result = await (options.evaluate ?? evaluateLocally)(repoRoot);
   } catch { stderr("evaluation: runtime error\n"); return 3; }
-  let destination;
+  let outputSelection;
   if (parsed.output !== undefined) {
-    try { destination = await resolveSafeOutput(repoRoot, parsed.output); } catch { stderr("evaluation: invalid output path\n"); return 2; }
+    try { outputSelection = await resolveSafeOutput(repoRoot, parsed.output); } catch { stderr("evaluation: invalid output path\n"); return 2; }
   }
   try {
     const report = formatEvaluationReport(result, { json: parsed.json });
-    if (destination) {
-      await writeSafeReport(repoRoot, destination, report, options.testHooks);
-      stdout(`evaluation: ${result.passed ? "passed" : "failed"} -> ${destination}\n`);
+    if (outputSelection) {
+      await writeSafeReport(repoRoot, outputSelection.destination, outputSelection.rootIdentity, report, options.testHooks);
+      stdout(`evaluation: ${result.passed ? "passed" : "failed"} -> ${outputSelection.destination}\n`);
     } else stdout(report);
     return result.passed ? 0 : 1;
   } catch { stderr("evaluation: runtime error\n"); return 3; }

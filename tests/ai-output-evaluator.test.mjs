@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { link, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -103,6 +103,34 @@ test("CLI rejects a temporary-file hard-link anomaly after writing and cleans th
   });
   assert.equal(code, 3);
   assert.deepEqual((await (await import("node:fs/promises")).readdir(root)).filter(name => name.includes(".tmp")), []);
+});
+
+test("CLI rejects replacement of the canonical root before temporary open", async t => {
+  const container = await mkdtemp(path.join(tmpdir(), "kidbot-container-"));
+  const root = path.join(container, "root"); const moved = path.join(container, "moved"); await mkdir(root);
+  t.after(() => rm(container, { recursive: true, force: true }));
+  const code = await evaluator.runCli(["--output", "report.txt"], {
+    repoRoot: root, stdout: () => {}, stderr: () => {},
+    evaluate: async () => ({ passed: true, cases: [], tools: [], overallMean: 100, thresholds: {} }),
+    testHooks: { beforeTemporaryOpen: async () => { await rename(root, moved); await mkdir(root); } },
+  });
+  assert.equal(code, 3);
+  assert.equal(await readFile(path.join(root, "report.txt"), "utf8").then(() => true, () => false), false);
+});
+
+test("CLI unlinks destination and fails when a hard link appears after rename", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "kidbot-cli-"));
+  const outsideRoot = await mkdtemp(path.join(tmpdir(), "kidbot-outside-"));
+  t.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(outsideRoot, { recursive: true, force: true })]));
+  const destination = path.join(root, "report.txt"); const linked = path.join(outsideRoot, "linked.txt");
+  const code = await evaluator.runCli(["--output", "report.txt"], {
+    repoRoot: root, stdout: () => {}, stderr: () => {},
+    evaluate: async () => ({ passed: true, cases: [], tools: [], overallMean: 100, thresholds: {} }),
+    testHooks: { afterRename: () => link(destination, linked) },
+  });
+  assert.equal(code, 3);
+  assert.equal(await readFile(destination, "utf8").then(() => true, () => false), false);
+  assert.match(await readFile(linked, "utf8"), /evaluation: passed/);
 });
 
 test("CLI exit codes are exact and errors redact environment and case payload", async () => {
