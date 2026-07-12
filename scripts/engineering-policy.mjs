@@ -1,4 +1,4 @@
-import { readFile, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -170,6 +170,11 @@ export async function loadSpecialistRegistry({ repoRoot, registryPath } = {}) {
         throw new Error(`specialist instructions file is missing or unreadable: ${portableInstructions}`, { cause: error });
       }
       if (!instructionStat.isFile()) throw new Error(`specialist instructions must be a regular file: ${portableInstructions}`);
+      const realInstructions = await realpath(resolvedInstructions);
+      const realRelativeInstructions = path.relative(instructionRoot, realInstructions);
+      if (realRelativeInstructions === "" || realRelativeInstructions === ".." || realRelativeInstructions.startsWith(`..${path.sep}`) || path.isAbsolute(realRelativeInstructions)) {
+        throw new Error(`specialist instructions resolve outside .agents/specialists: ${portableInstructions}`);
+      }
     }
     return registry;
   } catch (error) {

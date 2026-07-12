@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -132,4 +132,35 @@ test("rejects invalid selection classification and path escapes", async () => {
   const registry = await loadSpecialistRegistry({ repoRoot });
   assert.throws(() => selectSpecialists({ repoRoot, paths: ["README.md"], classification: "urgent", registry }), /classification/i);
   assert.throws(() => selectSpecialists({ repoRoot, paths: ["../outside.md"], classification: "standard", registry }), /outside repository/i);
+});
+
+test("rejects an instruction symlink that escapes the specialist directory", async (context) => {
+  const fixture = await createRegistryFixture();
+  const instructionPath = path.join(fixture.root, ".agents", "specialists", "tester.md");
+  const outsidePath = path.join(fixture.root, "outside.md");
+  await writeFile(outsidePath, "# Outside\n");
+  await rm(instructionPath);
+  try {
+    await symlink(outsidePath, instructionPath, "file");
+  } catch (error) {
+    if (["EACCES", "EPERM"].includes(error.code)) {
+      const outsideDirectory = path.join(fixture.root, "outside-specialists");
+      const specialistDirectory = path.dirname(instructionPath);
+      await mkdir(outsideDirectory);
+      await writeFile(path.join(outsideDirectory, "tester.md"), "# Outside\n");
+      await rm(specialistDirectory, { recursive: true });
+      try {
+        await symlink(outsideDirectory, specialistDirectory, "junction");
+      } catch (junctionError) {
+        if (["EACCES", "EPERM"].includes(junctionError.code)) {
+          context.skip(`symlink and junction creation denied by OS: ${junctionError.code}`);
+          return;
+        }
+        throw junctionError;
+      }
+    } else {
+      throw error;
+    }
+  }
+  await assert.rejects(loadSpecialistRegistry({ repoRoot: fixture.root }), /instructions|symlink|escape/i);
 });
