@@ -49,9 +49,11 @@ test('repository docs define deterministic evaluator thresholds and limitations'
 });
 
 test('baseline surfaces are protected by engineering policy', async () => {
-  const policy = await readFile('.agents/engineering-policy.json', 'utf8');
-  assert.match(policy, /evals\/baselines\/\*\*/);
-  assert.match(policy, /scripts\/ai-evaluation-baseline\.mjs/);
+  const policy = JSON.parse(await readFile('.agents/engineering-policy.json', 'utf8'));
+  const protectedPatterns = policy.rules.find(rule => rule.id === 'protected-engineering-surfaces').patterns;
+  for (const pattern of ['evals/baselines/**', 'scripts/ai-evaluation-baseline.mjs', 'scripts/update-ai-evaluation-baseline.mjs', 'scripts/evaluate-ai-outputs.mjs', 'tests/ai-output-evaluator.test.mjs', 'tests/engineering-policy.test.mjs', 'tests/engineering-harness-wiring.test.mjs', 'tests/verification-wiring.test.mjs']) {
+    assert.ok(protectedPatterns.includes(pattern), pattern);
+  }
 });
 
 test('README documents text and JSON specialist recommendations as advisory output', async () => {

@@ -53,6 +53,25 @@ test("classifies workflow, auth, and configuration paths as protected", async ()
   }
 });
 
+test("classifies every AI baseline and refresh surface as protected with human review", async () => {
+  const policy = await loadEngineeringPolicy({ repoRoot });
+  for (const candidate of [
+    "evals/baselines/ai-output-baseline.json",
+    "scripts/ai-evaluation-baseline.mjs",
+    "scripts/update-ai-evaluation-baseline.mjs",
+    "scripts/evaluate-ai-outputs.mjs",
+    "tests/ai-output-evaluator.test.mjs",
+    "tests/engineering-policy.test.mjs",
+    "tests/engineering-harness-wiring.test.mjs",
+    "tests/verification-wiring.test.mjs",
+  ]) {
+    const result = classifyPaths({ repoRoot, paths: [candidate], policy });
+    assert.equal(result.classification, "protected", candidate);
+    assert.equal(result.requiresHumanReview, true, candidate);
+    assert.deepEqual(result.commands, ["pnpm run verify:local"], candidate);
+  }
+});
+
 test("review-only policy selects the focused harness", async () => {
   const policy = await loadEngineeringPolicy({ repoRoot });
   const result = classifyPaths({ repoRoot, paths: ["README.md"], policy });

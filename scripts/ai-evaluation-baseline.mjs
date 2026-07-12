@@ -80,7 +80,7 @@ export async function loadBaselineManifest({ repoRoot, baselinePath } = {}) {
 }
 
 export function compareEvaluationToBaseline({ baseline, datasets, result }) {
-  validateBaselineManifest(baseline); validateCurrentResult(result); const fingerprint = buildEvaluationFingerprint({ datasets }); const regressions = [];
+  validateBaselineManifest(baseline); validateCurrentEvaluationResult(result); const fingerprint = buildEvaluationFingerprint({ datasets }); const regressions = [];
   if (baseline.fingerprint !== fingerprint) regressions.push({ scope: "fingerprint", baseline: baseline.fingerprint, current: fingerprint });
   const cases = compareList("case", baseline.cases, result.cases, "id", "score", regressions, x => ({ tool:x.tool, ageBand:x.ageBand }));
   const tools = compareList("tool", baseline.tools, result.tools, "tool", "mean", regressions);
@@ -93,7 +93,7 @@ export function compareEvaluationToBaseline({ baseline, datasets, result }) {
   return { fingerprint, cases, tools, overall, unchangedCount, regressions, passed: regressions.length === 0 };
 }
 function invalidCurrent(reason) { throw new Error(`current evaluation is invalid: ${reason}`); }
-function validateCurrentResult(result) {
+export function validateCurrentEvaluationResult(result) {
   if (!result || typeof result!=="object" || Array.isArray(result) || !Array.isArray(result.cases) || !Array.isArray(result.tools) || typeof result.passed!=="boolean") invalidCurrent("result shape");
   if (!exactKeys(result.thresholds,["case","toolMean","overallMean"]) || !Object.values(result.thresholds).every(Number.isFinite)) invalidCurrent("threshold shape");
   const caseIds=new Set(); for(const item of result.cases) {

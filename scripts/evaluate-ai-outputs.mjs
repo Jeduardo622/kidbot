@@ -333,19 +333,22 @@ export async function runCli(args = process.argv.slice(2), options = {}) {
   } catch { stderr("evaluation: runtime error\n"); return 3; }
   let baseline;
   if (options.skipBaseline !== true) {
-    let datasets; let baselineApi; let manifest;
-    try {
-      datasets = options.datasets ?? await loadEvaluationDatasets({ repoRoot });
-      baselineApi = await import("./ai-evaluation-baseline.mjs");
-    } catch { stderr("evaluation: runtime error\n"); return 3; }
-    try {
-      manifest = await (options.loadBaseline ?? baselineApi.loadBaselineManifest)({ repoRoot });
-    } catch (error) {
-      if (options.loadBaseline || (error?.code && error.code !== "ENOENT")) { stderr("evaluation: runtime error\n"); return 3; }
-      stderr("evaluation: invalid baseline\n"); return 2;
-    }
-    try { baseline = baselineApi.compareEvaluationToBaseline({ baseline: manifest, datasets, result }); }
+    let baselineApi;
+    try { baselineApi = await import("./ai-evaluation-baseline.mjs"); baselineApi.validateCurrentEvaluationResult(result); }
     catch { stderr("evaluation: runtime error\n"); return 3; }
+    if (result.passed === true) {
+      let datasets; let manifest;
+      try { datasets = options.datasets ?? await loadEvaluationDatasets({ repoRoot }); }
+      catch { stderr("evaluation: runtime error\n"); return 3; }
+      try {
+        manifest = await (options.loadBaseline ?? baselineApi.loadBaselineManifest)({ repoRoot });
+      } catch (error) {
+        if (options.loadBaseline || (error?.code && error.code !== "ENOENT")) { stderr("evaluation: runtime error\n"); return 3; }
+        stderr("evaluation: invalid baseline\n"); return 2;
+      }
+      try { baseline = baselineApi.compareEvaluationToBaseline({ baseline: manifest, datasets, result }); }
+      catch { stderr("evaluation: runtime error\n"); return 3; }
+    }
   }
   let outputSelection;
   if (parsed.output !== undefined) {

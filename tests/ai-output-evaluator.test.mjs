@@ -283,6 +283,27 @@ test("baseline CLI maps baseline validation and unexpected reads without leaking
   assert.equal(stderr, "evaluation: runtime error\n");
 });
 
+test("baseline CLI preserves primary absolute failures before baseline loading", async t => {
+  const datasets = await loadEvaluationDatasets({ repoRoot: path.resolve(".") });
+  const passing = await evaluator.evaluateLocally(path.resolve("."));
+  for (const [state, mutate] of [
+    ["missing", value => { value.passed = false; value.overallMean = 89.99; }],
+    ["malformed", value => { value.passed = false; value.cases[0].hardFailures = ["safety:probe"]; }],
+  ]) {
+    const root = await mkdtemp(path.join(tmpdir(), `kidbot-primary-${state}-`));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    await mkdir(path.join(root, "evals", "baselines"), { recursive: true });
+    if (state === "malformed") await writeFile(path.join(root, "evals", "baselines", "ai-output-baseline.json"), "{ malformed");
+    const result = structuredClone(passing); mutate(result);
+    let loaded = false; let stdout = ""; let stderr = "";
+    const code = await evaluator.runCli([], { repoRoot: root, datasets, evaluate: async () => result, loadBaseline: async () => { loaded = true; throw new Error("must not load"); }, stdout: value => { stdout += value; }, stderr: value => { stderr += value; } });
+    assert.equal(code, 1, state);
+    assert.equal(loaded, false, state);
+    assert.equal(stderr, "", state);
+    assert.match(stdout, /evaluation: failed\n$/, state);
+  }
+});
+
 test("baseline schema rejects malformed and noncanonical manifests", async t => {
   const root = await mkdtemp(path.join(tmpdir(), "kidbot-baseline-"));
   t.after(() => rm(root, { recursive: true, force: true }));
