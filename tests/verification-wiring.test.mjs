@@ -26,6 +26,7 @@ test('verify:local is authoritative and remains secret-free', async () => {
   assert.equal(packageJson.scripts['eval:ai'], 'tsx ./scripts/evaluate-ai-outputs.mjs');
   assert.match(strictVerify, /pnpm run test && pnpm run eval:ai &&/);
   assert.equal((strictVerify.match(/pnpm run eval:ai/g) ?? []).length, 1);
+  assert.doesNotMatch(strictVerify, /eval:ai:update-baseline/);
   assert.match(lintRunner, /process\.env\.STRICT_VERIFY === '1'/);
   assert.match(typecheckRunner, /process\.env\.STRICT_VERIFY === '1'/);
   assert.doesNotMatch(strictVerify, /production|railway|OPENAI_API_KEY|KIDBOT_REMOTE_MCP_URL/);
@@ -49,6 +50,9 @@ test('CI delegates root smoke-script tests to verify-change', async () => {
 test('deterministic evaluator command is allowlisted by engineering policy', async () => {
   const policy = await readFile('scripts/engineering-policy.mjs', 'utf8');
   assert.match(policy, /"pnpm run eval:ai"/);
+  assert.match(policy, /"pnpm run eval:ai:update-baseline"/);
+  assert.equal((policy.match(/"pnpm run eval:ai"/g) ?? []).length, 1);
+  assert.equal((policy.match(/"pnpm run eval:ai:update-baseline"/g) ?? []).length, 1);
 });
 
 test('CI keeps specialist recommendations advisory-only', async () => {

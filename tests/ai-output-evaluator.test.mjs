@@ -232,6 +232,57 @@ test("baseline refresh package and policy wiring is exact", async () => {
   }
 });
 
+test("baseline CLI emits stable delta report and blocks regressions read-only", async () => {
+  const repoRoot = path.resolve(".");
+  const target = path.join(repoRoot, "evals", "baselines", "ai-output-baseline.json");
+  const before = await readFile(target, "utf8");
+  const result = structuredClone(await evaluator.evaluateLocally(repoRoot));
+  result.cases[0].score -= 1;
+  let stdout = ""; let stderr = "";
+  const code = await evaluator.runCli([], { repoRoot, evaluate: async () => result, stdout: value => { stdout += value; }, stderr: value => { stderr += value; } });
+  assert.equal(code, 1);
+  assert.match(stdout, /baseline deltas:\n.*delta=-1\.00/s);
+  assert.match(stdout, /unchanged: 21/);
+  assert.match(stdout, /evaluation: failed\n$/);
+  assert.doesNotMatch(stdout, /delta=\+0\.00|delta=-0\.00/);
+  assert.equal(stderr, "");
+  assert.equal(await readFile(target, "utf8"), before);
+  let json = "";
+  assert.equal(await evaluator.runCli(["--json"], { repoRoot, evaluate: async () => result, stdout: value => { json += value; } }), 1);
+  assert.equal(JSON.parse(json).passed, false);
+});
+
+test("baseline CLI JSON is canonical, byte-stable, and includes comparison", async () => {
+  const repoRoot = path.resolve(".");
+  const result = await evaluator.evaluateLocally(repoRoot);
+  const invoke = async () => { let stdout = ""; const code = await evaluator.runCli(["--json"], { repoRoot, evaluate: async () => structuredClone(result), stdout: value => { stdout += value; } }); return { code, stdout }; };
+  const first = await invoke(); const second = await invoke();
+  assert.equal(first.code, 0); assert.equal(first.stdout, second.stdout);
+  const parsed = JSON.parse(first.stdout);
+  assert.equal(parsed.baseline.passed, true);
+  assert.equal(parsed.baseline.regressions.length, 0);
+  assert.equal(parsed.baseline.unchangedCount, 22);
+});
+
+test("baseline CLI maps baseline validation and unexpected reads without leaking", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "kidbot-baseline-cli-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(path.join(root, "evals", "baselines"), { recursive: true });
+  const result = await evaluator.evaluateLocally(path.resolve("."));
+  for (const bytes of [null, "{ malformed secret payload"]) {
+    if (bytes !== null) await writeFile(path.join(root, "evals", "baselines", "ai-output-baseline.json"), bytes);
+    let stdout = ""; let stderr = "";
+    assert.equal(await evaluator.runCli([], { repoRoot: root, datasets: await loadEvaluationDatasets({ repoRoot: path.resolve(".") }), evaluate: async () => result, stdout: value => { stdout += value; }, stderr: value => { stderr += value; } }), 2);
+    assert.equal(stdout, ""); assert.equal(stderr, "evaluation: invalid baseline\n"); assert.doesNotMatch(stderr, /secret|payload|malformed/i);
+  }
+  let stderr = "";
+  assert.equal(await evaluator.runCli([], { repoRoot: path.resolve("."), evaluate: async () => result, loadBaseline: async () => { throw new Error(`runtime ${process.env.PATH}`); }, stderr: value => { stderr += value; } }), 3);
+  assert.equal(stderr, "evaluation: runtime error\n");
+  stderr = "";
+  assert.equal(await evaluator.runCli([], { repoRoot: path.resolve("."), evaluate: async () => ({ passed: true, cases: [], tools: [], thresholds: {}, overallMean: 100 }), stderr: value => { stderr += value; } }), 3);
+  assert.equal(stderr, "evaluation: runtime error\n");
+});
+
 test("baseline schema rejects malformed and noncanonical manifests", async t => {
   const root = await mkdtemp(path.join(tmpdir(), "kidbot-baseline-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -383,7 +434,7 @@ test("CLI explicit output is contained, replaces a file, and prints only its sta
   const report = { passed: true, cases: [], tools: [], overallMean: 100, thresholds: { case: 85, toolMean: 90, overallMean: 90 } };
   const stdout = []; const stderr = [];
   await writeFile(path.join(root, "report.txt"), "old");
-  const code = await evaluator.runCli(["--output", "report.txt"], { repoRoot: root, evaluate: async () => report, stdout: value => stdout.push(value), stderr: value => stderr.push(value) });
+  const code = await evaluator.runCli(["--output", "report.txt"], { repoRoot: root, skipBaseline: true, evaluate: async () => report, stdout: value => stdout.push(value), stderr: value => stderr.push(value) });
   assert.equal(code, 0); assert.deepEqual(stderr, []);
   assert.equal(stdout.join(""), `evaluation: passed -> ${path.join(root, "report.txt")}\n`);
   assert.match(await readFile(path.join(root, "report.txt"), "utf8"), /evaluation: passed/);
@@ -392,7 +443,7 @@ test("CLI explicit output is contained, replaces a file, and prints only its sta
 test("CLI permits a direct output file in the operating-system temp root", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "kidbot-repo-"));
   const destination = path.join(tmpdir(), `kidbot-eval-${process.pid}-${Date.now()}.txt`);
-  const code = await evaluator.runCli(["--output", destination], { repoRoot: root, evaluate: async () => ({ passed: true }), stdout: () => {}, stderr: () => {} });
+  const code = await evaluator.runCli(["--output", destination], { repoRoot: root, skipBaseline: true, evaluate: async () => ({ passed: true }), stdout: () => {}, stderr: () => {} });
   assert.equal(code, 0);
   assert.equal((await lstat(destination)).isFile(), true);
   await rm(destination, { force: true });
@@ -407,7 +458,7 @@ test("CLI output path rejects lexical escapes and unsafe symlink destinations", 
   try { await symlink(outside, path.join(root, "linked.txt")); outputs.push("linked.txt"); } catch (error) { if (error?.code !== "EPERM") throw error; }
   for (const output of outputs) {
     const stderr = [];
-    assert.equal(await evaluator.runCli(["--output", output], { repoRoot: root, evaluate: async () => ({ passed: true }), stdout: () => {}, stderr: value => stderr.push(value) }), 2);
+    assert.equal(await evaluator.runCli(["--output", output], { repoRoot: root, skipBaseline: true, evaluate: async () => ({ passed: true }), stdout: () => {}, stderr: value => stderr.push(value) }), 2);
     assert.match(stderr.join(""), /output path/i);
   }
 });
@@ -421,7 +472,7 @@ test("CLI output path rejects nested destinations and a linked ancestor", async 
   else await symlink(actual, linked, "dir");
   for (const selected of ["actual/nested/report.txt", "linked/nested/report.txt"]) {
     const stderr = [];
-    const code = await evaluator.runCli(["--output", selected], { repoRoot: root, evaluate: async () => ({ passed: true }), stdout: () => {}, stderr: value => stderr.push(value) });
+    const code = await evaluator.runCli(["--output", selected], { repoRoot: root, skipBaseline: true, evaluate: async () => ({ passed: true }), stdout: () => {}, stderr: value => stderr.push(value) });
     assert.equal(code, 2); assert.match(stderr.join(""), /output path/i);
   }
 });
@@ -434,7 +485,7 @@ test("CLI revalidates an explicitly selected file after evaluation before replac
   const outside = path.join(outsideRoot, "outside.txt"); await writeFile(outside, "outside");
   const stderr = [];
   const code = await evaluator.runCli(["--output", "report.txt"], {
-    repoRoot: root, stdout: () => {}, stderr: value => stderr.push(value),
+    repoRoot: root, skipBaseline: true, stdout: () => {}, stderr: value => stderr.push(value),
     evaluate: async () => { await rm(destination); await link(outside, destination); return { passed: true, cases: [], tools: [], overallMean: 100, thresholds: {} }; },
   });
   assert.equal(code, 2); assert.equal(await readFile(outside, "utf8"), "outside");
@@ -447,7 +498,7 @@ test("CLI rejects a temporary-file hard-link anomaly after writing and cleans th
   const linked = path.join(outsideRoot, "linked-report.txt");
   const stderr = [];
   const code = await evaluator.runCli(["--output", "report.txt"], {
-    repoRoot: root, stdout: () => {}, stderr: value => stderr.push(value),
+    repoRoot: root, skipBaseline: true, stdout: () => {}, stderr: value => stderr.push(value),
     evaluate: async () => ({ passed: true, cases: [], tools: [], overallMean: 100, thresholds: {} }),
     testHooks: { afterTemporaryWrite: temporary => link(temporary, linked) },
   });
@@ -460,7 +511,7 @@ test("CLI rejects replacement of the canonical root before temporary open", asyn
   const root = path.join(container, "root"); const moved = path.join(container, "moved"); await mkdir(root);
   t.after(() => rm(container, { recursive: true, force: true }));
   const code = await evaluator.runCli(["--output", "report.txt"], {
-    repoRoot: root, stdout: () => {}, stderr: () => {},
+    repoRoot: root, skipBaseline: true, stdout: () => {}, stderr: () => {},
     evaluate: async () => ({ passed: true, cases: [], tools: [], overallMean: 100, thresholds: {} }),
     testHooks: { beforeTemporaryOpen: async () => { await rename(root, moved); await mkdir(root); } },
   });
@@ -474,7 +525,7 @@ test("CLI unlinks destination and fails when a hard link appears after rename", 
   t.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(outsideRoot, { recursive: true, force: true })]));
   const destination = path.join(root, "report.txt"); const linked = path.join(outsideRoot, "linked.txt");
   const code = await evaluator.runCli(["--output", "report.txt"], {
-    repoRoot: root, stdout: () => {}, stderr: () => {},
+    repoRoot: root, skipBaseline: true, stdout: () => {}, stderr: () => {},
     evaluate: async () => ({ passed: true, cases: [], tools: [], overallMean: 100, thresholds: {} }),
     testHooks: { afterRename: () => link(destination, linked) },
   });
@@ -486,7 +537,7 @@ test("CLI unlinks destination and fails when a hard link appears after rename", 
 test("CLI exit codes are exact and errors redact environment and case payload", async () => {
   const secret = "DO_NOT_LEAK_ENV"; process.env.KIDBOT_CLI_TEST_SECRET = secret;
   const payload = "DO_NOT_LEAK_CASE_PAYLOAD";
-  const invoke = async (args, evaluate) => { const stdout = []; const stderr = []; const code = await evaluator.runCli(args, { repoRoot: process.cwd(), evaluate, stdout: x => stdout.push(x), stderr: x => stderr.push(x) }); return { code, stdout: stdout.join(""), stderr: stderr.join("") }; };
+  const invoke = async (args, evaluate) => { const stdout = []; const stderr = []; const code = await evaluator.runCli(args, { repoRoot: process.cwd(), skipBaseline: true, evaluate, stdout: x => stdout.push(x), stderr: x => stderr.push(x) }); return { code, stdout: stdout.join(""), stderr: stderr.join("") }; };
   assert.equal((await invoke([], async () => ({ passed: true, cases: [], tools: [], overallMean: 100, thresholds: {} }))).code, 0);
   assert.equal((await invoke([], async () => ({ passed: false, cases: [], tools: [], overallMean: 0, thresholds: {} }))).code, 1);
   assert.equal((await invoke(["--unknown"], async () => ({ passed: true }))).code, 2);

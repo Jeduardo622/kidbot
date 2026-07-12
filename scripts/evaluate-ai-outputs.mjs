@@ -202,8 +202,9 @@ export async function evaluateDatasets({ datasets, agentFunctions = {} }) {
   return summarizeCaseResults(cases);
 }
 
-export function formatEvaluationReport(result, { json = false } = {}) {
-  if (json) return `${JSON.stringify(result, null, 2)}\n`;
+export function formatEvaluationReport(result, { json = false, baseline } = {}) {
+  const passed = result?.passed === true && (baseline?.passed ?? true);
+  if (json) return `${JSON.stringify(baseline ? { ...result, passed, baseline } : result, null, 2)}\n`;
   const lines = ["AI output evaluation (deterministic, no-provider)"];
   for (const item of result?.cases ?? []) {
     const categories = Object.entries(item.categoryScores ?? {}).map(([name, score]) => `${name}=${score}`).join(" ");
@@ -212,8 +213,19 @@ export function formatEvaluationReport(result, { json = false } = {}) {
   }
   for (const item of result?.tools ?? []) lines.push(`${item.tool} mean: ${Number(item.mean).toFixed(2)}`);
   lines.push(`overall mean: ${Number(result?.overallMean ?? 0).toFixed(2)}`);
+  if (baseline) {
+    lines.push("baseline deltas:");
+    const changed = [...baseline.cases, ...baseline.tools, baseline.overall].filter(item => item.delta !== 0);
+    for (const item of changed) {
+      const label = item.id === undefined ? item.scope : `${item.scope}/${item.id}`;
+      const sign = item.delta > 0 ? "+" : "";
+      lines.push(`  ${label} baseline=${Number(item.baseline).toFixed(2)} current=${Number(item.current).toFixed(2)} delta=${sign}${Number(item.delta).toFixed(2)}`);
+    }
+    for (const item of baseline.regressions.filter(item => item.delta === undefined)) lines.push(`  ${item.scope}${item.id ? `/${item.id}` : ""}: ${item.reason ?? "drift"}`);
+    lines.push(`unchanged: ${baseline.unchangedCount}`);
+  }
   lines.push("age-proxy limitation: deterministic proxy for length and word complexity; it is not a model judge.");
-  lines.push(`evaluation: ${result?.passed === true ? "passed" : "failed"}`);
+  lines.push(`evaluation: ${passed ? "passed" : "failed"}`);
   return `${lines.join("\n")}\n`;
 }
 
@@ -319,20 +331,37 @@ export async function runCli(args = process.argv.slice(2), options = {}) {
   try {
     result = await (options.evaluate ?? evaluateLocally)(repoRoot);
   } catch { stderr("evaluation: runtime error\n"); return 3; }
+  let baseline;
+  if (options.skipBaseline !== true) {
+    let datasets; let baselineApi; let manifest;
+    try {
+      datasets = options.datasets ?? await loadEvaluationDatasets({ repoRoot });
+      baselineApi = await import("./ai-evaluation-baseline.mjs");
+    } catch { stderr("evaluation: runtime error\n"); return 3; }
+    try {
+      manifest = await (options.loadBaseline ?? baselineApi.loadBaselineManifest)({ repoRoot });
+    } catch (error) {
+      if (options.loadBaseline || (error?.code && error.code !== "ENOENT")) { stderr("evaluation: runtime error\n"); return 3; }
+      stderr("evaluation: invalid baseline\n"); return 2;
+    }
+    try { baseline = baselineApi.compareEvaluationToBaseline({ baseline: manifest, datasets, result }); }
+    catch { stderr("evaluation: runtime error\n"); return 3; }
+  }
   let outputSelection;
   if (parsed.output !== undefined) {
     try { outputSelection = await resolveSafeOutput(repoRoot, parsed.output); } catch { stderr("evaluation: invalid output path\n"); return 2; }
   }
   try {
-    const report = formatEvaluationReport(result, { json: parsed.json });
+    const report = formatEvaluationReport(result, { json: parsed.json, baseline });
+    const passed = result.passed && (baseline?.passed ?? true);
     if (outputSelection) {
       await writeSafeReport(outputSelection.approvedRoot, outputSelection.destination, outputSelection.rootIdentity, report, options.testHooks);
-      stdout(`evaluation: ${result.passed ? "passed" : "failed"} -> ${outputSelection.destination}\n`);
+      stdout(`evaluation: ${passed ? "passed" : "failed"} -> ${outputSelection.destination}\n`);
     } else stdout(report);
-    return result.passed ? 0 : 1;
+    return passed ? 0 : 1;
   } catch { stderr("evaluation: runtime error\n"); return 3; }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
-  process.exitCode = await runCli();
+  runCli().then(code => { process.exitCode = code; });
 }
