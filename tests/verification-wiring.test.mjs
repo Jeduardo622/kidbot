@@ -42,6 +42,12 @@ test('CI delegates root smoke-script tests to verify-change', async () => {
   assert.doesNotMatch(workflow, /name: Run root smoke-script tests/);
 });
 
+test('MCP compatibility verification builds its required dist artifact first', async () => {
+  const packageJson = JSON.parse(await readFile('apps/mcp-server/package.json', 'utf8'));
+
+  assert.equal(packageJson.scripts['test:compat'], 'pnpm run build && node --test test/mcp-compat.test.mjs');
+});
+
 test('typed linting uses a project that includes every linted TypeScript surface', async () => {
   const eslintConfig = await readFile('eslint.config.js', 'utf8');
   const lintProject = JSON.parse(await readFile('tsconfig.eslint.json', 'utf8'));

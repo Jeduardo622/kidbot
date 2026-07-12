@@ -81,9 +81,6 @@ jobs:
       - name: Build web-widget
         run: pnpm --filter @kidbot/web-widget run build
 
-      - name: Build MCP server
-        run: pnpm --filter @kidbot/mcp-server run build
-
       - name: Run MCP parent profile store tests
         env:
           PARENT_AUTH_SECRET: parent-secret-abcdefghijklmnopqrstuvwxyz0123456789
