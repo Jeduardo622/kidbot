@@ -5,11 +5,17 @@ import { validateCurrentEvaluationResult } from "./ai-evaluation-baseline.mjs";
 
 const MAX_BYTES = 32 * 1024;
 const FINGERPRINT = /^[0-9a-f]{64}$/;
+const ID = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const TOOLS = new Set(["voice_chat", "story_panels", "coloring_outline", "science_sim"]);
+const AGES = new Set(["4-6", "7-9", "10-12"]);
 const identity = value => `${value.dev}:${value.ino}:${value.nlink}`;
 const objectIdentity = value => `${value.dev}:${value.ino}`;
+const exactKeys = (value, keys) => value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).sort().join("|") === [...keys].sort().join("|");
+const normalized = value => Number.isFinite(value) && value >= 0 && value <= 100 && Number(value.toFixed(2)) === value;
 
 function sanitize(value) {
   if (typeof value !== "string") throw new Error("summary dynamic value must be a string");
+  if (/(?:[a-z]:\\|(?:^|\s)\/(?:home|users?|tmp|var|etc)\/|\b(?:home|[a-z_]*(?:key|token|secret|password))\s*=|\b(?:bearer|basic)\s+|["'{]\s*(?:payload|request|output)\b|\b(?:payload|request|output)\s*:)/i.test(value)) throw new Error("summary dynamic value is unsafe");
   return value
     .replace(/<[^>]*>/g, "")
     .replace(/[\u0000-\u001f\u007f]/g, "")
@@ -17,21 +23,57 @@ function sanitize(value) {
     .replace(/[\\`*_{}\[\]<>\(\)#+\-.!|]/g, "\\$&");
 }
 
+function validateResult(result) {
+  validateCurrentEvaluationResult(result);
+  if (!exactKeys(result, ["version", "cases", "tools", "overallMean", "passed", "thresholds"]) || result.version !== 1) throw new Error("summary result has invalid exact keys");
+  const caseIds = new Set();
+  for (const item of result.cases) {
+    if (!exactKeys(item, ["id", "tool", "ageBand", "categoryScores", "score", "hardFailures", "passed", "checks"]) || !ID.test(item.id) || !TOOLS.has(item.tool) || !AGES.has(item.ageBand) || caseIds.has(item.id) || !exactKeys(item.categoryScores, ["contract", "safety", "completeness", "age-proxy"]) || !Object.values(item.categoryScores).every(Number.isFinite) || !Array.isArray(item.checks) || item.checks.some(value => typeof value !== "string")) throw new Error("summary result case is invalid");
+    if (Object.values(item.categoryScores).reduce((sum, value) => sum + value, 0) !== item.score || item.passed !== (item.score >= result.thresholds.case && item.hardFailures.length === 0)) throw new Error("summary result case totals are inconsistent");
+    caseIds.add(item.id);
+  }
+  const toolIds = new Set();
+  for (const item of result.tools) {
+    if (!exactKeys(item, ["tool", "mean", "passed"]) || !TOOLS.has(item.tool) || toolIds.has(item.tool)) throw new Error("summary result tool is invalid");
+    const cases = result.cases.filter(value => value.tool === item.tool);
+    const mean = cases.length ? Number((cases.reduce((sum, value) => sum + value.score, 0) / cases.length).toFixed(2)) : NaN;
+    if (item.mean !== mean || item.passed !== (mean >= result.thresholds.toolMean)) throw new Error("summary result tool totals are inconsistent");
+    toolIds.add(item.tool);
+  }
+  if (result.cases.some(item => !toolIds.has(item.tool)) || result.tools.some(item => !result.cases.some(value => value.tool === item.tool))) throw new Error("summary result identities are inconsistent");
+  const overall = result.cases.length ? Number((result.cases.reduce((sum, value) => sum + value.score, 0) / result.cases.length).toFixed(2)) : 0;
+  const passed = result.cases.length > 0 && result.cases.every(item => item.passed) && result.tools.every(item => item.passed) && overall >= result.thresholds.overallMean;
+  if (result.overallMean !== overall || result.passed !== passed) throw new Error("summary result totals are inconsistent");
+}
+
 function validateDelta(item, scope, requireId) {
-  if (!item || typeof item !== "object" || item.scope !== scope) throw new Error("summary comparison delta is invalid");
-  if (requireId && typeof item.id !== "string") throw new Error("summary comparison identity is invalid");
-  for (const key of ["baseline", "current", "delta"]) if (!Number.isFinite(item[key])) throw new Error("summary comparison metric is invalid");
+  const keys = requireId ? ["scope", "id", "baseline", "current", "delta"] : ["scope", "baseline", "current", "delta"];
+  if (!exactKeys(item, keys) || item.scope !== scope || (requireId && typeof item.id !== "string")) throw new Error("summary comparison delta is invalid");
+  for (const key of ["baseline", "current", "delta"]) if (!normalized(item[key]) && !(key === "delta" && Number.isFinite(item[key]) && Number(item[key].toFixed(2)) === item[key] && item[key] >= -100 && item[key] <= 100)) throw new Error("summary comparison metric is invalid");
+  if (item.delta !== Number((item.current - item.baseline).toFixed(2))) throw new Error("summary comparison delta is inconsistent");
 }
 
 function validateComparison(value) {
-  if (!value || typeof value !== "object" || !FINGERPRINT.test(value.fingerprint) || !Array.isArray(value.cases) || !Array.isArray(value.tools) || !Array.isArray(value.regressions) || !Number.isInteger(value.unchangedCount) || value.unchangedCount < 0 || typeof value.passed !== "boolean") throw new Error("summary comparison is invalid");
-  for (const item of value.cases) validateDelta(item, "case", true);
-  for (const item of value.tools) validateDelta(item, "tool", true);
+  if (!exactKeys(value, ["fingerprint", "cases", "tools", "overall", "unchangedCount", "regressions", "passed"]) || !FINGERPRINT.test(value.fingerprint) || !Array.isArray(value.cases) || !Array.isArray(value.tools) || !Array.isArray(value.regressions) || !Number.isInteger(value.unchangedCount) || value.unchangedCount < 0 || typeof value.passed !== "boolean") throw new Error("summary comparison is invalid");
+  const caseIds = new Set(); for (const item of value.cases) { validateDelta(item, "case", true); if (!ID.test(item.id) || caseIds.has(item.id)) throw new Error("summary comparison duplicate or invalid case"); caseIds.add(item.id); }
+  const toolIds = new Set(); for (const item of value.tools) { validateDelta(item, "tool", true); if (!TOOLS.has(item.id) || toolIds.has(item.id)) throw new Error("summary comparison duplicate or invalid tool"); toolIds.add(item.id); }
   validateDelta(value.overall, "overall", false);
   for (const item of value.regressions) {
-    if (!item || typeof item !== "object" || typeof item.scope !== "string") throw new Error("summary comparison regression is invalid");
-    if (item.reason !== undefined && typeof item.reason !== "string") throw new Error("summary comparison reason is invalid");
+    if (item?.delta !== undefined) {
+      validateDelta(item, item.scope, item.scope !== "overall");
+      if (!['case','tool','overall'].includes(item.scope) || item.delta >= 0) throw new Error("summary comparison regression delta is invalid");
+      const source = item.scope === "overall" ? value.overall : value[`${item.scope}s`].find(entry => entry.id === item.id);
+      if (!source || JSON.stringify(source) !== JSON.stringify(item)) throw new Error("summary comparison regression delta is inconsistent");
+    } else if (item?.scope === "fingerprint") {
+      if (!exactKeys(item, ["scope", "baseline", "current"]) || !FINGERPRINT.test(item.baseline) || item.current !== value.fingerprint) throw new Error("summary comparison fingerprint regression is invalid");
+    } else if (item?.scope === "absolute") {
+      if (!exactKeys(item, ["scope", "reason"]) || item.reason !== "current evaluation failed") throw new Error("summary comparison absolute regression is invalid");
+    } else if (item?.scope === "case" || item?.scope === "tool") {
+      if (!exactKeys(item, ["scope", "id", "reason"]) || !ID.test(item.id) || !["identity drift", "missing current identity", "extra current identity"].includes(item.reason)) throw new Error("summary comparison identity regression is invalid");
+    } else throw new Error("summary comparison regression is invalid");
   }
+  const unchanged = [...value.cases, ...value.tools, value.overall].filter(item => item.delta === 0).length;
+  if (value.unchangedCount !== unchanged || value.passed !== (value.regressions.length === 0)) throw new Error("summary comparison totals are inconsistent");
 }
 
 const metricLine = item => {
@@ -41,11 +83,12 @@ const metricLine = item => {
 };
 
 export function formatEvaluationJobSummary({ result, baseline }) {
-  validateCurrentEvaluationResult(result);
+  validateResult(result);
   validateComparison(baseline);
-  const changed = [...baseline.cases, ...baseline.tools]
-    .filter(item => item.delta !== 0)
-    .sort((a, b) => a.id.localeCompare(b.id));
+  const changed = [
+    ...baseline.cases.filter(item => item.delta !== 0).sort((a, b) => a.id.localeCompare(b.id)),
+    ...baseline.tools.filter(item => item.delta !== 0).sort((a, b) => a.id.localeCompare(b.id)),
+  ];
   if (baseline.overall.delta !== 0) changed.push(baseline.overall);
   const reasons = baseline.regressions.filter(item => item.delta === undefined).map(item => {
     const label = item.scope === "fingerprint" ? "fingerprint" : `${sanitize(item.scope)}${item.id ? `/${sanitize(item.id)}` : ""}`;
@@ -103,13 +146,21 @@ export async function appendEvaluationJobSummary({ summaryPath, markdown, testHo
   try {
     await invokeHook(testHooks, "after-open");
     await verify(handle);
-    await handle.write(buffer, 0, buffer.length, null);
+    let offset = 0;
+    while (offset < buffer.length) {
+      const writer = testHooks?.write;
+      if (writer !== undefined && typeof writer !== "function") throw new Error("summary write test hook is invalid");
+      const written = await (writer ? writer(handle, buffer, offset) : handle.write(buffer, offset, buffer.length - offset, null));
+      if (!Number.isInteger(written?.bytesWritten) || written.bytesWritten <= 0 || written.bytesWritten > buffer.length - offset) throw new Error("summary append made no progress");
+      offset += written.bytesWritten;
+    }
     await invokeHook(testHooks, "after-write");
     await verify(handle);
     await handle.sync();
     await invokeHook(testHooks, "after-sync");
     await verify(handle);
-    await invokeHook(testHooks, "after-verify");
+    await invokeHook(testHooks, "before-final-verify");
+    await verify(handle);
   } finally {
     await handle.close();
   }

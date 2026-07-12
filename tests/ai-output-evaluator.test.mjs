@@ -20,8 +20,8 @@ const { evaluateCase, evaluateDatasets, formatEvaluationReport, loadEvaluationDa
 const summaryResult = {
   version: 1,
   cases: [
-    { id: "alpha-case", tool: "voice_chat", ageBand: "4-6", score: 90, hardFailures: [], passed: true },
-    { id: "zeta-case", tool: "story_panels", ageBand: "7-9", score: 95, hardFailures: [], passed: true },
+    { id: "alpha-case", tool: "voice_chat", ageBand: "4-6", categoryScores: { contract: 25, safety: 30, completeness: 20, "age-proxy": 15 }, score: 90, hardFailures: [], passed: true, checks: [] },
+    { id: "zeta-case", tool: "story_panels", ageBand: "7-9", categoryScores: { contract: 30, safety: 30, completeness: 20, "age-proxy": 15 }, score: 95, hardFailures: [], passed: true, checks: [] },
   ],
   tools: [
     { tool: "voice_chat", mean: 90, passed: true },
@@ -58,7 +58,7 @@ test("job summary format emits canonical changed-only markdown", () => {
 });
 
 test("job summary markdown covers zero, positive, regression, fingerprint, identity, and mixed changes", () => {
-  const zero = summaryComparison({ cases: [], tools: [], overall: { scope: "overall", baseline: 92.5, current: 92.5, delta: 0 }, unchangedCount: 5, regressions: [], passed: true });
+  const zero = summaryComparison({ cases: summaryComparison().cases.map(item => ({ ...item, baseline: item.current, delta: 0 })), tools: summaryComparison().tools.map(item => ({ ...item, baseline: item.current, delta: 0 })), overall: { scope: "overall", baseline: 92.5, current: 92.5, delta: 0 }, unchangedCount: 5, regressions: [], passed: true });
   assert.match(formatEvaluationJobSummary({ result: summaryResult, baseline: zero }), /^## AI output evaluation: Passed/m);
   assert.doesNotMatch(formatEvaluationJobSummary({ result: summaryResult, baseline: zero }), /baseline=92\.50/);
   const drift = summaryComparison({ regressions: [
@@ -73,16 +73,64 @@ test("job summary markdown covers zero, positive, regression, fingerprint, ident
 test("job summary markdown neutralizes injected dynamic text and enforces exact byte bound", () => {
   const attack = "# head | [link](https://evil.test) ![img](x) <script>alert(1)</script>\r\nTOKEN=supersecret {\"request\":\"payload\"} C:\\private\\file\0";
   const hostile = summaryComparison({ regressions: [{ scope: "case", id: "alpha-case", reason: attack }] });
-  const text = formatEvaluationJobSummary({ result: summaryResult, baseline: hostile });
-  assert.doesNotMatch(text, /:\s+# head/);
-  for (const literal of ["| [link]", "![img]", "<script>", "\r", "\nTOKEN", "TOKEN=supersecret", "{\"request\":\"payload\"}", "C:\\private\\file", "\0"]) assert.equal(text.includes(literal), false, literal);
-  assert.doesNotMatch(text, /truncat/i);
+  assert.throws(() => formatEvaluationJobSummary({ result: summaryResult, baseline: hostile }), /summary|unsafe|regression/i);
 
-  const fixed = Buffer.byteLength(formatEvaluationJobSummary({ result: summaryResult, baseline: summaryComparison({ regressions: [{ scope: "case", id: "alpha-case", reason: "" }] }) }));
-  const exact = summaryComparison({ regressions: [{ scope: "case", id: "alpha-case", reason: "x".repeat(32768 - fixed) }] });
-  assert.equal(Buffer.byteLength(formatEvaluationJobSummary({ result: summaryResult, baseline: exact })), 32768);
-  exact.regressions[0].reason += "x";
-  assert.throws(() => formatEvaluationJobSummary({ result: summaryResult, baseline: exact }), /32 KiB/);
+  const cases = Array.from({ length: 150 }, (_, index) => ({ id: `case-${String(index).padStart(3, "0")}`, tool: "voice_chat", ageBand: "4-6", categoryScores: { contract: 25, safety: 30, completeness: 20, "age-proxy": 15 }, score: 90, hardFailures: [], passed: true, checks: [] }));
+  const boundedResult = { version: 1, cases, tools: [{ tool: "voice_chat", mean: 90, passed: true }], overallMean: 90, passed: true, thresholds: { case: 85, toolMean: 90, overallMean: 90 } };
+  const comparison = { fingerprint: fp, cases: cases.map(item => ({ scope: "case", id: item.id, baseline: 89, current: 90, delta: 1 })), tools: [{ scope: "tool", id: "voice_chat", baseline: 89, current: 90, delta: 1 }], overall: { scope: "overall", baseline: 89, current: 90, delta: 1 }, unchangedCount: 0, regressions: [], passed: true };
+  const fixed = Buffer.byteLength(formatEvaluationJobSummary({ result: boundedResult, baseline: comparison }));
+  const suffix = "x".repeat(32768 - fixed);
+  boundedResult.cases.at(-1).id += suffix; comparison.cases.at(-1).id += suffix;
+  assert.equal(Buffer.byteLength(formatEvaluationJobSummary({ result: boundedResult, baseline: comparison })), 32768);
+  boundedResult.cases.at(-1).id += "x"; comparison.cases.at(-1).id += "x";
+  assert.throws(() => formatEvaluationJobSummary({ result: boundedResult, baseline: comparison }), /32 KiB/);
+});
+
+test("job summary format rejects malformed semantic comparison state and unsafe dynamic content", () => {
+  const mutations = [
+    value => { value.extra = true; },
+    value => { value.cases[0].extra = true; },
+    value => { value.cases[0].scope = "tool"; },
+    value => { value.cases[1].id = value.cases[0].id; },
+    value => { value.tools[1].id = value.tools[0].id; },
+    value => { value.cases[0].delta = 2; },
+    value => { value.cases[0].current = 90.001; },
+    value => { value.unchangedCount = 1; },
+    value => { value.passed = true; },
+    value => { value.regressions[0].scope = "unknown"; },
+    value => { value.regressions[0].reason = "unexpected reason"; delete value.regressions[0].delta; },
+    value => { value.regressions.push({ scope: "fingerprint", baseline: "b".repeat(64), current: "c".repeat(64) }); },
+  ];
+  for (const mutate of mutations) {
+    const value = structuredClone(summaryComparison()); mutate(value);
+    assert.throws(() => formatEvaluationJobSummary({ result: summaryResult, baseline: value }), /summary|comparison|current evaluation/i);
+  }
+  const resultMutations = [
+    value => { value.extra = true; },
+    value => { value.cases[0].extra = true; },
+    value => { value.tools[0].mean = 91; },
+    value => { value.overallMean = 93; },
+  ];
+  for (const mutate of resultMutations) {
+    const value = structuredClone(summaryResult); mutate(value);
+    assert.throws(() => formatEvaluationJobSummary({ result: value, baseline: summaryComparison() }), /summary|current evaluation/i);
+  }
+
+  for (const unsafe of ["C:\\Users\\kid\\file", "/home/kid/file", "HOME=/tmp/private", "API_KEY=abc", "Bearer abc.def", "Basic dXNlcjpwYXNz", "token=secret", '{"payload":"private"}', "output: private"]) {
+    const value = summaryComparison({ regressions: [{ scope: "case", id: "alpha-case", reason: unsafe }] });
+    assert.throws(() => formatEvaluationJobSummary({ result: summaryResult, baseline: value }), /unsafe|summary|reason/i, unsafe);
+  }
+});
+
+test("job summary format orders cases before tools regardless of cross-scope identities", () => {
+  const value = summaryComparison({
+    cases: [{ scope: "case", id: "zeta-case", baseline: 94, current: 95, delta: 1 }],
+    tools: [{ scope: "tool", id: "voice_chat", baseline: 91, current: 90, delta: -1 }],
+    unchangedCount: 0,
+  });
+  const text = formatEvaluationJobSummary({ result: summaryResult, baseline: value });
+  assert.ok(text.indexOf("case/zeta") < text.indexOf("tool/voice"));
+  assert.ok(text.indexOf("tool/voice") < text.indexOf("  - overall:"));
 });
 
 test("job summary activation requires exact GitHub environment", async t => {
@@ -127,7 +175,7 @@ test("job summary writer preserves content syncs and detects swaps and new links
   const phases = [];
   await appendEvaluationJobSummary({ summaryPath: target, markdown: "section\n", testHooks: { phase: phase => phases.push(phase) } });
   assert.equal(await readFile(target, "utf8"), "before\nsection\n");
-  assert.deepEqual(phases, ["before-open", "after-open", "after-write", "after-sync", "after-verify"]);
+  assert.deepEqual(phases, ["before-open", "after-open", "after-write", "after-sync", "before-final-verify"]);
 
   await writeFile(target, "unchanged\n");
   await assert.rejects(appendEvaluationJobSummary({ summaryPath: target, markdown: "x\n", testHooks: { phase: phase => { if (phase === "after-open") throw new Error("injected append failure"); } } }), /injected append failure/);
@@ -141,6 +189,42 @@ test("job summary writer preserves content syncs and detects swaps and new links
   await rm(displaced); await writeFile(target, "original\n");
   const linked = path.join(root, "linked.md");
   await assert.rejects(appendEvaluationJobSummary({ summaryPath: target, markdown: "x\n", testHooks: { phase: async phase => { if (phase === "after-write") await link(target, linked); } } }), /link|identity|summary/i);
+
+  for (const attackPhase of ["after-sync", "before-final-verify"]) {
+    await rm(linked, { force: true }); await rm(target, { force: true }); await writeFile(target, "original\n");
+    await assert.rejects(appendEvaluationJobSummary({ summaryPath: target, markdown: "x\n", testHooks: { phase: async phase => { if (phase === attackPhase) await link(target, linked); } } }), /link|identity|summary/i, attackPhase);
+  }
+});
+
+test("job summary writer completes partial writes", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "kidbot-summary-short-write-")); t.after(() => rm(root, { recursive: true, force: true }));
+  const target = path.join(root, "summary.md"); await writeFile(target, "before\n");
+  let calls = 0;
+  await appendEvaluationJobSummary({ summaryPath: target, markdown: "abcdef\n", testHooks: { write: async (handle, buffer, offset) => {
+    calls += 1; const length = Math.min(2, buffer.length - offset); return handle.write(buffer, offset, length, null);
+  } } });
+  assert.ok(calls > 1); assert.equal(await readFile(target, "utf8"), "before\nabcdef\n");
+});
+
+test("job summary writer rejects parent replacement at every hook phase", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "kidbot-summary-parent-race-")); t.after(() => rm(root, { recursive: true, force: true }));
+  for (const phaseName of ["before-open", "after-open", "after-write", "after-sync", "before-final-verify"]) {
+    const parent = path.join(root, phaseName); const displaced = `${parent}-old`; await mkdir(parent); const target = path.join(parent, "summary.md"); await writeFile(target, "original\n");
+    let supported = true;
+    await assert.rejects(appendEvaluationJobSummary({ summaryPath: target, markdown: "x\n", testHooks: { phase: async phase => {
+      if (phase !== phaseName) return;
+      try { await rename(parent, displaced); await mkdir(parent); await writeFile(target, "replacement\n"); }
+      catch (error) { if (process.platform === "win32" && error.code === "EPERM") { supported = false; throw new Error("parent replacement unsupported"); } throw error; }
+    } } }), /parent|identity|summary|unsupported|ENOENT/i, phaseName);
+    if (supported) assert.equal(await readFile(target, "utf8"), "replacement\n");
+    else t.diagnostic(`Windows denied parent replacement at ${phaseName}`);
+  }
+});
+
+test("job summary path rejects FIFO destinations where supported", { skip: process.platform === "win32" }, async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "kidbot-summary-fifo-")); t.after(() => rm(root, { recursive: true, force: true }));
+  const fifo = path.join(root, "summary.fifo"); execFileSync("mkfifo", [fifo]);
+  await assert.rejects(appendEvaluationJobSummary({ summaryPath: fifo, markdown: "x\n" }), /regular|summary/i);
 });
 
 test("baseline refresh refusal rejects failed and nondeterministic evaluations", async t => {
