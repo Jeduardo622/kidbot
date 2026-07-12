@@ -158,14 +158,19 @@ export async function appendEvaluationJobSummary({ summaryPath, markdown, testHo
 
   await invokeHook(testHooks, "before-open");
   const handle = await open(summaryPath, constants.O_RDWR | (constants.O_NOFOLLOW ?? 0));
-  const rollbackTruncate = handle.truncate.bind(handle);
-  const rollbackSync = handle.sync.bind(handle);
-  const rollbackStat = handle.stat.bind(handle);
+  let appendHandle;
+  try {
+    appendHandle = await open(summaryPath, constants.O_WRONLY | constants.O_APPEND | (constants.O_NOFOLLOW ?? 0));
+  } catch (error) {
+    await handle.close().catch(() => {});
+    throw error;
+  }
   let appendStarted = false;
   let appendFailed = false;
   try {
     await invokeHook(testHooks, "after-open");
     await verify(handle);
+    if (identity(await appendHandle.stat()) !== pinnedDestination) throw new Error("summary append handle identity changed");
     const opened = await handle.stat();
     let separator = Buffer.alloc(0);
     if (opened.size > 0) {
@@ -181,8 +186,8 @@ export async function appendEvaluationJobSummary({ summaryPath, markdown, testHo
     while (offset < appendBuffer.length) {
       const writer = testHooks?.write;
       if (writer !== undefined && typeof writer !== "function") throw new Error("summary write test hook is invalid");
-      const writePosition = destinationBefore.size + offset;
-      const written = await (writer ? writer(handle, appendBuffer, offset, writePosition) : handle.write(appendBuffer, offset, appendBuffer.length - offset, writePosition));
+      const writePosition = null;
+      const written = await (writer ? writer(appendHandle, appendBuffer, offset, writePosition) : appendHandle.write(appendBuffer, offset, appendBuffer.length - offset, writePosition));
       if (!Number.isInteger(written?.bytesWritten) || written.bytesWritten <= 0 || written.bytesWritten > appendBuffer.length - offset) throw new Error("summary append made no progress");
       offset += written.bytesWritten;
     }
@@ -196,24 +201,20 @@ export async function appendEvaluationJobSummary({ summaryPath, markdown, testHo
   } catch (error) {
     if (!appendStarted) throw error;
     appendFailed = true;
-    try {
-      await rollbackTruncate(destinationBefore.size);
-      await rollbackSync();
-      await verify(handle, rollbackStat);
-      const restoredDestination = await lstat(summaryPath);
-      const restoredHandle = await rollbackStat();
-      if (restoredDestination.size !== destinationBefore.size || restoredHandle.size !== destinationBefore.size) throw new Error("summary rollback size mismatch");
-      try { await invokeHook(testHooks, "after-rollback"); } catch {}
-    } catch {
-      // The caller receives one stable error whether append or rollback failed.
-    }
     throw new Error("summary append failed");
   } finally {
+    let closeError;
+    try {
+      await appendHandle.close();
+    } catch (error) {
+      closeError = error;
+    }
     try {
       await handle.close();
     } catch (error) {
-      if (!appendFailed) throw error;
+      closeError ??= error;
     }
+    if (closeError && !appendFailed) throw closeError;
   }
 }
 

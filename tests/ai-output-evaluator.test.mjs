@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { link, lstat, mkdir, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { appendFile, link, lstat, mkdir, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -335,36 +335,56 @@ test("job summary writer completes partial writes", async t => {
   assert.ok(calls > 1); assert.equal(await readFile(target, "utf8"), "before\nabcdef\n");
 });
 
-test("job summary writer rolls back partial writes and separators before rejecting", async t => {
-  const root = await mkdtemp(path.join(tmpdir(), "kidbot-summary-rollback-")); t.after(() => rm(root, { recursive: true, force: true }));
+test("job summary writer appends after content added between stat and write", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "kidbot-summary-concurrent-")); t.after(() => rm(root, { recursive: true, force: true }));
+  const target = path.join(root, "summary.md"); await writeFile(target, "before\n");
+  await appendEvaluationJobSummary({ summaryPath: target, markdown: "section\n", testHooks: { phase: async phase => {
+    if (phase === "after-open") await appendFile(target, "other\n");
+  } } });
+  assert.equal(await readFile(target, "utf8"), "before\nother\nsection\n");
+});
+
+test("job summary writer preserves existing content when a partial append fails", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "kidbot-summary-partial-failure-")); t.after(() => rm(root, { recursive: true, force: true }));
   for (const [name, before] of [["separator", "before"], ["no-separator", "before\n"]]) {
     const target = path.join(root, `${name}.md`); const original = Buffer.from(before); await writeFile(target, original);
-    const pinned = await stat(target); let writes = 0; let rollbacks = 0;
+    const pinned = await stat(target); let writes = 0;
     await assert.rejects(appendEvaluationJobSummary({ summaryPath: target, markdown: "section\n", testHooks: { write: async (handle, buffer, offset, position) => {
       if (writes++ === 0) {
-        handle.truncate = async () => { throw new Error("hook attempted to skip rollback"); };
-        handle.sync = async () => { throw new Error("hook attempted to skip rollback sync"); };
         return handle.write(buffer, offset, Math.min(3, buffer.length - offset), position);
       }
       throw new Error(`injected writer leak ${target}`);
-    }, phase: phase => { if (phase === "after-rollback") rollbacks += 1; } } }), error => error?.message === "summary append failed", name);
-    const restored = await readFile(target); const restoredStat = await stat(target);
-    assert.deepEqual(restored, original, name);
-    assert.equal(restoredStat.size, pinned.size, name);
-    assert.equal(`${restoredStat.dev}:${restoredStat.ino}`, `${pinned.dev}:${pinned.ino}`, name);
-    assert.equal(rollbacks, 1, name);
-    assert.equal(restored.includes(Buffer.from("section")), false, name);
+    } } }), error => error?.message === "summary append failed", name);
+    const after = await readFile(target); const afterStat = await stat(target);
+    assert.deepEqual(after.subarray(0, original.length), original, name);
+    assert.equal(afterStat.size, pinned.size + 3, name);
+    assert.equal(`${afterStat.dev}:${afterStat.ino}`, `${pinned.dev}:${pinned.ino}`, name);
   }
 });
 
-test("job summary writer masks rollback failures", async t => {
-  const root = await mkdtemp(path.join(tmpdir(), "kidbot-summary-rollback-failure-")); t.after(() => rm(root, { recursive: true, force: true }));
+test("job summary writer masks append failures after the append handle closes", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "kidbot-summary-append-failure-")); t.after(() => rm(root, { recursive: true, force: true }));
   const target = path.join(root, "summary.md"); await writeFile(target, "before\n");
   await assert.rejects(appendEvaluationJobSummary({ summaryPath: target, markdown: "section\n", testHooks: { write: async (handle, buffer, offset, position) => {
     await handle.write(buffer, offset, 2, position);
     await handle.close();
-    throw new Error(`injected rollback leak ${target}`);
+    throw new Error(`injected append leak ${target}`);
   } } }), error => error?.message === "summary append failed");
+});
+
+test("job summary failure never truncates a later append", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "kidbot-summary-failure-race-")); t.after(() => rm(root, { recursive: true, force: true }));
+  const target = path.join(root, "summary.md"); await writeFile(target, "before\n");
+  let writes = 0;
+  await assert.rejects(appendEvaluationJobSummary({ summaryPath: target, markdown: "section\n", testHooks: { write: async (handle, buffer, offset, position) => {
+    if (writes++ === 0) {
+      const written = await handle.write(buffer, offset, 2, position);
+      await appendFile(target, "other\n");
+      return written;
+    }
+    throw new Error("injected writer failure");
+  } } }), error => error?.message === "summary append failed");
+  assert.equal((await readFile(target, "utf8")).endsWith("other\n"), true);
 });
 
 test("job summary writer inserts exactly one newline separator when required", async t => {
