@@ -52,6 +52,37 @@ test("baseline refresh refusal CLI uses generic exit codes", async () => {
   assert.equal(stderr, "baseline refresh: invalid path\n");
 });
 
+test("baseline refresh CLI redacts injected runtime payload and environment failures", async t => {
+  const sentinel = "TASK2_SENTINEL_SECRET_93f6";
+  process.env.KIDBOT_REFRESH_SENTINEL = sentinel;
+  t.after(() => { delete process.env.KIDBOT_REFRESH_SENTINEL; });
+  let stdout = ""; let stderr = "";
+  const code = await runRefreshCli([], {
+    repoRoot: path.resolve("."),
+    evaluate: async () => { throw new Error(`${sentinel} payload={\"child\":\"private\"} env=${process.env.KIDBOT_REFRESH_SENTINEL}`); },
+    stdout: value => { stdout += value; },
+    stderr: value => { stderr += value; },
+  });
+  assert.equal(code, 3);
+  assert.equal(stderr, "baseline refresh: runtime error\n");
+  assert.equal(stdout, "");
+  assert.doesNotMatch(`${stdout}${stderr}`, /TASK2_SENTINEL|private|KIDBOT_REFRESH_SENTINEL|payload|env=/i);
+});
+
+test("baseline refresh rejects a relocated baseline-directory junction before evaluation or write", async t => {
+  const root = await mkdtemp(path.join(tmpdir(), "kidbot-refresh-junction-"));
+  const outside = await mkdtemp(path.join(tmpdir(), "kidbot-refresh-outside-"));
+  t.after(() => Promise.all([rm(root, { recursive: true, force: true }), rm(outside, { recursive: true, force: true })]));
+  await mkdir(path.join(root, "evals"), { recursive: true });
+  const linked = path.join(root, "evals", "baselines");
+  if (process.platform === "win32") execFileSync("cmd.exe", ["/d", "/c", "mklink", "/J", linked, outside]);
+  else await symlink(outside, linked, "dir");
+  let evaluated = false;
+  await assert.rejects(refreshEvaluationBaseline({ repoRoot: root, evaluate: async () => { evaluated = true; throw new Error("must not evaluate"); } }), /linked|relocated|contain|baseline/i);
+  assert.equal(evaluated, false);
+  assert.equal(await lstat(path.join(outside, "ai-output-baseline.json")).then(() => true, () => false), false);
+});
+
 test("baseline refresh refusal covers identity, hard failure, threshold, tool, and age matrices", async t => {
   const root = await mkdtemp(path.join(tmpdir(), "kidbot-refresh-"));
   t.after(() => rm(root, { recursive: true, force: true }));
