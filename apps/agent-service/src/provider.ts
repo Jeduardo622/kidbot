@@ -19,10 +19,21 @@ export interface ProviderModerationResult {
 }
 
 export interface ModelProvider {
-  generateText(request: TextGenerationRequest): Promise<string>;
-  generateImage?(request: ImageGenerationRequest): Promise<string>;
-  moderateText(text: string): Promise<ProviderModerationResult>;
+  generateText(request: TextGenerationRequest, signal?: AbortSignal): Promise<string>;
+  generateImage?(request: ImageGenerationRequest, signal?: AbortSignal): Promise<string>;
+  moderateText(text: string, signal?: AbortSignal): Promise<ProviderModerationResult>;
 }
+
+export const bindProviderSignal = (
+  provider: ModelProvider,
+  signal: AbortSignal,
+): ModelProvider => ({
+  generateText: (request) => provider.generateText(request, signal),
+  ...(provider.generateImage
+    ? { generateImage: (request: ImageGenerationRequest) => provider.generateImage!(request, signal) }
+    : {}),
+  moderateText: (text) => provider.moderateText(text, signal),
+});
 
 export type ProviderFallbackReason =
   | 'moderation_failure'
@@ -109,35 +120,42 @@ export interface ProviderRetryOptions {
   retries: number;
 }
 
-const withTimeout = async <T>(operation: Promise<T>, timeoutMs: number): Promise<T> => {
-  let timer: NodeJS.Timeout | undefined;
-  try {
-    return await Promise.race([
-      operation,
-      new Promise<T>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new GenerationTimeoutError()), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
-    }
-  }
-};
-
 export const withProviderRetry = async <T>(
-  operation: () => Promise<T>,
+  operation: (signal: AbortSignal) => Promise<T>,
   { timeoutMs, retries }: ProviderRetryOptions,
+  outerSignal?: AbortSignal,
 ): Promise<T> => {
   let lastError: unknown;
   for (let attempt = 0; attempt <= retries; attempt += 1) {
+    if (outerSignal?.aborted) {
+      throw new ProviderUnavailableError('Provider request cancelled');
+    }
+    const timeoutController = new AbortController();
+    const timer = setTimeout(
+      () => timeoutController.abort(new GenerationTimeoutError()),
+      timeoutMs,
+    );
+    const signal = outerSignal
+      ? AbortSignal.any([outerSignal, timeoutController.signal])
+      : timeoutController.signal;
     try {
-      return await withTimeout(operation(), timeoutMs);
+      const aborted = new Promise<never>((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      });
+      return await Promise.race([operation(signal), aborted]);
     } catch (error) {
+      if (timeoutController.signal.aborted) {
+        throw new GenerationTimeoutError();
+      }
+      if (outerSignal?.aborted) {
+        throw new ProviderUnavailableError('Provider request cancelled');
+      }
       if (error instanceof ProviderError) {
         throw error;
       }
       lastError = error;
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -166,9 +184,9 @@ export const createOpenAIProvider = (apiKey: string | undefined): ModelProvider 
   const retries = Number(process.env.PROVIDER_RETRIES ?? 1);
 
   return {
-    async generateText(request) {
+    async generateText(request, outerSignal) {
       const response = await withProviderRetry(
-        () =>
+        (signal) =>
           client.chat.completions.create({
             model: generationModel,
             temperature: request.temperature ?? 0.4,
@@ -177,15 +195,16 @@ export const createOpenAIProvider = (apiKey: string | undefined): ModelProvider 
               { role: 'system', content: request.system },
               { role: 'user', content: request.user },
             ],
-          }),
+          }, { signal }),
         { timeoutMs, retries },
+        outerSignal,
       );
 
       return response.choices[0]?.message?.content?.trim() ?? '';
     },
-    async generateImage(request) {
+    async generateImage(request, outerSignal) {
       const response = await withProviderRetry(
-        () =>
+        (signal) =>
           client.images.generate({
             model: imageModel,
             prompt: request.prompt,
@@ -193,8 +212,9 @@ export const createOpenAIProvider = (apiKey: string | undefined): ModelProvider 
             size: request.size ?? '1024x1024',
             quality: 'low',
             output_format: 'png',
-          }),
+          }, { signal }),
         { timeoutMs, retries },
+        outerSignal,
       );
 
       const base64 = response.data?.[0]?.b64_json?.trim();
@@ -204,7 +224,7 @@ export const createOpenAIProvider = (apiKey: string | undefined): ModelProvider 
 
       return base64;
     },
-    async moderateText(text) {
+    async moderateText(text, outerSignal) {
       if (!text.trim()) {
         return { blocked: false };
       }
@@ -212,11 +232,15 @@ export const createOpenAIProvider = (apiKey: string | undefined): ModelProvider 
       let response;
       try {
         response = await withProviderRetry(
-          () => client.moderations.create({ model: moderationModel, input: text }),
+          (signal) => client.moderations.create(
+            { model: moderationModel, input: text },
+            { signal },
+          ),
           {
             timeoutMs,
             retries,
           },
+          outerSignal,
         );
       } catch (error) {
         throw error instanceof ProviderError

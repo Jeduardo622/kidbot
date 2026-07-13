@@ -291,11 +291,25 @@ Set MCP env:
 MCP_PORT=<Railway assigned port>
 AGENT_BASE_URL=<agent-service Railway private URL, or public HTTPS URL if private DNS is unavailable>
 AGENT_SERVICE_TOKEN=<same high-entropy service token as agent-service>
+REDIS_URL=<Railway Redis private URL>
+MCP_REQUEST_CONTROL_STORE=redis
+MCP_CALLER_REQUESTS_PER_MINUTE=60
+MCP_NETWORK_REQUESTS_PER_MINUTE=120
+MCP_GLOBAL_REQUESTS_PER_MINUTE=600
+MCP_CALLER_COST_PER_MINUTE=60
+MCP_NETWORK_COST_PER_MINUTE=120
+MCP_GLOBAL_COST_PER_MINUTE=600
+MCP_CALLER_CONCURRENCY=2
+MCP_NETWORK_CONCURRENCY=4
+MCP_GLOBAL_CONCURRENCY=8
+MCP_AGENT_REQUEST_TIMEOUT_MS=45000
 PARENT_PROFILE_STORE=redis
 PARENT_AUTH_SECRET=<high-entropy parent secret>
 PARENT_HISTORY_RETENTION_DAYS=30
 PARENT_HISTORY_MAX_EVENTS=200
 ```
+
+The MCP server reserves caller, server-derived network, and deployment-global request, provider-cost, and concurrency capacity atomically in Redis before each tool call. Story cost includes text/moderation work plus the requested image count, and story image generation is limited to two provider calls at a time. Production fails closed if the Redis control store is unavailable. MCP deadlines cancel the downstream agent request, and agent-service forwards cancellation into OpenAI SDK calls.
 
 Only expose the MCP service publicly for ChatGPT and the remote smoke. Keep agent-service private where Railway supports it; if a public agent URL is temporarily needed, `AGENT_SERVICE_TOKEN` and the secured startup posture still protect direct calls.
 
