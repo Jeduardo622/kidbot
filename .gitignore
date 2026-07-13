@@ -13,3 +13,4 @@ coverage/
 *.tsbuildinfo
 pnpm-lock.yaml
 .kidbot/
+.worktrees/
