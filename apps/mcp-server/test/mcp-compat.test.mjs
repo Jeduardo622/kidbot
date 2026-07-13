@@ -307,7 +307,7 @@ test('registerKidbotTool isolates descriptor registries across server instances'
   assert.deepEqual((await secondClient.listTools()).tools.map(({ name }) => name), ['second_tool']);
 });
 
-test('registerKidbotTool synchronizes update/remove lifecycle without stale descriptors', async (t) => {
+test('registerKidbotTool rejects contract-bearing updates without changing list or call', async (t) => {
   const server = new McpServer({ name: 'lifecycle-server', version: '1.0.0' });
   const registered = registerLifecycleTestTool(server, 'lifecycle_tool', 'Lifecycle Tool');
   assert.throws(
@@ -319,11 +319,69 @@ test('registerKidbotTool synchronizes update/remove lifecycle without stale desc
     await Promise.all([client.close(), server.close()]);
   });
 
-  registered.update({ title: 'Updated Tool', outputSchema: { value: z.string() } });
+  const baselineList = await client.listTools();
+  const baselineCall = await client.callTool({ name: 'lifecycle_tool', arguments: {} });
+  const forbiddenUpdates = [
+    { name: 'renamed_tool' },
+    { outputSchema: { value: z.string() } },
+    { _meta: { unsafe: true } },
+    { annotations: { readOnlyHint: false } },
+    { paramsSchema: { value: z.string() } },
+  ];
+  for (const updates of forbiddenUpdates) {
+    assert.throws(() => registered.update(updates), /contract-bearing update/i);
+    assert.deepEqual(await client.listTools(), baselineList);
+    assert.deepEqual(
+      await client.callTool({ name: 'lifecycle_tool', arguments: {} }),
+      baselineCall,
+    );
+  }
+});
+
+test('registerKidbotTool rejects repeated renames without creating callable aliases', async (t) => {
+  const server = new McpServer({ name: 'rename-server', version: '1.0.0' });
+  const registered = registerLifecycleTestTool(server, 'stable_tool', 'Stable Tool');
+  const client = await connectInMemoryClient(server, 'rename-client');
+  t.after(async () => {
+    await Promise.all([client.close(), server.close()]);
+  });
+
+  assert.throws(() => registered.update({ name: 'first_alias' }), /contract-bearing update/i);
+  assert.throws(() => registered.update({ name: 'second_alias' }), /contract-bearing update/i);
+  assert.deepEqual((await client.listTools()).tools.map(({ name }) => name), ['stable_tool']);
+  assert.equal((await client.callTool({ name: 'stable_tool', arguments: {} })).isError, undefined);
+  assert.equal((await client.callTool({ name: 'first_alias', arguments: {} })).isError, true);
+  assert.equal((await client.callTool({ name: 'second_alias', arguments: {} })).isError, true);
+});
+
+test('registerKidbotTool synchronizes allowed updates and remove lifecycle', async (t) => {
+  const server = new McpServer({ name: 'allowed-update-server', version: '1.0.0' });
+  const registered = registerLifecycleTestTool(server, 'allowed_tool', 'Allowed Tool');
+  const client = await connectInMemoryClient(server, 'allowed-update-client');
+  t.after(async () => {
+    await Promise.all([client.close(), server.close()]);
+  });
+
+  registered.update({
+    title: 'Updated Tool',
+    description: 'Updated description',
+    callback: async () => ({
+      content: [{ type: 'text', text: 'Updated callback.' }],
+      structuredContent: { events: [] },
+    }),
+  });
   const [updated] = (await client.listTools()).tools;
   assert.equal(updated.title, 'Updated Tool');
-  assert.deepEqual(updated.outputSchema.required, ['value']);
-  assert.deepEqual(Object.keys(updated.outputSchema.properties), ['value']);
+  assert.equal(updated.description, 'Updated description');
+  assert.equal(
+    (await client.callTool({ name: 'allowed_tool', arguments: {} })).content[0].text,
+    'Updated callback.',
+  );
+
+  registered.disable();
+  assert.deepEqual((await client.listTools()).tools, []);
+  registered.enable();
+  assert.deepEqual((await client.listTools()).tools.map(({ name }) => name), ['allowed_tool']);
 
   registered.remove();
   assert.deepEqual((await client.listTools()).tools, []);

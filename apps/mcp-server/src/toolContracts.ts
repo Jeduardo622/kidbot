@@ -194,7 +194,6 @@ type JsonSchema = {
 interface ToolDescriptorState {
   name: string;
   registered: RegisteredTool;
-  resultSchema: z.ZodTypeAny;
   successSchema?: z.AnyZodObject;
 }
 
@@ -302,13 +301,12 @@ export const registerKidbotTool = (
   callback: ToolCallback<z.ZodTypeAny>,
 ) => {
   const { resultSchema, successSchema, ...descriptor } = config;
-  let activeResultSchema = resultSchema;
   const validateCallback =
     (toolCallback: ToolCallback<z.ZodTypeAny>) =>
     async (...args: Parameters<ToolCallback<z.ZodTypeAny>>) => {
       const result = await toolCallback(...args);
       if (result.structuredContent) {
-        activeResultSchema.parse(result.structuredContent);
+        resultSchema.parse(result.structuredContent);
       }
       return result;
     };
@@ -322,34 +320,29 @@ export const registerKidbotTool = (
     validateCallback(callback),
   );
   const descriptors = toolDescriptors.get(server) ?? new Map<string, ToolDescriptorState>();
-  const state: ToolDescriptorState = { name, registered, resultSchema, successSchema };
+  const state: ToolDescriptorState = { name, registered, successSchema };
   descriptors.set(name, state);
   toolDescriptors.set(server, descriptors);
 
   const originalUpdate = registered.update.bind(registered);
   const applyUpdate = originalUpdate as unknown as (updates: Record<string, unknown>) => void;
   registered.update = ((updates) => {
-    const nextName = updates.name;
-    if (typeof nextName === 'string' && nextName !== state.name && descriptors.has(nextName)) {
-      throw new Error(`Tool ${nextName} is already registered`);
+    const allowedFields = new Set(['title', 'description', 'enabled', 'callback']);
+    const contractField = Object.keys(updates).find((field) => !allowedFields.has(field));
+    if (contractField) {
+      throw new Error(
+        `Tool ${state.name} contract-bearing update is not allowed: ${contractField}`,
+      );
     }
     const normalizedUpdates = updates.callback
       ? { ...updates, callback: validateCallback(updates.callback as ToolCallback<z.ZodTypeAny>) }
       : updates;
     applyUpdate(normalizedUpdates as unknown as Record<string, unknown>);
-    if (typeof updates.outputSchema !== 'undefined' && registered.outputSchema) {
-      activeResultSchema = registered.outputSchema as z.ZodTypeAny;
-      state.resultSchema = activeResultSchema;
-      state.successSchema = undefined;
-    }
-    if (typeof nextName !== 'undefined' && nextName !== state.name) {
-      descriptors.delete(state.name);
-      if (typeof nextName === 'string') {
-        state.name = nextName;
-        descriptors.set(nextName, state);
-      }
-    }
   }) as RegisteredTool['update'];
+  registered.remove = () => {
+    applyUpdate({ name: null });
+    descriptors.delete(state.name);
+  };
 
   installToolListHandler(server);
   return registered;
