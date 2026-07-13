@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ComicBoard } from './ComicBoard.js';
+import { ComicBoard, PanelArtwork } from './ComicBoard.js';
 
 describe('ComicBoard artwork rendering', () => {
   const callTool = vi.fn();
@@ -70,6 +70,61 @@ describe('ComicBoard artwork rendering', () => {
     const image = await screen.findByRole('img', { name: 'Story panel artwork: happy dragon and fox at sunset' });
     expect(image).toBeInstanceOf(HTMLImageElement);
     expect(image.getAttribute('src')).toBe('https://cdn.example.test/story/new-friends.png');
+  });
+
+  it('replaces artwork that fails to load with the accessible placeholder', async () => {
+    callTool.mockResolvedValueOnce({
+      blocked: false,
+      panels: [
+        {
+          title: 'Forest Friends',
+          caption: 'The friends keep exploring.',
+          imagePrompt: 'fox and owl exploring a friendly forest',
+          imageUrl: 'https://cdn.example.test/story/expired.png',
+        },
+      ],
+    });
+
+    render(<ComicBoard />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Plan Panels' }));
+
+    const accessibleName = 'Story panel artwork: fox and owl exploring a friendly forest';
+    const image = await screen.findByRole('img', { name: accessibleName });
+    expect(image).toBeInstanceOf(HTMLImageElement);
+
+    fireEvent.error(image);
+
+    const panel = screen.getByText('Forest Friends').closest('article');
+    expect(panel).not.toBeNull();
+    if (!panel) {
+      throw new Error('Expected Forest Friends to render inside a panel card.');
+    }
+    const fallback = within(panel).getByRole('img', { name: accessibleName });
+    expect(fallback).not.toBeInstanceOf(HTMLImageElement);
+    expect(fallback.classList.contains('panel-artwork-placeholder')).toBe(true);
+    expect(within(panel).getByText('The friends keep exploring.')).toBeTruthy();
+  });
+
+  it('attempts a changed imageUrl after the previous URL failed', () => {
+    const panel = {
+      title: 'Sky Friends',
+      caption: 'The friends look up.',
+      imagePrompt: 'owl and fox watching clouds',
+      imageUrl: 'https://cdn.example.test/story/expired.png',
+    };
+    const { rerender } = render(<PanelArtwork panel={panel} />);
+
+    const accessibleName = 'Story panel artwork: owl and fox watching clouds';
+    fireEvent.error(screen.getByRole('img', { name: accessibleName }));
+    expect(screen.getByRole('img', { name: accessibleName })).not.toBeInstanceOf(HTMLImageElement);
+
+    const replacementUrl = 'https://cdn.example.test/story/replacement.png';
+    rerender(<PanelArtwork panel={{ ...panel, imageUrl: replacementUrl }} />);
+
+    const replacement = screen.getByRole('img', { name: accessibleName });
+    expect(replacement).toBeInstanceOf(HTMLImageElement);
+    expect(replacement.getAttribute('src')).toBe(replacementUrl);
   });
 
   it('clears stale panels when a later response is blocked', async () => {
