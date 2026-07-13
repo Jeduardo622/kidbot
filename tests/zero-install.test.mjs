@@ -45,3 +45,17 @@ test('pnpm run smoke preflight stays zero-install locally', () => {
 
   assert.match(workspace, /^verifyDepsBeforeRun:\s*false$/m);
 });
+
+test('pnpm permits only the esbuild dependency build', () => {
+  const workspace = read('pnpm-workspace.yaml');
+  const block = workspace.match(/^allowBuilds:\s*\r?\n((?:^[ \t]+.*(?:\r?\n|$))*)/m)?.[1];
+  const allowBuilds = Object.fromEntries(
+    (block ?? '').split(/\r?\n/).filter((line) => line.trim()).map((line) => {
+      const match = line.match(/^\s+([^:]+):\s*(true|false)\s*$/);
+      assert.ok(match, `invalid allowBuilds entry: ${line}`);
+      return [match[1], match[2] === 'true'];
+    }),
+  );
+
+  assert.deepEqual(allowBuilds, { esbuild: true });
+});

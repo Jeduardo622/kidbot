@@ -37,7 +37,7 @@ const toolIds = [
 ];
 const strongToken = () => `matrix-token-${randomInt(1000, 9999)}-abcdefghijklmnopqrstuvwxyz0123456789`;
 const localEnvBypassPath = join(packageDir, '.env.auth-matrix-not-used');
-const isolatedEnvKeys = [
+const mcpServerEnvKeys = [
   'AGENT_BASE_URL',
   'AGENT_PORT',
   'AGENT_SERVICE_TOKEN',
@@ -57,10 +57,15 @@ const isolatedEnvKeys = [
   'MCP_NETWORK_COST_PER_MINUTE',
   'MCP_NETWORK_REQUESTS_PER_MINUTE',
   'MCP_REQUEST_CONTROL_STORE',
-  'OPENAI_API_KEY',
+  'NODE_ENV',
+  'PARENT_AUTH_SECRET',
   'PARENT_HISTORY_MAX_EVENTS',
   'PARENT_HISTORY_RETENTION_DAYS',
   'PARENT_PROFILE_STORE',
+];
+const isolatedEnvKeys = [
+  ...mcpServerEnvKeys,
+  'OPENAI_API_KEY',
   'PORT',
 ];
 
@@ -244,11 +249,12 @@ const redisAvailable = (redisUrl) =>
     }
   });
 
-const configImportEnv = {
-  FALLBACK_WIDGET: process.env.FALLBACK_WIDGET,
-  KIDBOT_LOCAL_DEV: process.env.KIDBOT_LOCAL_DEV,
-  NODE_ENV: process.env.NODE_ENV,
-};
+const configImportEnv = Object.fromEntries(
+  mcpServerEnvKeys.map((key) => [key, process.env[key]]),
+);
+for (const key of mcpServerEnvKeys) {
+  delete process.env[key];
+}
 process.env.FALLBACK_WIDGET = '1';
 process.env.KIDBOT_LOCAL_DEV = '1';
 process.env.NODE_ENV = 'test';
@@ -342,10 +348,10 @@ test('non-fallback mode without AGENT_SERVICE_TOKEN fails closed at mcp startup'
 test('non-fallback production mode with short AGENT_SERVICE_TOKEN fails closed at mcp startup', async () => {
   const mcpPort = await getFreePort();
   const mcp = spawnProcess(mcpEntry, {
+    ...productionWidgetEnv,
     AGENT_SERVICE_TOKEN: 'short-token-secret',
     FALLBACK_WIDGET: '0',
     MCP_PORT: String(mcpPort),
-    NODE_ENV: 'production',
   });
 
   let stderr = '';

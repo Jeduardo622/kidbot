@@ -3,6 +3,10 @@ import { test } from 'node:test';
 import { Redis } from 'ioredis';
 
 const strongSecret = 'parent-secret-abcdefghijklmnopqrstuvwxyz0123456789';
+const productionWidgetEnv = {
+  KIDBOT_WIDGET_DOMAIN: 'https://kidbot-production.up.railway.app',
+  KIDBOT_WIDGET_RESOURCE_DOMAINS: 'https://rxnwualzddplucjhclij.supabase.co',
+};
 process.env.AGENT_SERVICE_TOKEN ??= 'service-token-abcdefghijklmnopqrstuvwxyz0123456789';
 process.env.FALLBACK_WIDGET ??= '0';
 
@@ -14,6 +18,7 @@ const { parseMcpServerConfig } = await import('../dist/config.js');
 
 test('parent profile config is disabled by default and needs no secret', () => {
   const config = parseMcpServerConfig({
+    ...productionWidgetEnv,
     AGENT_SERVICE_TOKEN: 'service-token-abcdefghijklmnopqrstuvwxyz0123456789',
     FALLBACK_WIDGET: '0',
     NODE_ENV: 'production',
@@ -26,6 +31,7 @@ test('parent profile config is disabled by default and needs no secret', () => {
 
 test('agent base url overrides local agent port for split-service deploys', () => {
   const config = parseMcpServerConfig({
+    ...productionWidgetEnv,
     AGENT_BASE_URL: 'https://kidbot-agent-service.railway.internal/',
     AGENT_PORT: '4999',
     AGENT_SERVICE_TOKEN: 'service-token-abcdefghijklmnopqrstuvwxyz0123456789',
@@ -41,6 +47,7 @@ test('agent base url rejects non-http values', () => {
   assert.throws(
     () =>
       parseMcpServerConfig({
+        ...productionWidgetEnv,
         AGENT_BASE_URL: 'redis://kidbot-agent-service.internal',
         AGENT_SERVICE_TOKEN: 'service-token-abcdefghijklmnopqrstuvwxyz0123456789',
         FALLBACK_WIDGET: '0',
@@ -54,6 +61,7 @@ test('redis parent profile storage requires a secret', () => {
   assert.throws(
     () =>
       parseMcpServerConfig({
+        ...productionWidgetEnv,
         AGENT_SERVICE_TOKEN: 'service-token-abcdefghijklmnopqrstuvwxyz0123456789',
         FALLBACK_WIDGET: '0',
         NODE_ENV: 'production',
@@ -67,6 +75,7 @@ test('redis parent profile storage rejects short production secrets without leak
   assert.throws(
     () =>
       parseMcpServerConfig({
+        ...productionWidgetEnv,
         AGENT_SERVICE_TOKEN: 'service-token-abcdefghijklmnopqrstuvwxyz0123456789',
         FALLBACK_WIDGET: '0',
         NODE_ENV: 'production',
