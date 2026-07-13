@@ -73,7 +73,7 @@ Agent-service request logs will replace raw `profileId` and `sessionId` values w
 - OpenAI processing, Railway hosting/logs, Supabase public image storage, and browser speech-recognition processing.
 - Exact 30-day optional profile/history retention and scheduled 24-hour generated-image cleanup.
 - Immediate profile/history deletion semantics and the separate image cleanup window.
-- User controls and a deletion/contact process.
+- User controls and a deletion/contact process through `https://github.com/Jeduardo622/kidbot/issues` until a dedicated support channel is published.
 - No claim of COPPA, GDPR-K, or legal certification.
 
 The MCP HTTP service will expose the same policy at `/privacy` as accessible HTML suitable for a production submission URL. README and `EXECUTSPEC.md` claims will be reconciled with actual runtime behavior.
