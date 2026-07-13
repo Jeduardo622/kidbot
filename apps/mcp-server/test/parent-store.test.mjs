@@ -23,6 +23,42 @@ const eventForProfile = (profile, sessionId, id) => ({
   outputLength: 16,
 });
 
+const interceptAgeBandUpdate = (profileId) => {
+  const originalEval = Redis.prototype.eval;
+  let releaseUpdate;
+  let updateObserved;
+  const updateReached = new Promise((resolve) => {
+    updateObserved = resolve;
+  });
+  const updateRelease = new Promise((resolve) => {
+    releaseUpdate = resolve;
+  });
+  Redis.prototype.eval = async function (...args) {
+    const profileUpdate = args.some((arg) => {
+      if (typeof arg !== 'string' || !arg.startsWith('{')) return false;
+      try {
+        const value = JSON.parse(arg);
+        return value.ageBand === '10-12' && typeof value.updatedAt === 'string' && !value.sessionId;
+      } catch {
+        return false;
+      }
+    });
+    if (args.includes(`kidbot:profile:${profileId}`) && profileUpdate) {
+      updateObserved();
+      await updateRelease;
+    }
+    return originalEval.apply(this, args);
+  };
+  return {
+    release: () => releaseUpdate(),
+    reached: updateReached,
+    restore: () => {
+      releaseUpdate();
+      Redis.prototype.eval = originalEval;
+    },
+  };
+};
+
 const {
   createMemoryParentProfileStore,
   createParentProfileStoreFromConfig,
@@ -574,42 +610,60 @@ test('redis parent store smoke records capped metadata when REDIS_URL is availab
       sessionId: raceSessionId,
     });
     cleanupProfileIds.push(raceProfile.profileId);
-    const originalSet = Redis.prototype.set;
-    let releaseStaleWrite;
-    let staleWriteObserved;
-    const staleWriteReached = new Promise((resolve) => {
-      staleWriteObserved = resolve;
-    });
-    const staleWriteRelease = new Promise((resolve) => {
-      releaseStaleWrite = resolve;
-    });
-    Redis.prototype.set = async function (...args) {
-      if (args[0] === `kidbot:profile:${raceProfile.profileId}`) {
-        staleWriteObserved();
-        await staleWriteRelease;
-      }
-      return originalSet.apply(this, args);
-    };
+    const deleteRace = interceptAgeBandUpdate(raceProfile.profileId);
     try {
       const update = store.updateProfile({
         profileId: raceProfile.profileId,
         parentAccessToken: raceProfile.parentAccessToken,
         ageBand: '10-12',
       });
-      const updateState = await Promise.race([
-        staleWriteReached.then(() => 'stale-write'),
-        update.then(() => 'completed'),
-      ]);
+      await deleteRace.reached;
       await store.deleteProfile({
         profileId: raceProfile.profileId,
         parentAccessToken: raceProfile.parentAccessToken,
       });
-      if (updateState === 'stale-write') releaseStaleWrite();
-      await update;
+      deleteRace.release();
+      await assert.rejects(update, /invalid parent access token/i);
       assert.equal(await store.validateAccess(raceProfile.profileId, raceProfile.parentAccessToken), false);
     } finally {
-      releaseStaleWrite();
-      Redis.prototype.set = originalSet;
+      deleteRace.restore();
+    }
+
+    const consentRaceSessionId = `kb_session_consentrace${Date.now()}`;
+    cleanupSessionIds.push(consentRaceSessionId);
+    const consentRaceProfile = await store.createProfile({
+      ageBand: '7-9',
+      historyEnabled: true,
+      sessionId: consentRaceSessionId,
+    });
+    cleanupProfileIds.push(consentRaceProfile.profileId);
+    const consentRace = interceptAgeBandUpdate(consentRaceProfile.profileId);
+    try {
+      const ageBandUpdate = store.updateProfile({
+        profileId: consentRaceProfile.profileId,
+        parentAccessToken: consentRaceProfile.parentAccessToken,
+        ageBand: '10-12',
+      });
+      await consentRace.reached;
+      const disabled = await store.updateProfile({
+        profileId: consentRaceProfile.profileId,
+        parentAccessToken: consentRaceProfile.parentAccessToken,
+        historyEnabled: false,
+      });
+      assert.equal(disabled.historyEnabled, false);
+      consentRace.release();
+      const updated = await ageBandUpdate;
+      assert.equal(updated.ageBand, '10-12');
+      assert.equal(updated.historyEnabled, false);
+      assert.equal(
+        await store.recordEvent(
+          eventForProfile(consentRaceProfile, consentRaceSessionId, 'kb_event_after_disable_race'),
+          consentRaceProfile.parentAccessToken,
+        ),
+        false,
+      );
+    } finally {
+      consentRace.restore();
     }
 
     await assert.rejects(

@@ -403,50 +403,42 @@ export const createRedisParentProfileStore = (
       if (!profile) {
         throw new Error('Invalid parent access token.');
       }
-      const updated: StoredProfile = {
-        ...profile,
-        ageBand: input.ageBand ?? profile.ageBand,
-        historyEnabled: input.historyEnabled ?? profile.historyEnabled,
+      const updatePatch = {
+        ...(input.ageBand === undefined ? {} : { ageBand: input.ageBand }),
+        ...(input.historyEnabled === undefined ? {} : { historyEnabled: input.historyEnabled }),
         updatedAt: new Date().toISOString(),
         expiresAt: new Date(Date.now() + retentionSeconds * 1_000).toISOString(),
       };
-      if (updated.historyEnabled) {
-        const saved = await client.eval(
-          `local profileRaw = redis.call('GET', KEYS[1])
-           if not profileRaw then return 0 end
-           local okProfile, storedProfile = pcall(cjson.decode, profileRaw)
-           if not okProfile or storedProfile.profileId ~= ARGV[1] then return 0 end
-           redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
-           return 1`,
-          1,
-          profileKey(input.profileId),
-          input.profileId,
-          JSON.stringify(updated),
-          retentionSeconds,
-        );
-        if (saved !== 1) throw new Error('Invalid parent access token.');
-      } else {
-        const purged = await client.eval(
-          `local profileRaw = redis.call('GET', KEYS[1])
-           if not profileRaw then return 0 end
-           local okProfile, storedProfile = pcall(cjson.decode, profileRaw)
-           if not okProfile or storedProfile.profileId ~= ARGV[1] then return 0 end
+      const saved = await client.eval(
+        `local profileRaw = redis.call('GET', KEYS[1])
+         if not profileRaw then return 0 end
+         local okProfile, storedProfile = pcall(cjson.decode, profileRaw)
+         if not okProfile or storedProfile.profileId ~= ARGV[1] then return 0 end
+         local okPatch, patch = pcall(cjson.decode, ARGV[2])
+         if not okPatch then return 0 end
+         if patch.ageBand ~= nil then storedProfile.ageBand = patch.ageBand end
+         if patch.historyEnabled ~= nil then storedProfile.historyEnabled = patch.historyEnabled end
+         storedProfile.updatedAt = patch.updatedAt
+         storedProfile.expiresAt = patch.expiresAt
+         if patch.historyEnabled == false then
            local sessionIds = redis.call('ZRANGE', KEYS[2], 0, -1)
            for _, sessionId in ipairs(sessionIds) do
              redis.call('DEL', 'kidbot:session:' .. sessionId, 'kidbot:session:' .. sessionId .. ':events')
            end
            redis.call('DEL', KEYS[2])
-           redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
-           return 1`,
-          2,
-          profileKey(input.profileId),
-          profileSessionsKey(input.profileId),
-          input.profileId,
-          JSON.stringify(updated),
-          retentionSeconds,
-        );
-        if (purged !== 1) throw new Error('Invalid parent access token.');
-      }
+         end
+         local updatedRaw = cjson.encode(storedProfile)
+         redis.call('SET', KEYS[1], updatedRaw, 'EX', ARGV[3])
+         return updatedRaw`,
+        2,
+        profileKey(input.profileId),
+        profileSessionsKey(input.profileId),
+        input.profileId,
+        JSON.stringify(updatePatch),
+        retentionSeconds,
+      );
+      if (typeof saved !== 'string') throw new Error('Invalid parent access token.');
+      const updated = JSON.parse(saved) as StoredProfile;
       return {
         profileId: updated.profileId,
         ageBand: updated.ageBand,
