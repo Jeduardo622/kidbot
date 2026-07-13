@@ -576,7 +576,7 @@ export const registerTools = (
     outputSchema: voiceToolOutputSchema,
     resultSchema: voiceToolOutputUnion,
     successSchema: voiceSuccessSchema,
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   };
   registerKidbotTool(server, voiceTool.name, voiceTool, async (input: unknown, extra) =>
     runControlled(voiceTool.name, input, extra as ToolRequestExtra, networkIdentity, async (signal) =>
@@ -607,7 +607,7 @@ export const registerTools = (
     outputSchema: storyPanelsToolOutputSchema,
     resultSchema: storyPanelsToolOutputUnion,
     successSchema: storyPanelsSuccessSchema,
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   };
   registerKidbotTool(server, storyTool.name, storyTool, async (input: unknown, extra) =>
     runControlled(storyTool.name, input, extra as ToolRequestExtra, networkIdentity, async (signal) =>
@@ -638,7 +638,7 @@ export const registerTools = (
     outputSchema: coloringOutlineToolOutputSchema,
     resultSchema: coloringOutlineToolOutputUnion,
     successSchema: coloringOutlineSuccessSchema,
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   };
   registerKidbotTool(server, coloringTool.name, coloringTool, async (input: unknown, extra) =>
     runControlled(coloringTool.name, input, extra as ToolRequestExtra, networkIdentity, async (signal) =>
@@ -665,7 +665,7 @@ export const registerTools = (
     outputSchema: scienceSimToolOutputSchema,
     resultSchema: scienceSimToolOutputUnion,
     successSchema: scienceSimSuccessSchema,
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   };
   registerKidbotTool(server, scienceTool.name, scienceTool, async (input: unknown, extra) =>
     runControlled(scienceTool.name, input, extra as ToolRequestExtra, networkIdentity, async (signal) =>

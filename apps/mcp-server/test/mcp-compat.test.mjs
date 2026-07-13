@@ -1,11 +1,21 @@
 import assert from 'node:assert/strict';
 import { randomInt } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { spawn } from 'node:child_process';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
+import {
+  parentHistoryListSuccessSchema,
+  parentHistoryListToolOutputSchema,
+  parentHistoryListToolOutputUnion,
+  registerKidbotTool,
+} from '../dist/toolContracts.js';
 
 const serverEntry = join(process.cwd(), 'dist', 'server.js');
 
@@ -23,10 +33,10 @@ const toolIds = [
   'parent_history_list',
 ];
 const toolContractExpectations = {
-  voice_chat: { title: 'Voice Chat', readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-  story_panels: { title: 'Story Panels', readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-  coloring_outline: { title: 'Coloring Outline', readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-  science_sim: { title: 'Science Simulation', readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  voice_chat: { title: 'Voice Chat', readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  story_panels: { title: 'Story Panels', readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  coloring_outline: { title: 'Coloring Outline', readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  science_sim: { title: 'Science Simulation', readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   parent_profile_create: { title: 'Create Parent Profile', readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   parent_profile_update: { title: 'Update Parent Profile', readOnlyHint: false, destructiveHint: true, openWorldHint: false },
   parent_history_list: { title: 'List Parent History', readOnlyHint: true, destructiveHint: false, openWorldHint: false },
@@ -99,6 +109,28 @@ const getToolDescriptor = async (url, name) => {
 const assertMatchesAdvertisedOutput = (descriptor, structuredContent) => {
   const result = schemaValidator.getValidator(descriptor.outputSchema)(structuredContent);
   assert.equal(result.valid, true, result.errorMessage);
+};
+
+const registerLifecycleTestTool = (server, name, title) => registerKidbotTool(
+  server,
+  name,
+  {
+    title,
+    description: `${title} description`,
+    inputSchema: z.object({}),
+    outputSchema: parentHistoryListToolOutputSchema,
+    resultSchema: parentHistoryListToolOutputUnion,
+    successSchema: parentHistoryListSuccessSchema,
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  },
+  async () => ({ content: [], structuredContent: { events: [] } }),
+);
+
+const connectInMemoryClient = async (server, name) => {
+  const client = new Client({ name, version: '1.0.0' });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  return client;
 };
 
 const assertWidgetResourceContract = (resource) => {
@@ -258,6 +290,48 @@ test('/mcp tools/list advertises exact Kidbot app contracts', async () => {
       openWorldHint: expected.openWorldHint,
     });
   }
+});
+
+test('registerKidbotTool isolates descriptor registries across server instances', async (t) => {
+  const firstServer = new McpServer({ name: 'first-server', version: '1.0.0' });
+  const secondServer = new McpServer({ name: 'second-server', version: '1.0.0' });
+  registerLifecycleTestTool(firstServer, 'first_tool', 'First Tool');
+  registerLifecycleTestTool(secondServer, 'second_tool', 'Second Tool');
+  const firstClient = await connectInMemoryClient(firstServer, 'first-client');
+  const secondClient = await connectInMemoryClient(secondServer, 'second-client');
+  t.after(async () => {
+    await Promise.all([firstClient.close(), secondClient.close(), firstServer.close(), secondServer.close()]);
+  });
+
+  assert.deepEqual((await firstClient.listTools()).tools.map(({ name }) => name), ['first_tool']);
+  assert.deepEqual((await secondClient.listTools()).tools.map(({ name }) => name), ['second_tool']);
+});
+
+test('registerKidbotTool synchronizes update/remove lifecycle without stale descriptors', async (t) => {
+  const server = new McpServer({ name: 'lifecycle-server', version: '1.0.0' });
+  const registered = registerLifecycleTestTool(server, 'lifecycle_tool', 'Lifecycle Tool');
+  assert.throws(
+    () => registerLifecycleTestTool(server, 'lifecycle_tool', 'Duplicate Tool'),
+    /already registered/i,
+  );
+  const client = await connectInMemoryClient(server, 'lifecycle-client');
+  t.after(async () => {
+    await Promise.all([client.close(), server.close()]);
+  });
+
+  registered.update({ title: 'Updated Tool', outputSchema: { value: z.string() } });
+  const [updated] = (await client.listTools()).tools;
+  assert.equal(updated.title, 'Updated Tool');
+  assert.deepEqual(updated.outputSchema.required, ['value']);
+  assert.deepEqual(Object.keys(updated.outputSchema.properties), ['value']);
+
+  registered.remove();
+  assert.deepEqual((await client.listTools()).tools, []);
+});
+
+test('registerKidbotTool uses only the public tools/list handler API', () => {
+  const implementation = readFileSync(join(process.cwd(), 'dist', 'toolContracts.js'), 'utf8');
+  assert.doesNotMatch(implementation, /_requestHandlers/);
 });
 
 test('/mcp tool call returns structuredContent for widget contract', async () => {

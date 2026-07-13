@@ -1,7 +1,8 @@
 import { registerAppTool, type ToolCallback } from '@modelcontextprotocol/ext-apps/server';
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
+import type { McpServer, RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { ListToolsRequestSchema, type ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 import {
   ageBandSchema,
   generationResultMetadataShape,
@@ -184,15 +185,27 @@ export const parentHistoryListToolOutputSchema = advertiseObjectUnion(
   parentHistoryListSuccessSchema.shape,
 );
 
-type RequestHandler = (request: unknown, extra: unknown) => unknown | Promise<unknown>;
-type ToolListResult = { tools: Array<Record<string, unknown>>; nextCursor?: string };
 type JsonSchema = {
   type?: string;
   properties?: Record<string, JsonSchema>;
   [key: string]: unknown;
 };
 
-const toolSuccessSchemas = new WeakMap<McpServer, Map<string, z.AnyZodObject>>();
+interface ToolDescriptorState {
+  name: string;
+  registered: RegisteredTool;
+  resultSchema: z.ZodTypeAny;
+  successSchema?: z.AnyZodObject;
+}
+
+const toolDescriptors = new WeakMap<McpServer, Map<string, ToolDescriptorState>>();
+
+const toJsonSchema = (schema: z.ZodTypeAny): JsonSchema =>
+  zodToJsonSchema(schema, {
+    $refStrategy: 'none',
+    strictUnions: true,
+    target: 'jsonSchema7',
+  }) as JsonSchema;
 
 const exactAdvertisedOutputSchema = (schema: JsonSchema, successSchema: z.AnyZodObject) => {
   const properties = schema.properties ?? {};
@@ -240,41 +253,34 @@ const exactAdvertisedOutputSchema = (schema: JsonSchema, successSchema: z.AnyZod
   };
 };
 
-const decorateToolListSecuritySchemes = (server: McpServer) => {
-  const protocol = server.server as unknown as {
-    _requestHandlers: Map<string, RequestHandler>;
-  };
-  const originalHandler = protocol._requestHandlers.get('tools/list');
-  if (
-    !originalHandler ||
-    (originalHandler as RequestHandler & { kidbotSecurityDecorated?: boolean })
-      .kidbotSecurityDecorated
-  ) {
-    return;
-  }
-  const decoratedHandler = async (request: unknown, extra: unknown): Promise<ToolListResult> => {
-    const result = (await originalHandler(request, extra)) as ToolListResult;
-    const successSchemas = toolSuccessSchemas.get(server);
-    return {
-      ...result,
-      tools: result.tools.map((tool) => {
-        const name = typeof tool.name === 'string' ? tool.name : '';
-        const successSchema = successSchemas?.get(name);
-        const outputSchema = tool.outputSchema as JsonSchema | undefined;
+const installToolListHandler = (server: McpServer) => {
+  server.server.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: [...(toolDescriptors.get(server)?.values() ?? [])]
+      .filter(({ registered }) => registered.enabled)
+      .map(({ name, registered, successSchema }) => {
+        const outputSchema = registered.outputSchema
+          ? toJsonSchema(registered.outputSchema as z.ZodTypeAny)
+          : undefined;
         return {
-          ...tool,
-          securitySchemes: noAuth,
-          ...(successSchema && outputSchema
-            ? { outputSchema: exactAdvertisedOutputSchema(outputSchema, successSchema) }
+          name,
+          title: registered.title,
+          description: registered.description,
+          inputSchema: registered.inputSchema
+            ? toJsonSchema(registered.inputSchema as z.ZodTypeAny)
+            : { type: 'object' as const, properties: {} },
+          ...(outputSchema
+            ? {
+                outputSchema: successSchema
+                  ? exactAdvertisedOutputSchema(outputSchema, successSchema)
+                  : outputSchema,
+              }
             : {}),
+          annotations: registered.annotations,
+          securitySchemes: noAuth,
+          _meta: { ...registered._meta, securitySchemes: noAuth },
         };
       }),
-    };
-  };
-  (
-    decoratedHandler as RequestHandler & { kidbotSecurityDecorated?: boolean }
-  ).kidbotSecurityDecorated = true;
-  protocol._requestHandlers.set('tools/list', decoratedHandler);
+  }));
 };
 
 export interface KidbotToolConfig {
@@ -296,9 +302,16 @@ export const registerKidbotTool = (
   callback: ToolCallback<z.ZodTypeAny>,
 ) => {
   const { resultSchema, successSchema, ...descriptor } = config;
-  const successSchemas = toolSuccessSchemas.get(server) ?? new Map<string, z.AnyZodObject>();
-  successSchemas.set(name, successSchema);
-  toolSuccessSchemas.set(server, successSchemas);
+  let activeResultSchema = resultSchema;
+  const validateCallback =
+    (toolCallback: ToolCallback<z.ZodTypeAny>) =>
+    async (...args: Parameters<ToolCallback<z.ZodTypeAny>>) => {
+      const result = await toolCallback(...args);
+      if (result.structuredContent) {
+        activeResultSchema.parse(result.structuredContent);
+      }
+      return result;
+    };
   const registered = registerAppTool(
     server,
     name,
@@ -306,14 +319,38 @@ export const registerKidbotTool = (
       ...descriptor,
       _meta: createToolMeta(),
     },
-    async (...args) => {
-      const result = await callback(...args);
-      if (result.structuredContent) {
-        resultSchema.parse(result.structuredContent);
-      }
-      return result;
-    },
+    validateCallback(callback),
   );
-  decorateToolListSecuritySchemes(server);
+  const descriptors = toolDescriptors.get(server) ?? new Map<string, ToolDescriptorState>();
+  const state: ToolDescriptorState = { name, registered, resultSchema, successSchema };
+  descriptors.set(name, state);
+  toolDescriptors.set(server, descriptors);
+
+  const originalUpdate = registered.update.bind(registered);
+  const applyUpdate = originalUpdate as unknown as (updates: Record<string, unknown>) => void;
+  registered.update = ((updates) => {
+    const nextName = updates.name;
+    if (typeof nextName === 'string' && nextName !== state.name && descriptors.has(nextName)) {
+      throw new Error(`Tool ${nextName} is already registered`);
+    }
+    const normalizedUpdates = updates.callback
+      ? { ...updates, callback: validateCallback(updates.callback as ToolCallback<z.ZodTypeAny>) }
+      : updates;
+    applyUpdate(normalizedUpdates as unknown as Record<string, unknown>);
+    if (typeof updates.outputSchema !== 'undefined' && registered.outputSchema) {
+      activeResultSchema = registered.outputSchema as z.ZodTypeAny;
+      state.resultSchema = activeResultSchema;
+      state.successSchema = undefined;
+    }
+    if (typeof nextName !== 'undefined' && nextName !== state.name) {
+      descriptors.delete(state.name);
+      if (typeof nextName === 'string') {
+        state.name = nextName;
+        descriptors.set(nextName, state);
+      }
+    }
+  }) as RegisteredTool['update'];
+
+  installToolListHandler(server);
   return registered;
 };
