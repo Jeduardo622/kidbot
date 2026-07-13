@@ -274,6 +274,7 @@ const runParentFlow = async (baseUrl) => {
   const wrongTokenSessionId = `kb_session_wrong${suffix}`;
   const create = await callMcp(baseUrl, 301, 'parent_profile_create', {
     ageBand: '7-9',
+    historyEnabled: true,
     sessionId,
   });
   const profile = assertMcpOk(create, 'parent_profile_create');
@@ -340,6 +341,20 @@ const runParentFlow = async (baseUrl) => {
     limit: 20,
   });
   assertMcpError(unauthorizedHistory, 'parent_history_list with wrong token', /invalid parent access token/i);
+
+  const deleted = await callMcp(baseUrl, 308, 'parent_profile_delete', {
+    profileId: profile.profileId,
+    parentAccessToken: profile.parentAccessToken,
+  });
+  const deletedContent = assertMcpOk(deleted, 'parent_profile_delete');
+  assert.deepEqual(deletedContent, { deleted: true, profileId: profile.profileId });
+
+  const historyAfterDelete = await callMcp(baseUrl, 309, 'parent_history_list', {
+    profileId: profile.profileId,
+    parentAccessToken: profile.parentAccessToken,
+    limit: 20,
+  });
+  assertMcpError(historyAfterDelete, 'parent_history_list after delete', /invalid parent access token/i);
 
   return {
     events: initialEvents.length,

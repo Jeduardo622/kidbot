@@ -34,6 +34,7 @@ const toolIds = [
   'science_sim',
   'parent_profile_create',
   'parent_profile_update',
+  'parent_profile_delete',
   'parent_history_list',
 ];
 const strongToken = () => `matrix-token-${randomInt(1000, 9999)}-abcdefghijklmnopqrstuvwxyz0123456789`;
@@ -474,6 +475,27 @@ test('fallback mode remains explicit bypass path without AGENT_SERVICE_TOKEN', a
     for (const toolId of toolIds) {
       assert.match(response.body, new RegExp(`"${toolId}"`));
     }
+  } finally {
+    stopProcess(mcp);
+  }
+});
+
+test('parent profile deletion is destructive, closed-world, and requires parent credentials', async () => {
+  const mcpPort = await getFreePort();
+  const mcpBaseUrl = `http://localhost:${mcpPort}`;
+  const mcp = spawnProcess(mcpEntry, {
+    FALLBACK_WIDGET: '1',
+    KIDBOT_LOCAL_DEV: '1',
+    MCP_PORT: String(mcpPort),
+  });
+
+  try {
+    await waitForMcpHealth(mcpBaseUrl);
+    const descriptor = await getToolDescriptor(mcpBaseUrl, 'parent_profile_delete');
+    assert.equal(descriptor.annotations?.destructiveHint, true);
+    assert.equal(descriptor.annotations?.openWorldHint, false);
+    assert.deepEqual(descriptor.inputSchema.required?.sort(), ['parentAccessToken', 'profileId']);
+    assert.equal(descriptor.inputSchema.additionalProperties, false);
   } finally {
     stopProcess(mcp);
   }
@@ -974,6 +996,7 @@ test('mcp strips parent token and saves metadata history with valid parent auth'
         name: 'parent_profile_create',
         arguments: {
           ageBand: '4-6',
+          historyEnabled: true,
           sessionId,
         },
       },
@@ -983,6 +1006,21 @@ test('mcp strips parent token and saves metadata history with valid parent auth'
     const profile = createJson.result.structuredContent;
     assert.match(profile.profileId, /^kb_profile_/);
     assert.match(profile.parentAccessToken, /^kb_parent_/);
+
+    const otherCreateResponse = await callMcp(mcpBaseUrl, {
+      jsonrpc: '2.0',
+      id: 1061,
+      method: 'tools/call',
+      params: {
+        name: 'parent_profile_create',
+        arguments: {
+          ageBand: '7-9',
+          historyEnabled: true,
+          sessionId: `${sessionId}other`,
+        },
+      },
+    });
+    const otherProfile = parseMcpResponse(otherCreateResponse.body).result.structuredContent;
 
     const wrongTokenSessionId = `${sessionId}wrong`;
     const wrongTokenResponse = await callMcp(mcpBaseUrl, {
@@ -1063,6 +1101,51 @@ test('mcp strips parent token and saves metadata history with valid parent auth'
     assert.equal(wrongTokenHistoryResponse.status, 200);
     const wrongTokenHistoryJson = parseMcpResponse(wrongTokenHistoryResponse.body);
     assert.equal(wrongTokenHistoryJson.result.structuredContent.events.length, 0);
+
+    const foreignDeleteResponse = await callMcp(mcpBaseUrl, {
+      jsonrpc: '2.0',
+      id: 111,
+      method: 'tools/call',
+      params: {
+        name: 'parent_profile_delete',
+        arguments: {
+          profileId: profile.profileId,
+          parentAccessToken: otherProfile.parentAccessToken,
+        },
+      },
+    });
+    assert.match(foreignDeleteResponse.body, /invalid parent access token/i);
+
+    const deleteResponse = await callMcp(mcpBaseUrl, {
+      jsonrpc: '2.0',
+      id: 112,
+      method: 'tools/call',
+      params: {
+        name: 'parent_profile_delete',
+        arguments: {
+          profileId: profile.profileId,
+          parentAccessToken: profile.parentAccessToken,
+        },
+      },
+    });
+    assert.deepEqual(parseMcpResponse(deleteResponse.body).result.structuredContent, {
+      deleted: true,
+      profileId: profile.profileId,
+    });
+
+    const deletedTokenHistoryResponse = await callMcp(mcpBaseUrl, {
+      jsonrpc: '2.0',
+      id: 113,
+      method: 'tools/call',
+      params: {
+        name: 'parent_history_list',
+        arguments: {
+          profileId: profile.profileId,
+          parentAccessToken: profile.parentAccessToken,
+        },
+      },
+    });
+    assert.match(deletedTokenHistoryResponse.body, /invalid parent access token/i);
   } finally {
     stopProcess(mcp);
     await closeServer(fakeAgent);

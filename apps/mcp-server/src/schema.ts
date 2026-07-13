@@ -56,8 +56,9 @@ export const scienceSimSchema = z.object({
 
 export const parentProfileCreateSchema = z.object({
   sessionId: z.string().regex(/^kb_session_[A-Za-z0-9_-]{8,80}$/),
-  ageBand: ageBandSchema
-});
+  ageBand: ageBandSchema,
+  historyEnabled: z.literal(true)
+}).strict();
 
 export const parentProfileUpdateSchema = z.object({
   profileId: z.string().regex(/^kb_profile_[A-Za-z0-9_-]{8,80}$/),
@@ -65,6 +66,11 @@ export const parentProfileUpdateSchema = z.object({
   ageBand: ageBandSchema.optional(),
   historyEnabled: z.boolean().optional()
 });
+
+export const parentProfileDeleteSchema = z.object({
+  profileId: z.string().regex(/^kb_profile_[A-Za-z0-9_-]{8,80}$/),
+  parentAccessToken: z.string().min(24).max(256)
+}).strict();
 
 export const parentHistoryListSchema = z.object({
   profileId: z.string().regex(/^kb_profile_[A-Za-z0-9_-]{8,80}$/),

@@ -167,12 +167,15 @@ describe('contract integrity', () => {
       'coloring_outline',
       'parent_history_list',
       'parent_profile_create',
+      'parent_profile_delete',
       'parent_profile_update',
       'science_sim',
       'story_panels',
       'voice_chat',
     ];
-    const expectedWidgetToolIds = expectedMcpToolIds.filter((toolId) => toolId !== 'parent_history_list');
+    const expectedWidgetToolIds = expectedMcpToolIds.filter(
+      (toolId) => toolId !== 'parent_history_list' && toolId !== 'parent_profile_delete',
+    );
 
     expect(widgetToolIds).toEqual(expectedWidgetToolIds);
     expect(mcpToolIds).toEqual(expectedMcpToolIds);

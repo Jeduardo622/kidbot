@@ -8,6 +8,7 @@ import {
   coloringOutlineSchema,
   parentHistoryListSchema,
   parentProfileCreateSchema,
+  parentProfileDeleteSchema,
   parentProfileUpdateSchema,
   scienceSimSchema,
   storyPanelsSchema,
@@ -61,6 +62,27 @@ const outputMeta = {
     resource_domains: [] as string[]
   }
 };
+
+const parentProfileDeleteSuccessSchema = z.object({
+  deleted: z.literal(true),
+  profileId: z.string(),
+}).strict();
+const parentProfileDeleteFailureSchema = z.object({
+  error: z.literal(true),
+  code: z.enum(['rate_limited', 'concurrency_limited', 'request_timeout']),
+  retryAfter: z.number().int().positive().optional(),
+}).strict();
+const parentProfileDeleteToolOutputUnion = z.union([
+  parentProfileDeleteSuccessSchema,
+  parentProfileDeleteFailureSchema,
+]);
+const parentProfileDeleteToolOutputSchema = z.object({
+  deleted: z.literal(true).optional(),
+  profileId: z.string().optional(),
+  error: z.literal(true).optional(),
+  code: z.enum(['rate_limited', 'concurrency_limited', 'request_timeout']).optional(),
+  retryAfter: z.number().int().positive().optional(),
+}).strict();
 
 interface AgentDegradedResponse {
   blocked: false;
@@ -536,6 +558,30 @@ export const registerTools = (
         ...outputMeta,
         'openai/widgetAccessible': true
       }
+      };
+    }));
+
+  const parentDeleteTool = {
+    name: 'parent_profile_delete',
+    title: 'Delete Parent Profile',
+    description: 'Permanently delete a parent-gated Kidbot profile and its saved metadata history',
+    inputSchema: parentProfileDeleteSchema,
+    outputSchema: parentProfileDeleteToolOutputSchema,
+    resultSchema: parentProfileDeleteToolOutputUnion,
+    successSchema: parentProfileDeleteSuccessSchema,
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+  };
+  registerKidbotTool(server, parentDeleteTool.name, parentDeleteTool, async (input: unknown, extra) =>
+    runControlled(parentDeleteTool.name, input, extra as ToolRequestExtra, networkIdentity, async () => {
+      const parsed = parentProfileDeleteSchema.parse(input);
+      const result = await parentProfileStore.deleteProfile(parsed);
+      return {
+        content: [{ type: 'text' as const, text: 'Parent profile deleted.' }],
+        structuredContent: result,
+        _meta: {
+          ...outputMeta,
+          'openai/widgetAccessible': true
+        }
       };
     }));
 

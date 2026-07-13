@@ -49,7 +49,7 @@ export interface ParentProfileCreateResult extends ParentProfile {
 
 export interface ParentProfileStore {
   mode: 'disabled' | 'memory' | 'redis';
-  createProfile(input: { sessionId: string; ageBand: AgeBand }): Promise<ParentProfileCreateResult>;
+  createProfile(input: { sessionId: string; ageBand: AgeBand; historyEnabled: true }): Promise<ParentProfileCreateResult>;
   updateProfile(input: {
     profileId: string;
     parentAccessToken: string;
@@ -64,11 +64,16 @@ export interface ParentProfileStore {
     sessionId?: string;
     limit?: number;
   }): Promise<ParentHistoryEvent[]>;
+  deleteProfile(input: {
+    profileId: string;
+    parentAccessToken: string;
+  }): Promise<{ deleted: true; profileId: string }>;
   readiness(): Promise<ParentStoreReadiness>;
   close?(): Promise<void>;
 }
 
 interface StoredProfile extends ParentProfile {
+  expiresAt: string;
   tokenHash: string;
 }
 
@@ -108,9 +113,16 @@ const sessionKey = (sessionId: string) => `kidbot:session:${sessionId}`;
 const profileSessionsKey = (profileId: string) => `kidbot:profile:${profileId}:sessions`;
 const sessionEventsKey = (sessionId: string) => `kidbot:session:${sessionId}:events`;
 
+const requireHistoryConsent = (historyEnabled: unknown) => {
+  if (historyEnabled !== true) {
+    throw new Error('Explicit history consent is required.');
+  }
+};
+
 export const createDisabledParentProfileStore = (): ParentProfileStore => ({
   mode: 'disabled',
   async createProfile(input) {
+    requireHistoryConsent(input.historyEnabled);
     return { ...disabledProfile, ageBand: input.ageBand };
   },
   async updateProfile(input) {
@@ -125,6 +137,9 @@ export const createDisabledParentProfileStore = (): ParentProfileStore => ({
   async listHistory() {
     return [];
   },
+  async deleteProfile() {
+    throw new Error('Parent profile deletion requires persistent storage.');
+  },
   async readiness() {
     return { mode: 'disabled', ready: true };
   },
@@ -134,18 +149,39 @@ export const createMemoryParentProfileStore = (options: StoreOptions): ParentPro
   const profiles = new Map<string, StoredProfile>();
   const sessions = new Map<string, ParentSession>();
   const events = new Map<string, ParentHistoryEvent[]>();
+  const retentionMs = options.retentionDays * 24 * 60 * 60 * 1_000;
+
+  const purgeOwnedHistory = (profileId: string) => {
+    for (const [sessionId, session] of sessions) {
+      if (session.profileId === profileId) {
+        sessions.delete(sessionId);
+        events.delete(sessionId);
+      }
+    }
+  };
+
+  const deleteStoredProfile = (profileId: string) => {
+    profiles.delete(profileId);
+    purgeOwnedHistory(profileId);
+  };
 
   const readAuthorizedProfile = (profileId: string, token: string) => {
     const profile = profiles.get(profileId);
+    if (profile && Date.parse(profile.expiresAt) <= Date.now()) {
+      deleteStoredProfile(profileId);
+      return undefined;
+    }
     if (!profile || !tokenMatches(profile.tokenHash, options.secret, token)) {
       return undefined;
     }
+    profile.expiresAt = new Date(Date.now() + retentionMs).toISOString();
     return profile;
   };
 
   return {
     mode: 'memory',
     async createProfile(input) {
+      requireHistoryConsent(input.historyEnabled);
       if (sessions.has(input.sessionId)) {
         throw new Error('Parent profile could not be created.');
       }
@@ -158,6 +194,7 @@ export const createMemoryParentProfileStore = (options: StoreOptions): ParentPro
         historyEnabled: true,
         createdAt: now,
         updatedAt: now,
+        expiresAt: new Date(Date.now() + retentionMs).toISOString(),
         tokenHash: hashToken(options.secret, parentAccessToken),
       };
       profiles.set(profileId, profile);
@@ -189,6 +226,9 @@ export const createMemoryParentProfileStore = (options: StoreOptions): ParentPro
         updatedAt: new Date().toISOString(),
       };
       profiles.set(input.profileId, updated);
+      if (!updated.historyEnabled) {
+        purgeOwnedHistory(input.profileId);
+      }
       return {
         profileId: updated.profileId,
         ageBand: updated.ageBand,
@@ -238,6 +278,14 @@ export const createMemoryParentProfileStore = (options: StoreOptions): ParentPro
             .map((session) => session.sessionId);
       return sessionIds.flatMap((sessionId) => events.get(sessionId) ?? []).slice(0, limit);
     },
+    async deleteProfile(input) {
+      const profile = readAuthorizedProfile(input.profileId, input.parentAccessToken);
+      if (!profile) {
+        throw new Error('Invalid parent access token.');
+      }
+      deleteStoredProfile(input.profileId);
+      return { deleted: true, profileId: input.profileId };
+    },
     async readiness() {
       return { mode: 'memory', ready: true };
     },
@@ -269,12 +317,37 @@ export const createRedisParentProfileStore = (
     if (!profile || !tokenMatches(profile.tokenHash, options.secret, token)) {
       return undefined;
     }
+    const expiresAt = new Date(Date.now() + retentionSeconds * 1_000).toISOString();
+    const renewed = await client.eval(
+      `local profileRaw = redis.call('GET', KEYS[1])
+       if not profileRaw then return 0 end
+       local okProfile, storedProfile = pcall(cjson.decode, profileRaw)
+       if not okProfile or storedProfile.profileId ~= ARGV[1] then return 0 end
+       storedProfile.expiresAt = ARGV[3]
+       redis.call('SET', KEYS[1], cjson.encode(storedProfile), 'EX', ARGV[2])
+       local sessionIds = redis.call('ZRANGE', KEYS[2], 0, -1)
+       if #sessionIds > 0 then redis.call('EXPIRE', KEYS[2], ARGV[2]) end
+       for _, sessionId in ipairs(sessionIds) do
+         redis.call('EXPIRE', 'kidbot:session:' .. sessionId, ARGV[2])
+         redis.call('EXPIRE', 'kidbot:session:' .. sessionId .. ':events', ARGV[2])
+       end
+       return 1`,
+      2,
+      profileKey(profileId),
+      profileSessionsKey(profileId),
+      profileId,
+      retentionSeconds,
+      expiresAt,
+    );
+    if (renewed !== 1) return undefined;
+    profile.expiresAt = expiresAt;
     return profile;
   };
 
   return {
     mode: 'redis',
     async createProfile(input) {
+      requireHistoryConsent(input.historyEnabled);
       const now = new Date().toISOString();
       const profileId = createId('kb_profile');
       const parentAccessToken = createToken();
@@ -284,6 +357,7 @@ export const createRedisParentProfileStore = (
         historyEnabled: true,
         createdAt: now,
         updatedAt: now,
+        expiresAt: new Date(Date.now() + retentionSeconds * 1_000).toISOString(),
         tokenHash: hashToken(options.secret, parentAccessToken),
       };
       const session: ParentSession = {
@@ -297,7 +371,7 @@ export const createRedisParentProfileStore = (
         `if redis.call('EXISTS', KEYS[2]) == 1 then
            return 0
          end
-         redis.call('SET', KEYS[1], ARGV[1])
+         redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[5])
          redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[5])
          redis.call('ZADD', KEYS[3], ARGV[3], ARGV[4])
          redis.call('EXPIRE', KEYS[3], ARGV[5])
@@ -334,8 +408,45 @@ export const createRedisParentProfileStore = (
         ageBand: input.ageBand ?? profile.ageBand,
         historyEnabled: input.historyEnabled ?? profile.historyEnabled,
         updatedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + retentionSeconds * 1_000).toISOString(),
       };
-      await client.set(profileKey(input.profileId), JSON.stringify(updated));
+      if (updated.historyEnabled) {
+        const saved = await client.eval(
+          `local profileRaw = redis.call('GET', KEYS[1])
+           if not profileRaw then return 0 end
+           local okProfile, storedProfile = pcall(cjson.decode, profileRaw)
+           if not okProfile or storedProfile.profileId ~= ARGV[1] then return 0 end
+           redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
+           return 1`,
+          1,
+          profileKey(input.profileId),
+          input.profileId,
+          JSON.stringify(updated),
+          retentionSeconds,
+        );
+        if (saved !== 1) throw new Error('Invalid parent access token.');
+      } else {
+        const purged = await client.eval(
+          `local profileRaw = redis.call('GET', KEYS[1])
+           if not profileRaw then return 0 end
+           local okProfile, storedProfile = pcall(cjson.decode, profileRaw)
+           if not okProfile or storedProfile.profileId ~= ARGV[1] then return 0 end
+           local sessionIds = redis.call('ZRANGE', KEYS[2], 0, -1)
+           for _, sessionId in ipairs(sessionIds) do
+             redis.call('DEL', 'kidbot:session:' .. sessionId, 'kidbot:session:' .. sessionId .. ':events')
+           end
+           redis.call('DEL', KEYS[2])
+           redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
+           return 1`,
+          2,
+          profileKey(input.profileId),
+          profileSessionsKey(input.profileId),
+          input.profileId,
+          JSON.stringify(updated),
+          retentionSeconds,
+        );
+        if (purged !== 1) throw new Error('Invalid parent access token.');
+      }
       return {
         profileId: updated.profileId,
         ageBand: updated.ageBand,
@@ -436,6 +547,30 @@ export const createRedisParentProfileStore = (
         }
       }
       return allEvents.slice(0, limit);
+    },
+    async deleteProfile(input) {
+      const profile = await readAuthorizedProfile(input.profileId, input.parentAccessToken);
+      if (!profile) {
+        throw new Error('Invalid parent access token.');
+      }
+      const deleted = await client.eval(
+        `local profileRaw = redis.call('GET', KEYS[1])
+         if not profileRaw then return 0 end
+         local okProfile, storedProfile = pcall(cjson.decode, profileRaw)
+         if not okProfile or storedProfile.profileId ~= ARGV[1] then return 0 end
+         local sessionIds = redis.call('ZRANGE', KEYS[2], 0, -1)
+         for _, sessionId in ipairs(sessionIds) do
+           redis.call('DEL', 'kidbot:session:' .. sessionId, 'kidbot:session:' .. sessionId .. ':events')
+         end
+         redis.call('DEL', KEYS[2], KEYS[1])
+         return 1`,
+        2,
+        profileKey(input.profileId),
+        profileSessionsKey(input.profileId),
+        input.profileId,
+      );
+      if (deleted !== 1) throw new Error('Invalid parent access token.');
+      return { deleted: true, profileId: input.profileId };
     },
     async readiness() {
       try {

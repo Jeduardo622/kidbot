@@ -10,6 +10,19 @@ const productionWidgetEnv = {
 process.env.AGENT_SERVICE_TOKEN ??= 'service-token-abcdefghijklmnopqrstuvwxyz0123456789';
 process.env.FALLBACK_WIDGET ??= '0';
 
+const eventForProfile = (profile, sessionId, id) => ({
+  id,
+  timestamp: new Date().toISOString(),
+  tool: 'voice_chat',
+  sessionId,
+  profileId: profile.profileId,
+  ageBand: profile.ageBand,
+  status: 'ok',
+  blocked: false,
+  inputLength: 8,
+  outputLength: 16,
+});
+
 const {
   createMemoryParentProfileStore,
   createParentProfileStoreFromConfig,
@@ -97,6 +110,7 @@ test('memory parent store saves only metadata with a valid token', async () => {
   });
   const profile = await store.createProfile({
     ageBand: '7-9',
+    historyEnabled: true,
     sessionId: 'kb_session_store123',
   });
 
@@ -139,10 +153,12 @@ test('memory parent store rejects cross-profile session reads and writes', async
   });
   const owner = await store.createProfile({
     ageBand: '7-9',
+    historyEnabled: true,
     sessionId: 'kb_session_owner123',
   });
   const attacker = await store.createProfile({
     ageBand: '10-12',
+    historyEnabled: true,
     sessionId: 'kb_session_attacker123',
   });
   const ownerEvent = {
@@ -195,12 +211,14 @@ test('memory parent store cannot reassign a session during profile creation', as
   });
   const owner = await store.createProfile({
     ageBand: '7-9',
+    historyEnabled: true,
     sessionId: 'kb_session_claimed123',
   });
 
   await assert.rejects(
     store.createProfile({
       ageBand: '10-12',
+      historyEnabled: true,
       sessionId: 'kb_session_claimed123',
     }),
     /parent profile could not be created/i,
@@ -217,6 +235,7 @@ test('memory parent store caps history events', async () => {
   });
   const profile = await store.createProfile({
     ageBand: '4-6',
+    historyEnabled: true,
     sessionId: 'kb_session_cap123',
   });
 
@@ -246,6 +265,120 @@ test('memory parent store caps history events', async () => {
     events.map((event) => event.id),
     ['kb_event_three', 'kb_event_two'],
   );
+});
+
+test('memory parent store requires explicit history consent', async () => {
+  const store = createMemoryParentProfileStore({
+    maxEvents: 10,
+    retentionDays: 30,
+    secret: strongSecret,
+  });
+
+  await assert.rejects(
+    store.createProfile({ ageBand: '7-9', sessionId: 'kb_session_noconsent123' }),
+    /explicit history consent is required/i,
+  );
+  await assert.rejects(
+    store.createProfile({
+      ageBand: '7-9',
+      historyEnabled: false,
+      sessionId: 'kb_session_falseconsent123',
+    }),
+    /explicit history consent is required/i,
+  );
+});
+
+test('memory parent store expires profiles and releases their sessions', async () => {
+  const store = createMemoryParentProfileStore({
+    maxEvents: 10,
+    retentionDays: 0,
+    secret: strongSecret,
+  });
+  const sessionId = 'kb_session_expired123';
+  const profile = await store.createProfile({ ageBand: '7-9', historyEnabled: true, sessionId });
+
+  assert.equal(await store.validateAccess(profile.profileId, profile.parentAccessToken), false);
+  await assert.rejects(
+    store.listHistory({ profileId: profile.profileId, parentAccessToken: profile.parentAccessToken }),
+    /invalid parent access token/i,
+  );
+  await assert.rejects(
+    store.updateProfile({
+      profileId: profile.profileId,
+      parentAccessToken: profile.parentAccessToken,
+      ageBand: '10-12',
+    }),
+    /invalid parent access token/i,
+  );
+  const replacement = await store.createProfile({ ageBand: '10-12', historyEnabled: true, sessionId });
+  assert.notEqual(replacement.profileId, profile.profileId);
+});
+
+test('memory parent store purges history when disabled', async () => {
+  const store = createMemoryParentProfileStore({
+    maxEvents: 10,
+    retentionDays: 30,
+    secret: strongSecret,
+  });
+  const sessionId = 'kb_session_disable123';
+  const profile = await store.createProfile({ ageBand: '7-9', historyEnabled: true, sessionId });
+  await store.recordEvent({
+    id: 'kb_event_disable',
+    timestamp: new Date().toISOString(),
+    tool: 'voice_chat',
+    sessionId,
+    profileId: profile.profileId,
+    ageBand: '7-9',
+    status: 'ok',
+    inputLength: 1,
+    outputLength: 2,
+  }, profile.parentAccessToken);
+
+  const disabled = await store.updateProfile({
+    profileId: profile.profileId,
+    parentAccessToken: profile.parentAccessToken,
+    historyEnabled: false,
+  });
+  assert.equal(disabled.historyEnabled, false);
+  const enabled = await store.updateProfile({
+    profileId: profile.profileId,
+    parentAccessToken: profile.parentAccessToken,
+    historyEnabled: true,
+  });
+  assert.equal(enabled.historyEnabled, true);
+  assert.deepEqual(await store.listHistory({
+    profileId: profile.profileId,
+    parentAccessToken: profile.parentAccessToken,
+  }), []);
+});
+
+test('memory parent store deletes only with the owning token', async () => {
+  const store = createMemoryParentProfileStore({
+    maxEvents: 10,
+    retentionDays: 30,
+    secret: strongSecret,
+  });
+  const owner = await store.createProfile({
+    ageBand: '7-9',
+    historyEnabled: true,
+    sessionId: 'kb_session_deleteowner123',
+  });
+  const other = await store.createProfile({
+    ageBand: '10-12',
+    historyEnabled: true,
+    sessionId: 'kb_session_deleteother123',
+  });
+
+  await assert.rejects(
+    store.deleteProfile({ profileId: owner.profileId, parentAccessToken: other.parentAccessToken }),
+    /invalid parent access token/i,
+  );
+  assert.deepEqual(
+    await store.deleteProfile({ profileId: owner.profileId, parentAccessToken: owner.parentAccessToken }),
+    { deleted: true, profileId: owner.profileId },
+  );
+  assert.equal(await store.validateAccess(owner.profileId, owner.parentAccessToken), false);
+  assert.equal(await store.validateAccess(other.profileId, other.parentAccessToken), true);
 });
 
 test('redis parent store smoke records capped metadata when REDIS_URL is available', async (t) => {
@@ -283,6 +416,7 @@ test('redis parent store smoke records capped metadata when REDIS_URL is availab
     const profileSessionId = `kb_session_redis${Date.now()}`;
     const profile = await store.createProfile({
       ageBand: '10-12',
+      historyEnabled: true,
       sessionId: profileSessionId,
     });
     cleanupProfileIds.push(profile.profileId);
@@ -290,6 +424,7 @@ test('redis parent store smoke records capped metadata when REDIS_URL is availab
     const otherSessionId = `kb_session_other${Date.now()}`;
     const otherProfile = await store.createProfile({
       ageBand: '7-9',
+      historyEnabled: true,
       sessionId: otherSessionId,
     });
     cleanupProfileIds.push(otherProfile.profileId);
@@ -360,6 +495,45 @@ test('redis parent store smoke records capped metadata when REDIS_URL is availab
       false,
     );
 
+    const ttlClient = new Redis(redisUrl);
+    try {
+      const ownedKeys = [
+        `kidbot:profile:${profile.profileId}`,
+        `kidbot:profile:${profile.profileId}:sessions`,
+        `kidbot:session:${profileSessionId}`,
+        `kidbot:session:${profileSessionId}:events`,
+      ];
+      for (const key of ownedKeys) assert.ok(await ttlClient.pttl(key) > 0, `${key} must expire`);
+      for (const key of ownedKeys) await ttlClient.pexpire(key, 1_000);
+      assert.equal(await store.validateAccess(profile.profileId, profile.parentAccessToken), true);
+      for (const key of ownedKeys) assert.ok(await ttlClient.pttl(key) > 1_000, `${key} must renew`);
+
+      const purgeSessionId = `kb_session_purge${Date.now()}`;
+      cleanupSessionIds.push(purgeSessionId);
+      const purgeProfile = await store.createProfile({
+        ageBand: '7-9',
+        historyEnabled: true,
+        sessionId: purgeSessionId,
+      });
+      cleanupProfileIds.push(purgeProfile.profileId);
+      await store.recordEvent(
+        eventForProfile(purgeProfile, purgeSessionId, 'kb_event_purge'),
+        purgeProfile.parentAccessToken,
+      );
+      const disabled = await store.updateProfile({
+        profileId: purgeProfile.profileId,
+        parentAccessToken: purgeProfile.parentAccessToken,
+        historyEnabled: false,
+      });
+      assert.equal(disabled.historyEnabled, false);
+      assert.ok(await ttlClient.pttl(`kidbot:profile:${purgeProfile.profileId}`) > 0);
+      assert.equal(await ttlClient.exists(`kidbot:profile:${purgeProfile.profileId}:sessions`), 0);
+      assert.equal(await ttlClient.exists(`kidbot:session:${purgeSessionId}`), 0);
+      assert.equal(await ttlClient.exists(`kidbot:session:${purgeSessionId}:events`), 0);
+    } finally {
+      ttlClient.disconnect();
+    }
+
     const sharedSessionId = `kb_session_shared${Date.now()}`;
     cleanupSessionIds.push(sharedSessionId);
     const eventFor = (owner, id) => ({
@@ -383,13 +557,84 @@ test('redis parent store smoke records capped metadata when REDIS_URL is availab
     const duplicateSessionId = `kb_session_duplicate${Date.now()}`;
     cleanupSessionIds.push(duplicateSessionId);
     const duplicateClaims = await Promise.allSettled([
-      store.createProfile({ ageBand: '7-9', sessionId: duplicateSessionId }),
-      store.createProfile({ ageBand: '10-12', sessionId: duplicateSessionId }),
+      store.createProfile({ ageBand: '7-9', historyEnabled: true, sessionId: duplicateSessionId }),
+      store.createProfile({ ageBand: '10-12', historyEnabled: true, sessionId: duplicateSessionId }),
     ]);
     assert.equal(duplicateClaims.filter((result) => result.status === 'fulfilled').length, 1);
     assert.equal(duplicateClaims.filter((result) => result.status === 'rejected').length, 1);
     for (const result of duplicateClaims) {
       if (result.status === 'fulfilled') cleanupProfileIds.push(result.value.profileId);
+    }
+
+    const raceSessionId = `kb_session_race${Date.now()}`;
+    cleanupSessionIds.push(raceSessionId);
+    const raceProfile = await store.createProfile({
+      ageBand: '7-9',
+      historyEnabled: true,
+      sessionId: raceSessionId,
+    });
+    cleanupProfileIds.push(raceProfile.profileId);
+    const originalSet = Redis.prototype.set;
+    let releaseStaleWrite;
+    let staleWriteObserved;
+    const staleWriteReached = new Promise((resolve) => {
+      staleWriteObserved = resolve;
+    });
+    const staleWriteRelease = new Promise((resolve) => {
+      releaseStaleWrite = resolve;
+    });
+    Redis.prototype.set = async function (...args) {
+      if (args[0] === `kidbot:profile:${raceProfile.profileId}`) {
+        staleWriteObserved();
+        await staleWriteRelease;
+      }
+      return originalSet.apply(this, args);
+    };
+    try {
+      const update = store.updateProfile({
+        profileId: raceProfile.profileId,
+        parentAccessToken: raceProfile.parentAccessToken,
+        ageBand: '10-12',
+      });
+      const updateState = await Promise.race([
+        staleWriteReached.then(() => 'stale-write'),
+        update.then(() => 'completed'),
+      ]);
+      await store.deleteProfile({
+        profileId: raceProfile.profileId,
+        parentAccessToken: raceProfile.parentAccessToken,
+      });
+      if (updateState === 'stale-write') releaseStaleWrite();
+      await update;
+      assert.equal(await store.validateAccess(raceProfile.profileId, raceProfile.parentAccessToken), false);
+    } finally {
+      releaseStaleWrite();
+      Redis.prototype.set = originalSet;
+    }
+
+    await assert.rejects(
+      store.deleteProfile({
+        profileId: profile.profileId,
+        parentAccessToken: otherProfile.parentAccessToken,
+      }),
+      /invalid parent access token/i,
+    );
+    assert.deepEqual(
+      await store.deleteProfile({
+        profileId: profile.profileId,
+        parentAccessToken: profile.parentAccessToken,
+      }),
+      { deleted: true, profileId: profile.profileId },
+    );
+    assert.equal(await store.validateAccess(profile.profileId, profile.parentAccessToken), false);
+    const deletionClient = new Redis(redisUrl);
+    try {
+      assert.equal(await deletionClient.exists(`kidbot:profile:${profile.profileId}`), 0);
+      assert.equal(await deletionClient.exists(`kidbot:profile:${profile.profileId}:sessions`), 0);
+      assert.equal(await deletionClient.exists(`kidbot:session:${profileSessionId}`), 0);
+      assert.equal(await deletionClient.exists(`kidbot:session:${profileSessionId}:events`), 0);
+    } finally {
+      deletionClient.disconnect();
     }
   } finally {
     await store.close?.();
