@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { spawn } from 'node:child_process';
+import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
 
 const serverEntry = join(process.cwd(), 'dist', 'server.js');
 
@@ -21,12 +22,22 @@ const toolIds = [
   'parent_profile_update',
   'parent_history_list',
 ];
+const toolContractExpectations = {
+  voice_chat: { title: 'Voice Chat', readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  story_panels: { title: 'Story Panels', readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  coloring_outline: { title: 'Coloring Outline', readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  science_sim: { title: 'Science Simulation', readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  parent_profile_create: { title: 'Create Parent Profile', readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  parent_profile_update: { title: 'Update Parent Profile', readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+  parent_history_list: { title: 'List Parent History', readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+};
 const port = randomInt(3200, 3899);
 const baseUrl = `http://localhost:${port}`;
 const productionPort = randomInt(3900, 4599);
 const productionBaseUrl = `http://localhost:${productionPort}`;
 let serverProcess;
 let productionServerProcess;
+const schemaValidator = new AjvJsonSchemaValidator();
 
 const waitForHealth = async () => {
   const maxAttempts = 30;
@@ -71,6 +82,23 @@ const callMcp = async (url, payload) => {
   assert.equal(response.status, 200, body);
   assert.ok(dataLine, body);
   return JSON.parse(dataLine.slice('data:'.length).trim());
+};
+
+const getToolDescriptor = async (url, name) => {
+  const response = await callMcp(url, {
+    jsonrpc: '2.0',
+    id: `list-${name}`,
+    method: 'tools/list',
+    params: {},
+  });
+  const descriptor = response.result.tools.find((tool) => tool.name === name);
+  assert.ok(descriptor, `missing ${name} descriptor`);
+  return descriptor;
+};
+
+const assertMatchesAdvertisedOutput = (descriptor, structuredContent) => {
+  const result = schemaValidator.getValidator(descriptor.outputSchema)(structuredContent);
+  assert.equal(result.valid, true, result.errorMessage);
 };
 
 const assertWidgetResourceContract = (resource) => {
@@ -202,31 +230,69 @@ test('/mcp streamable response includes expected tool ids', async () => {
   }
 });
 
-test('/mcp tool call returns structuredContent for widget contract', async () => {
-  const response = await fetch(`${baseUrl}/mcp`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json, text/event-stream'
-    },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 3,
-      method: 'tools/call',
-      params: {
-        name: 'story_panels',
-        arguments: {
-          theme: 'A dragon learns kindness',
-          panels: 2,
-          ageBand: '7-9'
-        }
-      }
-    })
+test('/mcp tools/list advertises exact Kidbot app contracts', async () => {
+  const response = await callMcp(baseUrl, {
+    jsonrpc: '2.0',
+    id: 20,
+    method: 'tools/list',
+    params: {},
   });
 
-  const body = await response.text();
-  assert.equal(response.status, 200);
-  assert.match(body, /"structuredContent":\{/);
-  assert.match(body, /"blocked":false/);
-  assert.match(body, /"panels":\[/);
+  for (const [toolId, expected] of Object.entries(toolContractExpectations)) {
+    const tool = response.result.tools.find(({ name }) => name === toolId);
+    assert.ok(tool, `missing ${toolId}`);
+    assert.equal(tool.title, expected.title);
+    assert.equal(tool.outputSchema?.type, 'object');
+    assert.equal(tool.outputSchema?.anyOf?.length, 4);
+    assert.equal(schemaValidator.getValidator(tool.outputSchema)({ blocked: false }).valid, false);
+    assert.deepEqual(tool.securitySchemes, [{ type: 'noauth' }]);
+    assert.deepEqual(tool._meta.securitySchemes, tool.securitySchemes);
+    assert.equal(tool._meta.ui.resourceUri, 'ui://widget/kidbot-v2.html');
+    assert.deepEqual(tool._meta.ui.visibility, ['model', 'app']);
+    assert.equal(tool._meta['ui/resourceUri'], 'ui://widget/kidbot-v2.html');
+    assert.equal(tool._meta['openai/outputTemplate'], 'ui://widget/kidbot-v2.html');
+    assert.equal(tool._meta['openai/widgetAccessible'], true);
+    assert.deepEqual(tool.annotations, {
+      readOnlyHint: expected.readOnlyHint,
+      destructiveHint: expected.destructiveHint,
+      openWorldHint: expected.openWorldHint,
+    });
+  }
+});
+
+test('/mcp tool call returns structuredContent for widget contract', async () => {
+  const descriptor = await getToolDescriptor(baseUrl, 'story_panels');
+  const response = await callMcp(baseUrl, {
+    jsonrpc: '2.0',
+    id: 3,
+    method: 'tools/call',
+    params: {
+      name: 'story_panels',
+      arguments: {
+        theme: 'A dragon learns kindness',
+        panels: 2,
+        ageBand: '7-9'
+      }
+    }
+  });
+
+  assert.equal(response.result.structuredContent.blocked, false);
+  assert.ok(Array.isArray(response.result.structuredContent.panels));
+  assertMatchesAdvertisedOutput(descriptor, response.result.structuredContent);
+});
+
+test('/mcp moderation block matches the advertised output contract', async () => {
+  const descriptor = await getToolDescriptor(baseUrl, 'voice_chat');
+  const response = await callMcp(baseUrl, {
+    jsonrpc: '2.0',
+    id: 4,
+    method: 'tools/call',
+    params: {
+      name: 'voice_chat',
+      arguments: { text: 'Tell me about a weapon', persona: 'robot', ageBand: '7-9' },
+    },
+  });
+
+  assert.equal(response.result.structuredContent.blocked, true);
+  assertMatchesAdvertisedOutput(descriptor, response.result.structuredContent);
 });

@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import Redis from 'ioredis';
+import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
 
 const packageDir = dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
 const mcpEntry = join(packageDir, 'dist', 'server.js');
@@ -63,6 +64,7 @@ const mcpServerEnvKeys = [
   'PARENT_HISTORY_RETENTION_DAYS',
   'PARENT_PROFILE_STORE',
 ];
+const schemaValidator = new AjvJsonSchemaValidator();
 const isolatedEnvKeys = [
   ...mcpServerEnvKeys,
   'OPENAI_API_KEY',
@@ -273,6 +275,23 @@ const productionWidgetEnv = {
   MCP_REQUEST_CONTROL_STORE: 'redis',
   KIDBOT_WIDGET_DOMAIN: 'https://kidbot-production.up.railway.app',
   KIDBOT_WIDGET_RESOURCE_DOMAINS: 'https://rxnwualzddplucjhclij.supabase.co',
+};
+
+const getToolDescriptor = async (baseUrl, name) => {
+  const response = await callMcp(baseUrl, {
+    jsonrpc: '2.0',
+    id: `list-${name}`,
+    method: 'tools/list',
+    params: {},
+  });
+  const descriptor = parseMcpResponse(response.body).result.tools.find((tool) => tool.name === name);
+  assert.ok(descriptor, `missing ${name} descriptor`);
+  return descriptor;
+};
+
+const assertMatchesAdvertisedOutput = (descriptor, structuredContent) => {
+  const result = schemaValidator.getValidator(descriptor.outputSchema)(structuredContent);
+  assert.equal(result.valid, true, result.errorMessage);
 };
 
 test('widget CSP parses exact production origins', () => {
@@ -487,8 +506,10 @@ test('mcp returns a stable tool error when a caller exceeds its request budget',
 
   try {
     await waitForMcpHealth(mcpBaseUrl);
+    const descriptor = await getToolDescriptor(mcpBaseUrl, 'voice_chat');
     const first = await callMcp(mcpBaseUrl, payload);
     const second = await callMcp(mcpBaseUrl, { ...payload, id: 121 });
+    const rejection = parseMcpResponse(second.body).result.structuredContent;
 
     assert.equal(first.status, 200);
     assert.match(first.body, /reply ready/i);
@@ -496,6 +517,7 @@ test('mcp returns a stable tool error when a caller exceeds its request budget',
     assert.match(second.body, /"isError":true/);
     assert.match(second.body, /"code":"rate_limited"/);
     assert.match(second.body, /"retryAfter"/);
+    assertMatchesAdvertisedOutput(descriptor, rejection);
   } finally {
     stopProcess(mcp);
   }
@@ -724,6 +746,7 @@ test('mcp surfaces provider 503 as degraded content instead of a safety block', 
 
   try {
     await waitForMcpHealth(mcpBaseUrl);
+    const descriptor = await getToolDescriptor(mcpBaseUrl, 'voice_chat');
 
     const response = await callMcp(mcpBaseUrl, {
       jsonrpc: '2.0',
@@ -744,6 +767,10 @@ test('mcp surfaces provider 503 as degraded content instead of a safety block', 
     assert.match(response.body, /"degraded":true/);
     assert.match(response.body, /"fallbackReason":"generation_timeout"/);
     assert.match(response.body, /idea engine right now/i);
+    assertMatchesAdvertisedOutput(
+      descriptor,
+      parseMcpResponse(response.body).result.structuredContent,
+    );
   } finally {
     stopProcess(mcp);
     await closeServer(fakeAgent);

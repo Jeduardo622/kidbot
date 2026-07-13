@@ -2,6 +2,31 @@ import { z } from 'zod';
 
 export const ageBandSchema = z.enum(['4-6', '7-9', '10-12']);
 export const personaSchema = z.enum(['robot', 'fairy', 'explorer']);
+export const responseSourceSchema = z.enum(['fixture', 'stub', 'local', 'agent']);
+
+export const generationResultMetadataShape = {
+  source: responseSourceSchema.optional(),
+  providerFallback: z.boolean().optional(),
+  fallbackReason: z.string().optional(),
+  correlationId: z.string().optional(),
+};
+
+export const parentHistoryEventSchema = z.object({
+  id: z.string(),
+  timestamp: z.string().datetime(),
+  tool: z.string(),
+  sessionId: z.string(),
+  profileId: z.string(),
+  ageBand: ageBandSchema,
+  status: z.enum(['ok', 'blocked', 'degraded', 'error']),
+  blocked: z.boolean().optional(),
+  degraded: z.boolean().optional(),
+  providerFallback: z.boolean().optional(),
+  fallbackReason: z.string().optional(),
+  correlationId: z.string().optional(),
+  inputLength: z.number().int().nonnegative(),
+  outputLength: z.number().int().nonnegative(),
+}).strict();
 
 const sessionMetadataSchema = z.object({
   sessionId: z.string().regex(/^kb_session_[A-Za-z0-9_-]{8,80}$/).optional(),

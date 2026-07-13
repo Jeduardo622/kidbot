@@ -23,13 +23,38 @@ import {
   type RequestControlRejectionReason,
 } from './requestControls.js';
 import { kidTone, moderate } from './safety.js';
+import {
+  coloringOutlineToolOutputSchema,
+  coloringOutlineToolOutputUnion,
+  coloringOutlineSuccessSchema,
+  parentHistoryListToolOutputSchema,
+  parentHistoryListToolOutputUnion,
+  parentHistoryListSuccessSchema,
+  parentProfileCreateToolOutputSchema,
+  parentProfileCreateToolOutputUnion,
+  parentProfileCreateSuccessSchema,
+  parentProfileUpdateToolOutputSchema,
+  parentProfileUpdateToolOutputUnion,
+  parentProfileUpdateSuccessSchema,
+  registerKidbotTool,
+  scienceSimToolOutputSchema,
+  scienceSimToolOutputUnion,
+  scienceSimSuccessSchema,
+  storyPanelsToolOutputSchema,
+  storyPanelsToolOutputUnion,
+  storyPanelsSuccessSchema,
+  voiceToolOutputSchema,
+  voiceToolOutputUnion,
+  voiceSuccessSchema,
+} from './toolContracts.js';
+import { widgetResourceUri } from './widgetMetadata.js';
 
 const { agentBaseUrl, fallbackMode, serviceAuthToken, startupPosture } = mcpConfig;
 export const parentProfileStore = createParentProfileStoreFromConfig(mcpConfig);
 export const requestControlStore = createRequestControlStoreFromConfig(mcpConfig);
 const degradedServiceMessage = 'Kidbot is having trouble reaching its idea engine right now. Please try again in a moment.';
 const outputMeta = {
-  'openai/outputTemplate': 'ui://widget/kidbot.html',
+  'openai/outputTemplate': widgetResourceUri,
   'openai/widgetDescription': 'Kidbot — safe creative play: voice, comics, coloring, science.',
   'openai/widgetCSP': {
     connect_domains: [] as string[],
@@ -458,11 +483,15 @@ export const registerTools = (
 ): void => {
   const parentCreateTool = {
     name: 'parent_profile_create',
+    title: 'Create Parent Profile',
     description: 'Create a parent-gated Kidbot profile for saved metadata history',
-    _meta: { 'openai/widgetAccessible': true },
-    inputSchema: parentProfileCreateSchema
+    inputSchema: parentProfileCreateSchema,
+    outputSchema: parentProfileCreateToolOutputSchema,
+    resultSchema: parentProfileCreateToolOutputUnion,
+    successSchema: parentProfileCreateSuccessSchema,
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   };
-  server.registerTool(parentCreateTool.name, parentCreateTool, async (input: unknown, extra) =>
+  registerKidbotTool(server, parentCreateTool.name, parentCreateTool, async (input: unknown, extra) =>
     runControlled(parentCreateTool.name, input, extra as ToolRequestExtra, networkIdentity, async () => {
       const parsed = parentProfileCreateSchema.parse(input);
       const profile = await parentProfileStore.createProfile(parsed);
@@ -483,11 +512,15 @@ export const registerTools = (
 
   const parentUpdateTool = {
     name: 'parent_profile_update',
+    title: 'Update Parent Profile',
     description: 'Update parent-gated Kidbot profile settings',
-    _meta: { 'openai/widgetAccessible': true },
-    inputSchema: parentProfileUpdateSchema
+    inputSchema: parentProfileUpdateSchema,
+    outputSchema: parentProfileUpdateToolOutputSchema,
+    resultSchema: parentProfileUpdateToolOutputUnion,
+    successSchema: parentProfileUpdateSuccessSchema,
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
   };
-  server.registerTool(parentUpdateTool.name, parentUpdateTool, async (input: unknown, extra) =>
+  registerKidbotTool(server, parentUpdateTool.name, parentUpdateTool, async (input: unknown, extra) =>
     runControlled(parentUpdateTool.name, input, extra as ToolRequestExtra, networkIdentity, async () => {
       const parsed = parentProfileUpdateSchema.parse(input);
       const profile = await parentProfileStore.updateProfile(parsed);
@@ -508,11 +541,15 @@ export const registerTools = (
 
   const parentHistoryTool = {
     name: 'parent_history_list',
+    title: 'List Parent History',
     description: 'List saved Kidbot session metadata for parent review',
-    _meta: { 'openai/widgetAccessible': true },
-    inputSchema: parentHistoryListSchema
+    inputSchema: parentHistoryListSchema,
+    outputSchema: parentHistoryListToolOutputSchema,
+    resultSchema: parentHistoryListToolOutputUnion,
+    successSchema: parentHistoryListSuccessSchema,
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   };
-  server.registerTool(parentHistoryTool.name, parentHistoryTool, async (input: unknown, extra) =>
+  registerKidbotTool(server, parentHistoryTool.name, parentHistoryTool, async (input: unknown, extra) =>
     runControlled(parentHistoryTool.name, input, extra as ToolRequestExtra, networkIdentity, async () => {
       const parsed = parentHistoryListSchema.parse(input);
       const events = await parentProfileStore.listHistory(parsed);
@@ -533,11 +570,15 @@ export const registerTools = (
 
   const voiceTool = {
     name: 'voice_chat',
+    title: 'Voice Chat',
     description: 'Kid-friendly persona voice replies',
-    _meta: { 'openai/widgetAccessible': true },
-    inputSchema: voiceInputSchema
+    inputSchema: voiceInputSchema,
+    outputSchema: voiceToolOutputSchema,
+    resultSchema: voiceToolOutputUnion,
+    successSchema: voiceSuccessSchema,
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   };
-  server.registerTool(voiceTool.name, voiceTool, async (input: unknown, extra) =>
+  registerKidbotTool(server, voiceTool.name, voiceTool, async (input: unknown, extra) =>
     runControlled(voiceTool.name, input, extra as ToolRequestExtra, networkIdentity, async (signal) =>
       handleWithModeration(
         voiceInputSchema,
@@ -560,11 +601,15 @@ export const registerTools = (
 
   const storyTool = {
     name: 'story_panels',
+    title: 'Story Panels',
     description: 'Plan bright story panels for comics',
-    _meta: { 'openai/widgetAccessible': true },
-    inputSchema: storyPanelsSchema
+    inputSchema: storyPanelsSchema,
+    outputSchema: storyPanelsToolOutputSchema,
+    resultSchema: storyPanelsToolOutputUnion,
+    successSchema: storyPanelsSuccessSchema,
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   };
-  server.registerTool(storyTool.name, storyTool, async (input: unknown, extra) =>
+  registerKidbotTool(server, storyTool.name, storyTool, async (input: unknown, extra) =>
     runControlled(storyTool.name, input, extra as ToolRequestExtra, networkIdentity, async (signal) =>
       handleWithModeration(
         storyPanelsSchema,
@@ -587,11 +632,15 @@ export const registerTools = (
 
   const coloringTool = {
     name: 'coloring_outline',
+    title: 'Coloring Outline',
     description: 'Generate a coloring page outline',
-    _meta: { 'openai/widgetAccessible': true },
-    inputSchema: coloringOutlineSchema
+    inputSchema: coloringOutlineSchema,
+    outputSchema: coloringOutlineToolOutputSchema,
+    resultSchema: coloringOutlineToolOutputUnion,
+    successSchema: coloringOutlineSuccessSchema,
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   };
-  server.registerTool(coloringTool.name, coloringTool, async (input: unknown, extra) =>
+  registerKidbotTool(server, coloringTool.name, coloringTool, async (input: unknown, extra) =>
     runControlled(coloringTool.name, input, extra as ToolRequestExtra, networkIdentity, async (signal) =>
       handleWithModeration(
         coloringOutlineSchema,
@@ -610,11 +659,15 @@ export const registerTools = (
 
   const scienceTool = {
     name: 'science_sim',
+    title: 'Science Simulation',
     description: 'Kid-safe science experiment cards',
-    _meta: { 'openai/widgetAccessible': true },
-    inputSchema: scienceSimSchema
+    inputSchema: scienceSimSchema,
+    outputSchema: scienceSimToolOutputSchema,
+    resultSchema: scienceSimToolOutputUnion,
+    successSchema: scienceSimSuccessSchema,
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   };
-  server.registerTool(scienceTool.name, scienceTool, async (input: unknown, extra) =>
+  registerKidbotTool(server, scienceTool.name, scienceTool, async (input: unknown, extra) =>
     runControlled(scienceTool.name, input, extra as ToolRequestExtra, networkIdentity, async (signal) =>
       handleWithModeration(
         scienceSimSchema,
