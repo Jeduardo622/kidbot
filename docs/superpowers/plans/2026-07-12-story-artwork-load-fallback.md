@@ -32,7 +32,7 @@ Render a panel with a real URL, dispatch `error` on its image, and assert that t
 
 - [ ] **Step 2: Run the focused test to verify RED**
 
-Run: `pnpm --filter web-widget exec vitest run src/components/ComicBoard.artwork.test.tsx`
+Run: `pnpm --filter web-widget exec cross-env NODE_ENV=test vitest --run --environment jsdom src/components/ComicBoard.artwork.test.tsx`
 
 Expected: FAIL because the image remains mounted after its error event.
 

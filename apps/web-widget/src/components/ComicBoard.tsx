@@ -29,11 +29,20 @@ interface ComicBoardProps {
 
 const artworkAltText = (imagePrompt: string) => `Story panel artwork: ${imagePrompt}`;
 
-const PanelArtwork = ({ panel }: { panel: StoryPanel }) => {
+export const PanelArtwork = ({ panel }: { panel: StoryPanel }) => {
   const altText = artworkAltText(panel.imagePrompt);
+  const imageUrl = panel.imageUrl;
+  const [failedImageUrl, setFailedImageUrl] = useState<string | null>(null);
 
-  if (panel.imageUrl) {
-    return <img className="panel-artwork" src={panel.imageUrl} alt={altText} />;
+  if (imageUrl && imageUrl !== failedImageUrl) {
+    return (
+      <img
+        className="panel-artwork"
+        src={imageUrl}
+        alt={altText}
+        onError={() => setFailedImageUrl(imageUrl)}
+      />
+    );
   }
 
   return (
