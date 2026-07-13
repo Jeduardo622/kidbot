@@ -86,25 +86,39 @@ const attachGeneratedImages = async (
     return panels;
   }
 
-  return Promise.all(
-    panels.map(async (panel) => {
-      const pngBase64 = await provider.generateImage?.({
-        prompt: panel.imagePrompt,
-        size: '1024x1024',
-      });
+  const generated = new Array<StoryPanel>(panels.length);
+  let nextIndex = 0;
+  let stopped = false;
+  const worker = async () => {
+    while (!stopped && nextIndex < panels.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      const panel = panels[index];
+      if (!panel) continue;
+      try {
+        const pngBase64 = await provider.generateImage?.({
+          prompt: panel.imagePrompt,
+          size: '1024x1024',
+        });
 
-      if (!pngBase64) {
-        throw new MalformedOutputError('Provider image output did not include base64 data');
+        if (!pngBase64) {
+          throw new MalformedOutputError('Provider image output did not include base64 data');
+        }
+
+        generated[index] = {
+          ...panel,
+          imageUrl: options.resolveGeneratedImageUrl
+            ? await options.resolveGeneratedImageUrl(panel, pngBase64)
+            : `data:image/png;base64,${pngBase64}`,
+        };
+      } catch (error) {
+        stopped = true;
+        throw error;
       }
-
-      return {
-        ...panel,
-        imageUrl: options.resolveGeneratedImageUrl
-          ? await options.resolveGeneratedImageUrl(panel, pngBase64)
-          : `data:image/png;base64,${pngBase64}`,
-      };
-    }),
-  );
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(2, panels.length) }, () => worker()));
+  return generated;
 };
 
 const planStoryWithProvider = async (

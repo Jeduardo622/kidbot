@@ -41,6 +41,17 @@ const isolatedEnvKeys = [
   'FALLBACK_WIDGET',
   'KIDBOT_LOCAL_DEV',
   'MCP_PORT',
+  'MCP_AGENT_REQUEST_TIMEOUT_MS',
+  'MCP_CALLER_CONCURRENCY',
+  'MCP_CALLER_COST_PER_MINUTE',
+  'MCP_CALLER_REQUESTS_PER_MINUTE',
+  'MCP_GLOBAL_CONCURRENCY',
+  'MCP_GLOBAL_COST_PER_MINUTE',
+  'MCP_GLOBAL_REQUESTS_PER_MINUTE',
+  'MCP_NETWORK_CONCURRENCY',
+  'MCP_NETWORK_COST_PER_MINUTE',
+  'MCP_NETWORK_REQUESTS_PER_MINUTE',
+  'MCP_REQUEST_CONTROL_STORE',
   'OPENAI_API_KEY',
   'PARENT_HISTORY_MAX_EVENTS',
   'PARENT_HISTORY_RETENTION_DAYS',
@@ -164,12 +175,13 @@ const readExit = async (child, timeoutMs = 3000) =>
     delay(timeoutMs).then(() => ({ code: null, signal: 'timeout' })),
   ]);
 
-const callMcp = async (baseUrl, payload) => {
+const callMcp = async (baseUrl, payload, headers = {}) => {
   const response = await fetch(`${baseUrl}/mcp`, {
     method: 'POST',
     headers: {
       Accept: 'application/json, text/event-stream',
       'Content-Type': 'application/json',
+      ...headers,
     },
     body: JSON.stringify(payload),
   });
@@ -363,6 +375,86 @@ test('fallback mode remains explicit bypass path without AGENT_SERVICE_TOKEN', a
   }
 });
 
+test('mcp returns a stable tool error when a caller exceeds its request budget', async () => {
+  const mcpPort = await getFreePort();
+  const mcpBaseUrl = `http://localhost:${mcpPort}`;
+  const mcp = spawnProcess(mcpEntry, {
+    FALLBACK_WIDGET: '1',
+    KIDBOT_LOCAL_DEV: '1',
+    MCP_CALLER_REQUESTS_PER_MINUTE: '1',
+    MCP_GLOBAL_REQUESTS_PER_MINUTE: '100',
+    MCP_PORT: String(mcpPort),
+    MCP_REQUEST_CONTROL_STORE: 'memory',
+  });
+  const payload = {
+    jsonrpc: '2.0',
+    id: 120,
+    method: 'tools/call',
+    params: {
+      name: 'voice_chat',
+      arguments: {
+        text: 'Tell me a moon fact',
+        persona: 'robot',
+        ageBand: '7-9',
+      },
+    },
+  };
+
+  try {
+    await waitForMcpHealth(mcpBaseUrl);
+    const first = await callMcp(mcpBaseUrl, payload);
+    const second = await callMcp(mcpBaseUrl, { ...payload, id: 121 });
+
+    assert.equal(first.status, 200);
+    assert.match(first.body, /reply ready/i);
+    assert.equal(second.status, 200);
+    assert.match(second.body, /"isError":true/);
+    assert.match(second.body, /"code":"rate_limited"/);
+    assert.match(second.body, /"retryAfter"/);
+  } finally {
+    stopProcess(mcp);
+  }
+});
+
+test('rotated subject and forwarded headers cannot evade the network budget', async () => {
+  const mcpPort = await getFreePort();
+  const mcpBaseUrl = `http://localhost:${mcpPort}`;
+  const mcp = spawnProcess(mcpEntry, {
+    FALLBACK_WIDGET: '1',
+    KIDBOT_LOCAL_DEV: '1',
+    MCP_CALLER_REQUESTS_PER_MINUTE: '100',
+    MCP_GLOBAL_REQUESTS_PER_MINUTE: '100',
+    MCP_NETWORK_REQUESTS_PER_MINUTE: '1',
+    MCP_PORT: String(mcpPort),
+    MCP_REQUEST_CONTROL_STORE: 'memory',
+  });
+  const payload = (id, subject) => ({
+    jsonrpc: '2.0',
+    id,
+    method: 'tools/call',
+    params: {
+      _meta: { 'openai/subject': subject },
+      name: 'voice_chat',
+      arguments: { text: 'Tell me a moon fact', persona: 'robot', ageBand: '7-9' },
+    },
+  });
+
+  try {
+    await waitForMcpHealth(mcpBaseUrl);
+    const first = await callMcp(
+      mcpBaseUrl, payload(123, 'subject-a'), { 'x-forwarded-for': '203.0.113.10' },
+    );
+    const second = await callMcp(
+      mcpBaseUrl, payload(124, 'subject-b'), { 'x-forwarded-for': '198.51.100.20' },
+    );
+    assert.equal(first.status, 200);
+    assert.match(first.body, /reply ready/i);
+    assert.match(second.body, /"code":"rate_limited"/);
+  } finally {
+    stopProcess(mcp);
+  }
+});
+
 test('fallback mode without KIDBOT_LOCAL_DEV fails closed at mcp startup', async () => {
   const mcpPort = await getFreePort();
   const mcp = spawnProcess(mcpEntry, {
@@ -485,6 +577,62 @@ test('mcp surfaces provider 503 as degraded content instead of a safety block', 
     assert.match(response.body, /"degraded":true/);
     assert.match(response.body, /"fallbackReason":"generation_timeout"/);
     assert.match(response.body, /idea engine right now/i);
+  } finally {
+    stopProcess(mcp);
+    await closeServer(fakeAgent);
+  }
+});
+
+test('mcp deadline aborts the downstream agent request', async () => {
+  const token = strongToken();
+  const agentPort = await getFreePort();
+  const mcpPort = await getFreePort();
+  const mcpBaseUrl = `http://localhost:${mcpPort}`;
+  let observeAbort;
+  const aborted = new Promise((resolve) => {
+    observeAbort = resolve;
+  });
+  const fakeAgent = createServer((req, res) => {
+    if (req.method === 'POST' && req.url === '/voice') {
+      req.on('aborted', () => observeAbort(true));
+      res.on('close', () => {
+        if (!res.writableEnded) observeAbort(true);
+      });
+      return;
+    }
+    res.writeHead(404).end();
+  });
+  await listen(fakeAgent, agentPort);
+
+  const mcp = spawnProcess(mcpEntry, {
+    AGENT_PORT: String(agentPort),
+    AGENT_SERVICE_TOKEN: token,
+    FALLBACK_WIDGET: '0',
+    MCP_AGENT_REQUEST_TIMEOUT_MS: '50',
+    MCP_PORT: String(mcpPort),
+    MCP_REQUEST_CONTROL_STORE: 'memory',
+  });
+
+  try {
+    await waitForMcpHealth(mcpBaseUrl);
+    const response = await callMcp(mcpBaseUrl, {
+      jsonrpc: '2.0',
+      id: 122,
+      method: 'tools/call',
+      params: {
+        name: 'voice_chat',
+        arguments: {
+          text: 'Tell me a moon fact',
+          persona: 'robot',
+          ageBand: '7-9',
+        },
+      },
+    });
+
+    assert.equal(response.status, 200);
+    assert.match(response.body, /"isError":true/);
+    assert.match(response.body, /"code":"request_timeout"/);
+    assert.equal(await Promise.race([aborted, delay(1_000).then(() => false)]), true);
   } finally {
     stopProcess(mcp);
     await closeServer(fakeAgent);

@@ -14,7 +14,7 @@ import {
 
 const fakeProvider = (
   generate: (request: TextGenerationRequest) => string,
-  generateImage?: (request: ImageGenerationRequest) => string,
+  generateImage?: (request: ImageGenerationRequest) => string | Promise<string>,
 ): ModelProvider => ({
   async generateText(request) {
     return generate(request);
@@ -150,6 +150,94 @@ describe('provider-backed agents', () => {
       ],
     });
     expect(imagePrompts).toEqual(['Mia planting a bean', 'A happy sprout']);
+  });
+
+  it('limits story image generation to two concurrent provider calls', async () => {
+    let active = 0;
+    let maxActive = 0;
+    const panels = Array.from({ length: 6 }, (_, index) => ({
+      title: `Panel ${index + 1}`,
+      caption: `A friendly scene ${index + 1}.`,
+      imagePrompt: `Friendly scene ${index + 1}`,
+      imageUrl: null,
+    }));
+    const provider = fakeProvider(
+      () => JSON.stringify({ panels }),
+      async (request) => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        active -= 1;
+        return Buffer.from(request.prompt).toString('base64');
+      },
+    );
+
+    await planStory({ theme: 'Six friendly scenes', panels: 6, ageBand: '7-9' }, provider);
+    expect(maxActive).toBe(2);
+  });
+
+  it('stops assigning story images after a sibling provider call fails', async () => {
+    const calls: string[] = [];
+    const panels = Array.from({ length: 6 }, (_, index) => ({
+      title: `Panel ${index + 1}`,
+      caption: `A friendly scene ${index + 1}.`,
+      imagePrompt: `Scene ${index}`,
+      imageUrl: null,
+    }));
+    const provider = fakeProvider(
+      () => JSON.stringify({ panels }),
+      async (request) => {
+        calls.push(request.prompt);
+        if (request.prompt === 'Scene 0') {
+          await new Promise((resolve) => setTimeout(resolve, 1));
+          throw new Error('image provider failed');
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        return Buffer.from(request.prompt).toString('base64');
+      },
+    );
+
+    await expect(
+      planStory({ theme: 'Six friendly scenes', panels: 6, ageBand: '7-9' }, provider),
+    ).rejects.toThrow('image provider failed');
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(calls).toEqual(['Scene 0', 'Scene 1']);
+  });
+
+  it('stops assigning story images after generated-image storage fails', async () => {
+    const calls: string[] = [];
+    const panels = Array.from({ length: 6 }, (_, index) => ({
+      title: `Panel ${index + 1}`,
+      caption: `A friendly scene ${index + 1}.`,
+      imagePrompt: `Stored scene ${index}`,
+      imageUrl: null,
+    }));
+    const provider = fakeProvider(
+      () => JSON.stringify({ panels }),
+      async (request) => {
+        calls.push(request.prompt);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return Buffer.from(request.prompt).toString('base64');
+      },
+    );
+
+    await expect(
+      planStory(
+        { theme: 'Six stored scenes', panels: 6, ageBand: '7-9' },
+        provider,
+        {
+          resolveGeneratedImageUrl: async (panel) => {
+            if (panel.imagePrompt === 'Stored scene 0') {
+              throw new Error('storage unavailable');
+            }
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            return `https://example.test/${encodeURIComponent(panel.imagePrompt)}`;
+          },
+        },
+      ),
+    ).rejects.toThrow('storage unavailable');
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(calls).toEqual(['Stored scene 0', 'Stored scene 1']);
   });
 
   it('surfaces malformed structured provider output for route-level policy handling', async () => {

@@ -1,3 +1,5 @@
+import type { RequestControlLimits } from './requestControls.js';
+
 export interface McpServerConfig {
   agentPort: number;
   agentBaseUrl: string;
@@ -10,6 +12,9 @@ export interface McpServerConfig {
   parentAuthSecret: string | undefined;
   parentHistoryRetentionDays: number;
   parentHistoryMaxEvents: number;
+  requestControlStore: 'memory' | 'redis';
+  requestControlLimits: RequestControlLimits;
+  agentRequestTimeoutMs: number;
 }
 
 type McpServerEnv = Partial<
@@ -20,6 +25,17 @@ type McpServerEnv = Partial<
     | 'FALLBACK_WIDGET'
     | 'KIDBOT_LOCAL_DEV'
     | 'MCP_PORT'
+    | 'MCP_AGENT_REQUEST_TIMEOUT_MS'
+    | 'MCP_CALLER_CONCURRENCY'
+    | 'MCP_CALLER_COST_PER_MINUTE'
+    | 'MCP_CALLER_REQUESTS_PER_MINUTE'
+    | 'MCP_GLOBAL_CONCURRENCY'
+    | 'MCP_GLOBAL_COST_PER_MINUTE'
+    | 'MCP_GLOBAL_REQUESTS_PER_MINUTE'
+    | 'MCP_NETWORK_CONCURRENCY'
+    | 'MCP_NETWORK_COST_PER_MINUTE'
+    | 'MCP_NETWORK_REQUESTS_PER_MINUTE'
+    | 'MCP_REQUEST_CONTROL_STORE'
     | 'NODE_ENV'
     | 'PARENT_AUTH_SECRET'
     | 'PARENT_HISTORY_MAX_EVENTS'
@@ -129,6 +145,20 @@ export const parseMcpServerConfig = (env: McpServerEnv = process.env): McpServer
     }
   }
 
+  const requestControlStoreRaw = env.MCP_REQUEST_CONTROL_STORE?.trim().toLowerCase()
+    || (env.NODE_ENV === 'production' || parentProfileStore === 'redis' ? 'redis' : 'memory');
+  if (requestControlStoreRaw !== 'memory' && requestControlStoreRaw !== 'redis') {
+    throw new Error('MCP_REQUEST_CONTROL_STORE must be memory or redis.');
+  }
+  if (env.NODE_ENV === 'production' && requestControlStoreRaw !== 'redis') {
+    throw new Error('MCP_REQUEST_CONTROL_STORE must be redis in production.');
+  }
+  const agentRequestTimeoutMs = parsePositiveInteger(
+    'MCP_AGENT_REQUEST_TIMEOUT_MS',
+    env.MCP_AGENT_REQUEST_TIMEOUT_MS,
+    45_000,
+  );
+
   return {
     agentPort,
     agentBaseUrl,
@@ -149,6 +179,38 @@ export const parseMcpServerConfig = (env: McpServerEnv = process.env): McpServer
       env.PARENT_HISTORY_MAX_EVENTS,
       200,
     ),
+    requestControlStore: requestControlStoreRaw,
+    requestControlLimits: {
+      callerRequestsPerMinute: parsePositiveInteger(
+        'MCP_CALLER_REQUESTS_PER_MINUTE', env.MCP_CALLER_REQUESTS_PER_MINUTE, 60,
+      ),
+      networkRequestsPerMinute: parsePositiveInteger(
+        'MCP_NETWORK_REQUESTS_PER_MINUTE', env.MCP_NETWORK_REQUESTS_PER_MINUTE, 120,
+      ),
+      globalRequestsPerMinute: parsePositiveInteger(
+        'MCP_GLOBAL_REQUESTS_PER_MINUTE', env.MCP_GLOBAL_REQUESTS_PER_MINUTE, 600,
+      ),
+      callerCostPerMinute: parsePositiveInteger(
+        'MCP_CALLER_COST_PER_MINUTE', env.MCP_CALLER_COST_PER_MINUTE, 60,
+      ),
+      networkCostPerMinute: parsePositiveInteger(
+        'MCP_NETWORK_COST_PER_MINUTE', env.MCP_NETWORK_COST_PER_MINUTE, 120,
+      ),
+      globalCostPerMinute: parsePositiveInteger(
+        'MCP_GLOBAL_COST_PER_MINUTE', env.MCP_GLOBAL_COST_PER_MINUTE, 600,
+      ),
+      callerConcurrency: parsePositiveInteger(
+        'MCP_CALLER_CONCURRENCY', env.MCP_CALLER_CONCURRENCY, 2,
+      ),
+      networkConcurrency: parsePositiveInteger(
+        'MCP_NETWORK_CONCURRENCY', env.MCP_NETWORK_CONCURRENCY, 4,
+      ),
+      globalConcurrency: parsePositiveInteger(
+        'MCP_GLOBAL_CONCURRENCY', env.MCP_GLOBAL_CONCURRENCY, 8,
+      ),
+      leaseMs: agentRequestTimeoutMs + 5_000,
+    },
+    agentRequestTimeoutMs,
   };
 };
 

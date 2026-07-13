@@ -8,7 +8,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { asyncRoute } from './async-route.js';
 import { mcpConfig } from './config.js';
-import { parentProfileStore, registerTools } from './tools.js';
+import { parentProfileStore, registerTools, requestControlStore } from './tools.js';
 import type { Mode } from './types.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -65,9 +65,9 @@ const resolveDistHtml = (): string => {
 const widgetMode: Mode = fallbackRequested || !hasBundle ? 'fallback' : 'dist';
 const widgetHtml = widgetMode === 'fallback' ? resolveFallbackHtml() : resolveDistHtml();
 
-const createMcpServer = (): McpServer => {
+const createMcpServer = (networkIdentity: string): McpServer => {
   const server = new McpServer({ name: 'Kidbot-mcp', version: '0.1.0' });
-  registerTools(server);
+  registerTools(server, { networkIdentity });
 
   server.registerResource(
     'kidbot_widget',
@@ -117,10 +117,13 @@ if (existsSync(publicDir)) {
 
 app.get('/healthz', asyncRoute(async (_req, res) => {
   const parentStore = await parentProfileStore.readiness();
-  res.status(parentStore.ready ? 200 : 503).json({
-    ok: parentStore.ready,
+  const requestControls = await requestControlStore.readiness();
+  const ok = parentStore.ready && requestControls.ready;
+  res.status(ok ? 200 : 503).json({
+    ok,
     mode: widgetMode,
     parentProfileStore: parentStore,
+    requestControlStore: requestControls,
     time: new Date().toISOString()
   });
 }));
@@ -139,7 +142,7 @@ app.get('/diag', (_req, res) => {
 });
 
 app.post('/mcp', asyncRoute(async (req, res) => {
-  const mcpServer = createMcpServer();
+  const mcpServer = createMcpServer(req.socket.remoteAddress ?? 'unknown');
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined
   });
@@ -158,7 +161,7 @@ app.post('/mcp', asyncRoute(async (req, res) => {
         jsonrpc: '2.0',
         error: {
           code: -32603,
-          message: error instanceof Error ? error.message : 'Internal server error'
+          message: 'Internal server error'
         },
         id: null
       });

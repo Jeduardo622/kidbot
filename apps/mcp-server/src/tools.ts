@@ -15,10 +15,18 @@ import {
 } from './schema.js';
 import { mcpConfig } from './config.js';
 import { createParentProfileStoreFromConfig, type AgeBand, type ParentHistoryEvent } from './parentStore.js';
+import {
+  computeToolCost,
+  createCallerKey,
+  createNetworkKey,
+  createRequestControlStoreFromConfig,
+  type RequestControlRejectionReason,
+} from './requestControls.js';
 import { kidTone, moderate } from './safety.js';
 
 const { agentBaseUrl, fallbackMode, serviceAuthToken, startupPosture } = mcpConfig;
 export const parentProfileStore = createParentProfileStoreFromConfig(mcpConfig);
+export const requestControlStore = createRequestControlStoreFromConfig(mcpConfig);
 const degradedServiceMessage = 'Kidbot is having trouble reaching its idea engine right now. Please try again in a moment.';
 const outputMeta = {
   'openai/outputTemplate': 'ui://widget/kidbot.html',
@@ -52,7 +60,11 @@ const stripParentAccessToken = <T extends Record<string, unknown>>(input: T) => 
   return agentPayload;
 };
 
-const callAgent = async <T>(path: string, payload: unknown): Promise<T | AgentDegradedResponse> => {
+const callAgent = async <T>(
+  path: string,
+  payload: unknown,
+  signal: AbortSignal,
+): Promise<T | AgentDegradedResponse> => {
   if (fallbackMode) {
     throw new Error('Agent disabled in fallback mode');
   }
@@ -63,7 +75,8 @@ const callAgent = async <T>(path: string, payload: unknown): Promise<T | AgentDe
       'x-kidbot-startup-posture': startupPosture,
       Authorization: `Bearer ${serviceAuthToken ?? ''}`
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    signal,
   });
 
   const responseBody = (await response.json().catch(() => undefined)) as unknown;
@@ -122,6 +135,115 @@ const degradedResponse = (response: AgentDegradedResponse) => ({
     'openai/widgetAccessible': true
   }
 });
+
+interface ToolRequestExtra {
+  signal: AbortSignal;
+  _meta?: Record<string, unknown>;
+  requestInfo?: {
+    headers: Record<string, string | string[] | undefined>;
+  };
+}
+
+const controlErrorResponse = (
+  code: 'rate_limited' | 'concurrency_limited' | 'request_timeout',
+  retryAfter?: number,
+): CallToolResult => ({
+  isError: true,
+  content: [{
+    type: 'text',
+    text: code === 'request_timeout'
+      ? 'Kidbot took too long to respond. Please try again.'
+      : 'Kidbot is busy right now. Please wait a moment and try again.',
+  }],
+  structuredContent: {
+    error: true,
+    code,
+    ...(retryAfter ? { retryAfter } : {}),
+  },
+  _meta: {
+    ...outputMeta,
+    'openai/widgetAccessible': true,
+  },
+});
+
+const isConcurrencyReason = (reason: RequestControlRejectionReason) =>
+  reason === 'caller_concurrency'
+  || reason === 'network_concurrency'
+  || reason === 'global_concurrency';
+
+const runControlled = async (
+  toolName: string,
+  input: unknown,
+  extra: ToolRequestExtra,
+  networkIdentity: string,
+  operation: (signal: AbortSignal) => Promise<CallToolResult>,
+): Promise<CallToolResult> => {
+  const deadlineSignal = AbortSignal.timeout(mcpConfig.agentRequestTimeoutMs);
+  const signal = AbortSignal.any([extra.signal, deadlineSignal]);
+  const aborted = new Promise<never>((_resolve, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+  });
+  const execute = async (): Promise<CallToolResult> => {
+    const payload = isRecord(input) ? input : {};
+    const profileId = typeof payload.profileId === 'string' ? payload.profileId : undefined;
+    const parentAccessToken = typeof payload.parentAccessToken === 'string'
+      ? payload.parentAccessToken
+      : undefined;
+    const authorizedProfileId = profileId && parentAccessToken
+      && await parentProfileStore.validateAccess(profileId, parentAccessToken)
+      ? profileId
+      : undefined;
+    const subject = typeof extra._meta?.['openai/subject'] === 'string'
+      ? extra._meta['openai/subject']
+      : undefined;
+    const secret = mcpConfig.serviceAuthToken
+      ?? mcpConfig.parentAuthSecret
+      ?? 'kidbot-local-control';
+    const callerKey = createCallerKey({
+      secret,
+      subject,
+      profileId: authorizedProfileId,
+      headers: extra.requestInfo?.headers ?? {},
+      remoteAddress: networkIdentity,
+    });
+    const networkKey = createNetworkKey({ secret, networkIdentity });
+    const lease = await requestControlStore.acquire({
+      callerKey,
+      networkKey,
+      cost: computeToolCost(toolName, input),
+      limits: mcpConfig.requestControlLimits,
+    });
+    if (!lease.allowed) {
+      return controlErrorResponse(
+        isConcurrencyReason(lease.reason) ? 'concurrency_limited' : 'rate_limited',
+        Math.max(1, Math.ceil(lease.retryAfterMs / 1000)),
+      );
+    }
+    try {
+      return await operation(signal);
+    } finally {
+      try {
+        await lease.release();
+      } catch {
+        // Lease expiry is the fail-safe; do not replace a completed tool result.
+        // eslint-disable-next-line no-console
+        console.warn(JSON.stringify({ event: 'mcp_request_control_release_failed' }));
+      }
+    }
+  };
+  try {
+    return await Promise.race([execute(), aborted]);
+  } catch (error) {
+    if (signal.aborted) {
+      return controlErrorResponse('request_timeout');
+    }
+    throw error;
+  }
+};
 
 const createHistoryEvent = ({
   input,
@@ -340,17 +462,21 @@ const fixtureScience = (input: z.infer<typeof scienceSimSchema>) => {
   };
 };
 
-export const registerTools = (server: McpServer): void => {
+export const registerTools = (
+  server: McpServer,
+  { networkIdentity = 'unknown' }: { networkIdentity?: string } = {},
+): void => {
   const parentCreateTool = {
     name: 'parent_profile_create',
     description: 'Create a parent-gated Kidbot profile for saved metadata history',
     _meta: { 'openai/widgetAccessible': true },
     inputSchema: parentProfileCreateSchema
   };
-  server.registerTool(parentCreateTool.name, parentCreateTool, async (input: unknown) => {
-    const parsed = parentProfileCreateSchema.parse(input);
-    const profile = await parentProfileStore.createProfile(parsed);
-    return {
+  server.registerTool(parentCreateTool.name, parentCreateTool, async (input: unknown, extra) =>
+    runControlled(parentCreateTool.name, input, extra as ToolRequestExtra, networkIdentity, async () => {
+      const parsed = parentProfileCreateSchema.parse(input);
+      const profile = await parentProfileStore.createProfile(parsed);
+      return {
       content: [
         {
           type: 'text' as const,
@@ -362,8 +488,8 @@ export const registerTools = (server: McpServer): void => {
         ...outputMeta,
         'openai/widgetAccessible': true
       }
-    };
-  });
+      };
+    }));
 
   const parentUpdateTool = {
     name: 'parent_profile_update',
@@ -371,10 +497,11 @@ export const registerTools = (server: McpServer): void => {
     _meta: { 'openai/widgetAccessible': true },
     inputSchema: parentProfileUpdateSchema
   };
-  server.registerTool(parentUpdateTool.name, parentUpdateTool, async (input: unknown) => {
-    const parsed = parentProfileUpdateSchema.parse(input);
-    const profile = await parentProfileStore.updateProfile(parsed);
-    return {
+  server.registerTool(parentUpdateTool.name, parentUpdateTool, async (input: unknown, extra) =>
+    runControlled(parentUpdateTool.name, input, extra as ToolRequestExtra, networkIdentity, async () => {
+      const parsed = parentProfileUpdateSchema.parse(input);
+      const profile = await parentProfileStore.updateProfile(parsed);
+      return {
       content: [
         {
           type: 'text' as const,
@@ -386,8 +513,8 @@ export const registerTools = (server: McpServer): void => {
         ...outputMeta,
         'openai/widgetAccessible': true
       }
-    };
-  });
+      };
+    }));
 
   const parentHistoryTool = {
     name: 'parent_history_list',
@@ -395,10 +522,11 @@ export const registerTools = (server: McpServer): void => {
     _meta: { 'openai/widgetAccessible': true },
     inputSchema: parentHistoryListSchema
   };
-  server.registerTool(parentHistoryTool.name, parentHistoryTool, async (input: unknown) => {
-    const parsed = parentHistoryListSchema.parse(input);
-    const events = await parentProfileStore.listHistory(parsed);
-    return {
+  server.registerTool(parentHistoryTool.name, parentHistoryTool, async (input: unknown, extra) =>
+    runControlled(parentHistoryTool.name, input, extra as ToolRequestExtra, networkIdentity, async () => {
+      const parsed = parentHistoryListSchema.parse(input);
+      const events = await parentProfileStore.listHistory(parsed);
+      return {
       content: [
         {
           type: 'text' as const,
@@ -410,8 +538,8 @@ export const registerTools = (server: McpServer): void => {
         ...outputMeta,
         'openai/widgetAccessible': true
       }
-    };
-  });
+      };
+    }));
 
   const voiceTool = {
     name: 'voice_chat',
@@ -419,7 +547,8 @@ export const registerTools = (server: McpServer): void => {
     _meta: { 'openai/widgetAccessible': true },
     inputSchema: voiceInputSchema
   };
-  server.registerTool(voiceTool.name, voiceTool, async (input: unknown) =>
+  server.registerTool(voiceTool.name, voiceTool, async (input: unknown, extra) =>
+    runControlled(voiceTool.name, input, extra as ToolRequestExtra, networkIdentity, async (signal) =>
       handleWithModeration(
         voiceInputSchema,
         input,
@@ -430,13 +559,14 @@ export const registerTools = (server: McpServer): void => {
             ? Promise.resolve(fixtureVoice(data))
             : callAgent<{ blocked: boolean; message?: string; persona?: string; text?: string; ssml?: string }>(
                 '/voice',
-                stripParentAccessToken(data)
+                stripParentAccessToken(data),
+                signal,
               ),
         (data, response) =>
           response.blocked
             ? response.message ?? 'Kidbot paused this request.'
             : `${data.persona} reply ready! ${'text' in response ? response.text ?? '' : ''}`
-      ));
+      )));
 
   const storyTool = {
     name: 'story_panels',
@@ -444,7 +574,8 @@ export const registerTools = (server: McpServer): void => {
     _meta: { 'openai/widgetAccessible': true },
     inputSchema: storyPanelsSchema
   };
-  server.registerTool(storyTool.name, storyTool, async (input: unknown) =>
+  server.registerTool(storyTool.name, storyTool, async (input: unknown, extra) =>
+    runControlled(storyTool.name, input, extra as ToolRequestExtra, networkIdentity, async (signal) =>
       handleWithModeration(
         storyPanelsSchema,
         input,
@@ -455,13 +586,14 @@ export const registerTools = (server: McpServer): void => {
             ? Promise.resolve(fixturePanels(data))
             : callAgent<{ blocked: boolean; message?: string; theme?: string; panels?: unknown[] }>(
                 '/story-panels',
-                stripParentAccessToken(data)
+                stripParentAccessToken(data),
+                signal,
               ),
         (data, response) =>
           response.blocked
             ? response.message ?? 'Story paused for safety.'
             : `Planned ${data.panels} panels about ${data.theme}.`
-      ));
+      )));
 
   const coloringTool = {
     name: 'coloring_outline',
@@ -469,7 +601,8 @@ export const registerTools = (server: McpServer): void => {
     _meta: { 'openai/widgetAccessible': true },
     inputSchema: coloringOutlineSchema
   };
-  server.registerTool(coloringTool.name, coloringTool, async (input: unknown) =>
+  server.registerTool(coloringTool.name, coloringTool, async (input: unknown, extra) =>
+    runControlled(coloringTool.name, input, extra as ToolRequestExtra, networkIdentity, async (signal) =>
       handleWithModeration(
         coloringOutlineSchema,
         input,
@@ -478,10 +611,12 @@ export const registerTools = (server: McpServer): void => {
         async (data) =>
           fallbackMode
             ? Promise.resolve(fixtureColoring())
-            : callAgent<{ blocked: boolean; message?: string; svg?: string }>('/coloring-outline', stripParentAccessToken(data)),
+            : callAgent<{ blocked: boolean; message?: string; svg?: string }>(
+                '/coloring-outline', stripParentAccessToken(data), signal,
+              ),
         (data, response) =>
           response.blocked ? response.message ?? 'Coloring outline blocked.' : `Outline ready for ${data.scene}.`
-      ));
+      )));
 
   const scienceTool = {
     name: 'science_sim',
@@ -489,7 +624,8 @@ export const registerTools = (server: McpServer): void => {
     _meta: { 'openai/widgetAccessible': true },
     inputSchema: scienceSimSchema
   };
-  server.registerTool(scienceTool.name, scienceTool, async (input: unknown) =>
+  server.registerTool(scienceTool.name, scienceTool, async (input: unknown, extra) =>
+    runControlled(scienceTool.name, input, extra as ToolRequestExtra, networkIdentity, async (signal) =>
       handleWithModeration(
         scienceSimSchema,
         input,
@@ -504,10 +640,10 @@ export const registerTools = (server: McpServer): void => {
                 title?: string;
                 objective?: string;
                 steps?: string[];
-              }>('/science-sim', stripParentAccessToken(data)),
+              }>('/science-sim', stripParentAccessToken(data), signal),
         (data, response) =>
           response.blocked
             ? response.message ?? 'Science sim paused.'
             : `Science lab ready for ${data.topic}.`
-      ));
+      )));
 };

@@ -14,6 +14,7 @@ import { correlationId, moderate } from './guardrails.js';
 import {
   ProviderError,
   ProviderUnavailableError,
+  bindProviderSignal,
   classifyProviderError,
   createOpenAIProvider,
   parseProviderFailurePolicy,
@@ -140,11 +141,17 @@ const withValidation = <T>(
   schema: {
     parse: (payload: unknown) => T;
   },
-  handler: (payload: T) => Promise<unknown> | unknown,
+  handler: (payload: T, signal: AbortSignal) => Promise<unknown> | unknown,
 ): RequestHandler => {
   return (req, res, next) => {
     void (async () => {
       const id = correlationId();
+      const requestController = new AbortController();
+      const abortRequest = () => requestController.abort();
+      req.once('aborted', abortRequest);
+      res.once('close', () => {
+        if (!res.writableEnded) abortRequest();
+      });
       res.locals.correlationId = id;
       try {
         const parsed = schema.parse(req.body);
@@ -161,7 +168,7 @@ const withValidation = <T>(
           res.locals.ageBand =
             typeof metadata.ageBand === 'string' ? metadata.ageBand : defaultAgeBand;
         }
-        const data = await handler(parsed);
+        const data = await handler(parsed, requestController.signal);
         if (!data || typeof data !== 'object' || Array.isArray(data)) {
           throw new Error('Handler must return an object payload.');
         }
@@ -422,13 +429,14 @@ const scienceRateLimit = createRateLimiter({
 app.post(
   '/voice',
   voiceRateLimit,
-  withValidation<VoiceRequest>(voiceRequestSchema, async (payload) => {
+  withValidation<VoiceRequest>(voiceRequestSchema, async (payload, signal) => {
     if (useStub) {
       return stubVoice(payload);
     }
     try {
-      const response = provider
-        ? await craftVoiceReply(payload, provider)
+      const requestProvider = provider ? bindProviderSignal(provider, signal) : undefined;
+      const response = requestProvider
+        ? await craftVoiceReply(payload, requestProvider)
         : craftVoiceReply(payload);
       return response.blocked ? response : { ...response, source: 'agent' as const };
     } catch (error) {
@@ -439,13 +447,14 @@ app.post(
 app.post(
   '/story-panels',
   storyRateLimit,
-  withValidation<StoryRequest>(storyRequestSchema, async (payload) => {
+  withValidation<StoryRequest>(storyRequestSchema, async (payload, signal) => {
     if (useStub) {
       return stubStory(payload);
     }
     try {
-      const response = provider
-        ? await planStory(payload, provider, {
+      const requestProvider = provider ? bindProviderSignal(provider, signal) : undefined;
+      const response = requestProvider
+        ? await planStory(payload, requestProvider, {
             resolveGeneratedImageUrl: (_panel, pngBase64) =>
               imageAssetStore.storePngBase64(pngBase64),
           })
@@ -459,13 +468,14 @@ app.post(
 app.post(
   '/coloring-outline',
   coloringRateLimit,
-  withValidation<ColoringRequest>(coloringRequestSchema, async (payload) => {
+  withValidation<ColoringRequest>(coloringRequestSchema, async (payload, signal) => {
     if (useStub) {
       return stubColoring(payload);
     }
     try {
-      const response = provider
-        ? await generateColoringOutline(payload, provider)
+      const requestProvider = provider ? bindProviderSignal(provider, signal) : undefined;
+      const response = requestProvider
+        ? await generateColoringOutline(payload, requestProvider)
         : generateColoringOutline(payload);
       return response.blocked ? response : { ...response, source: 'agent' as const };
     } catch (error) {
@@ -476,12 +486,15 @@ app.post(
 app.post(
   '/science-sim',
   scienceRateLimit,
-  withValidation<ScienceRequest>(scienceRequestSchema, async (payload) => {
+  withValidation<ScienceRequest>(scienceRequestSchema, async (payload, signal) => {
     if (useStub) {
       return stubScience(payload);
     }
     try {
-      const response = provider ? await planExperiment(payload, provider) : planExperiment(payload);
+      const requestProvider = provider ? bindProviderSignal(provider, signal) : undefined;
+      const response = requestProvider
+        ? await planExperiment(payload, requestProvider)
+        : planExperiment(payload);
       return response.blocked ? response : { ...response, source: 'agent' as const };
     } catch (error) {
       return providerFailureFallback('/science-sim', error, () => stubScience(payload));

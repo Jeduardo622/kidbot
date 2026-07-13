@@ -6,11 +6,36 @@ import {
   ProviderUnavailableError,
   UnsafeOutputError,
   classifyProviderError,
+  bindProviderSignal,
   parseProviderFailurePolicy,
   withProviderRetry,
 } from '../provider.js';
 
 describe('provider failure policy', () => {
+  it('binds the request signal to every provider operation', async () => {
+    const controller = new AbortController();
+    const observed: AbortSignal[] = [];
+    const provider = bindProviderSignal({
+      async generateText(_request, signal) {
+        if (signal) observed.push(signal);
+        return 'ok';
+      },
+      async generateImage(_request, signal) {
+        if (signal) observed.push(signal);
+        return 'png';
+      },
+      async moderateText(_text, signal) {
+        if (signal) observed.push(signal);
+        return { blocked: false };
+      },
+    }, controller.signal);
+
+    await provider.generateText({ task: 'voice', system: 'safe', user: 'hello' });
+    await provider.generateImage?.({ prompt: 'safe' });
+    await provider.moderateText('safe');
+    expect(observed).toEqual([controller.signal, controller.signal, controller.signal]);
+  });
+
   it('allows fallback for local development by default', () => {
     expect(parseProviderFailurePolicy({ NODE_ENV: 'development', KIDBOT_LOCAL_DEV: '1' })).toEqual({
       allowFallback: true,
@@ -52,6 +77,26 @@ describe('provider failure policy', () => {
         },
       ),
     ).rejects.toBeInstanceOf(GenerationTimeoutError);
+  });
+
+  it('aborts timed-out provider work and does not retry it in the background', async () => {
+    let attempts = 0;
+    let observedAbort = false;
+    await expect(
+      withProviderRetry(
+        (signal) => new Promise<string>((_resolve, reject) => {
+          attempts += 1;
+          signal.addEventListener('abort', () => {
+            observedAbort = true;
+            reject(signal.reason);
+          }, { once: true });
+        }),
+        { timeoutMs: 5, retries: 2 },
+      ),
+    ).rejects.toBeInstanceOf(GenerationTimeoutError);
+
+    expect(attempts).toBe(1);
+    expect(observedAbort).toBe(true);
   });
 
   it('retries transient provider failures before surfacing unavailable', async () => {

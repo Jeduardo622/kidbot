@@ -146,6 +146,9 @@ export const createMemoryParentProfileStore = (options: StoreOptions): ParentPro
   return {
     mode: 'memory',
     async createProfile(input) {
+      if (sessions.has(input.sessionId)) {
+        throw new Error('Parent profile could not be created.');
+      }
       const now = new Date().toISOString();
       const profileId = createId('kb_profile');
       const parentAccessToken = createToken();
@@ -203,6 +206,9 @@ export const createMemoryParentProfileStore = (options: StoreOptions): ParentPro
         return false;
       }
       const session = sessions.get(event.sessionId);
+      if (session && session.profileId !== event.profileId) {
+        return false;
+      }
       const now = event.timestamp;
       sessions.set(event.sessionId, {
         sessionId: event.sessionId,
@@ -221,8 +227,11 @@ export const createMemoryParentProfileStore = (options: StoreOptions): ParentPro
         throw new Error('Invalid parent access token.');
       }
       const limit = input.limit ?? options.maxEvents;
+      const requestedSession = input.sessionId ? sessions.get(input.sessionId) : undefined;
       const sessionIds = input.sessionId
-        ? [input.sessionId]
+        ? requestedSession?.profileId === input.profileId
+          ? [input.sessionId]
+          : []
         : [...sessions.values()]
             .filter((session) => session.profileId === input.profileId)
             .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
@@ -243,6 +252,7 @@ export const createRedisParentProfileStore = (
     maxRetriesPerRequest: 1,
     enableReadyCheck: true,
     lazyConnect: true,
+    commandTimeout: 5_000,
   });
   client.on('error', () => {
     // Request-time Redis failures are surfaced through store promises/readiness.
@@ -283,13 +293,28 @@ export const createRedisParentProfileStore = (
         createdAt: now,
         updatedAt: now,
       };
-      await client
-        .multi()
-        .set(profileKey(profileId), JSON.stringify(profile))
-        .set(sessionKey(input.sessionId), JSON.stringify(session), 'EX', retentionSeconds)
-        .zadd(profileSessionsKey(profileId), Date.now(), input.sessionId)
-        .expire(profileSessionsKey(profileId), retentionSeconds)
-        .exec();
+      const created = await client.eval(
+        `if redis.call('EXISTS', KEYS[2]) == 1 then
+           return 0
+         end
+         redis.call('SET', KEYS[1], ARGV[1])
+         redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[5])
+         redis.call('ZADD', KEYS[3], ARGV[3], ARGV[4])
+         redis.call('EXPIRE', KEYS[3], ARGV[5])
+         return 1`,
+        3,
+        profileKey(profileId),
+        sessionKey(input.sessionId),
+        profileSessionsKey(profileId),
+        JSON.stringify(profile),
+        JSON.stringify(session),
+        Date.now(),
+        input.sessionId,
+        retentionSeconds,
+      );
+      if (created !== 1) {
+        throw new Error('Parent profile could not be created.');
+      }
       return {
         profileId,
         ageBand: profile.ageBand,
@@ -329,25 +354,48 @@ export const createRedisParentProfileStore = (
       if (!profile?.historyEnabled) {
         return false;
       }
-      const existingSessionRaw = await client.get(sessionKey(event.sessionId));
-      const existingSession = existingSessionRaw ? (JSON.parse(existingSessionRaw) as ParentSession) : undefined;
       const session: ParentSession = {
         sessionId: event.sessionId,
         profileId: event.profileId,
         ageBand: event.ageBand,
-        createdAt: existingSession?.createdAt ?? event.timestamp,
+        createdAt: event.timestamp,
         updatedAt: event.timestamp,
       };
-      await client
-        .multi()
-        .set(sessionKey(event.sessionId), JSON.stringify(session), 'EX', retentionSeconds)
-        .zadd(profileSessionsKey(event.profileId), Date.now(), event.sessionId)
-        .expire(profileSessionsKey(event.profileId), retentionSeconds)
-        .lpush(sessionEventsKey(event.sessionId), JSON.stringify(event))
-        .ltrim(sessionEventsKey(event.sessionId), 0, options.maxEvents - 1)
-        .expire(sessionEventsKey(event.sessionId), retentionSeconds)
-        .exec();
-      return true;
+      const recorded = await client.eval(
+        `local profileRaw = redis.call('GET', KEYS[1])
+         if not profileRaw then return 0 end
+         local okProfile, storedProfile = pcall(cjson.decode, profileRaw)
+         if not okProfile or storedProfile.profileId ~= ARGV[1] or storedProfile.historyEnabled ~= true then
+           return 0
+         end
+         local sessionRaw = redis.call('GET', KEYS[2])
+         local session = cjson.decode(ARGV[2])
+         if sessionRaw then
+           local okSession, storedSession = pcall(cjson.decode, sessionRaw)
+           if not okSession or storedSession.profileId ~= ARGV[1] then return 0 end
+           session.createdAt = storedSession.createdAt
+         end
+         redis.call('SET', KEYS[2], cjson.encode(session), 'EX', ARGV[6])
+         redis.call('ZADD', KEYS[3], ARGV[3], ARGV[4])
+         redis.call('EXPIRE', KEYS[3], ARGV[6])
+         redis.call('LPUSH', KEYS[4], ARGV[5])
+         redis.call('LTRIM', KEYS[4], 0, tonumber(ARGV[7]) - 1)
+         redis.call('EXPIRE', KEYS[4], ARGV[6])
+         return 1`,
+        4,
+        profileKey(event.profileId),
+        sessionKey(event.sessionId),
+        profileSessionsKey(event.profileId),
+        sessionEventsKey(event.sessionId),
+        event.profileId,
+        JSON.stringify(session),
+        Date.now(),
+        event.sessionId,
+        JSON.stringify(event),
+        retentionSeconds,
+        options.maxEvents,
+      );
+      return recorded === 1;
     },
     async listHistory(input) {
       const profile = await readAuthorizedProfile(input.profileId, input.parentAccessToken);
@@ -360,7 +408,28 @@ export const createRedisParentProfileStore = (
         : await client.zrevrange(profileSessionsKey(input.profileId), 0, options.maxEvents - 1);
       const allEvents: ParentHistoryEvent[] = [];
       for (const sessionId of sessionIds) {
-        const rawEvents = await client.lrange(sessionEventsKey(sessionId), 0, limit - 1);
+        const rawEvents = await client.eval(
+          `local sessionRaw = redis.call('GET', KEYS[1])
+           if not sessionRaw then return {} end
+           local okSession, session = pcall(cjson.decode, sessionRaw)
+           if not okSession or session.profileId ~= ARGV[1] then return {} end
+           local clean = {}
+           local rawEvents = redis.call('LRANGE', KEYS[2], 0, -1)
+           for _, rawEvent in ipairs(rawEvents) do
+             local okEvent, event = pcall(cjson.decode, rawEvent)
+             if okEvent and event.profileId == ARGV[1] and event.sessionId == ARGV[3] then
+               table.insert(clean, rawEvent)
+               if #clean >= tonumber(ARGV[2]) then break end
+             end
+           end
+           return clean`,
+          2,
+          sessionKey(sessionId),
+          sessionEventsKey(sessionId),
+          input.profileId,
+          limit,
+          sessionId,
+        ) as string[];
         allEvents.push(...rawEvents.map((raw: string) => JSON.parse(raw) as ParentHistoryEvent));
         if (allEvents.length >= limit) {
           break;
