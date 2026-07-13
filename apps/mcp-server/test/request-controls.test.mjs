@@ -85,31 +85,20 @@ test('Redis control configuration fails closed without REDIS_URL', () => {
 test('caller keys are stable and do not expose raw network identifiers', () => {
   const first = createCallerKey({
     secret: 'test-control-secret',
-    profileId: undefined,
     headers: { 'user-agent': 'Kidbot-Test', 'x-forwarded-for': '203.0.113.9, 10.0.0.2' },
     remoteAddress: '10.0.0.2',
   });
   const second = createCallerKey({
     secret: 'test-control-secret',
-    profileId: undefined,
     headers: { 'user-agent': 'Kidbot-Test', 'x-forwarded-for': '203.0.113.9, 10.0.0.2' },
     remoteAddress: '10.0.0.2',
   });
   assert.equal(first, second);
   assert.match(first, /^network:[a-f0-9]{64}$/);
   assert.equal(first.includes('203.0.113.9'), false);
-  const profileKey = createCallerKey({
-      secret: 'test-control-secret',
-      profileId: 'kb_profile_authorized123',
-      headers: {},
-      remoteAddress: undefined,
-    });
-  assert.match(profileKey, /^profile:[a-f0-9]{64}$/);
-  assert.equal(profileKey.includes('kb_profile_authorized123'), false);
   const subjectKey = createCallerKey({
     secret: 'test-control-secret',
     subject: 'anonymous-openai-subject',
-    profileId: undefined,
     headers: {},
     remoteAddress: undefined,
   });

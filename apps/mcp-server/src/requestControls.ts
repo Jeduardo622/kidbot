@@ -77,21 +77,16 @@ const headerValue = (headers: Record<string, string | string[] | undefined>, nam
 export const createCallerKey = ({
   secret,
   subject,
-  profileId,
   headers,
   remoteAddress,
 }: {
   secret: string;
   subject?: string;
-  profileId: string | undefined;
   headers: Record<string, string | string[] | undefined>;
   remoteAddress: string | undefined;
 }): string => {
   if (subject) {
     return `subject:${createHmac('sha256', secret).update(subject).digest('hex')}`;
-  }
-  if (profileId) {
-    return `profile:${createHmac('sha256', secret).update(profileId).digest('hex')}`;
   }
   const source = `${remoteAddress || 'unknown'}\n${headerValue(headers, 'user-agent')}`;
   return `network:${createHmac('sha256', secret).update(source).digest('hex')}`;
