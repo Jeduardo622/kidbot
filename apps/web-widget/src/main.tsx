@@ -22,19 +22,25 @@ const tabs: Array<{ key: TabKey; label: string }> = [
   { key: 'science', label: 'Science Lab' }
 ];
 
-const profileId = 'local-default';
+const defaultProfileId = 'local-default';
 
-interface WidgetSessionState {
+interface PersistedWidgetState {
   ageBand: AgeBand;
+  sessionId: string;
+  tab: TabKey;
+}
+
+interface ParentCredentialState {
   historyEnabled: boolean;
   parentAccessToken?: string;
   parentModeUnlocked: boolean;
   parentPin?: string;
-  parentPinSet: boolean;
   profileId: string;
-  sessionId: string;
-  tab: TabKey;
 }
+
+type PersistenceStatus =
+  | { kind: 'error' | 'pending' | 'success'; message: string }
+  | undefined;
 
 declare global {
   interface Window {
@@ -50,20 +56,11 @@ declare global {
 const isTabKey = (value: unknown): value is TabKey =>
   typeof value === 'string' && tabs.some((tab) => tab.key === value);
 
-const readInitialState = (): WidgetSessionState => {
+const readInitialState = (): PersistedWidgetState => {
   const saved = window.openai?.getWidgetState?.();
   const savedSessionId = typeof saved?.sessionId === 'string' ? saved.sessionId : undefined;
-  const savedPin = typeof saved?.parentPin === 'string' ? saved.parentPin : undefined;
-  const savedParentAccessToken =
-    typeof saved?.parentAccessToken === 'string' ? saved.parentAccessToken : undefined;
   return {
     ageBand: isAgeBand(saved?.ageBand) ? saved.ageBand : '7-9',
-    historyEnabled: Boolean(saved?.historyEnabled && savedParentAccessToken),
-    parentAccessToken: savedParentAccessToken,
-    parentModeUnlocked: false,
-    parentPin: savedPin,
-    parentPinSet: Boolean(savedPin || saved?.parentPinSet),
-    profileId: typeof saved?.profileId === 'string' ? saved.profileId : profileId,
     sessionId: savedSessionId ?? createSessionId(),
     tab: isTabKey(saved?.tab) ? saved.tab : 'voice',
   };
@@ -82,17 +79,30 @@ interface ParentProfileUpdateResponse {
   profileId?: string;
 }
 
+interface ParentProfileDeleteResponse {
+  deleted?: boolean;
+  profileId?: string;
+}
+
 export const App = () => {
-  const [sessionState, setSessionState] = useState<WidgetSessionState>(() => readInitialState());
+  const [sessionState, setSessionState] = useState<PersistedWidgetState>(() => readInitialState());
+  const [parentCredentials, setParentCredentials] = useState<ParentCredentialState>({
+    historyEnabled: false,
+    parentModeUnlocked: false,
+    profileId: defaultProfileId,
+  });
   const [activeTab, setActiveTab] = useState<TabKey>('voice');
   const [pinInput, setPinInput] = useState('');
   const [pinMessage, setPinMessage] = useState<string | undefined>();
+  const [persistenceStatus, setPersistenceStatus] = useState<PersistenceStatus>();
+  const persistencePending = persistenceStatus?.kind === 'pending';
+  const parentPinSet = Boolean(parentCredentials.parentPin);
   const sessionContext: SessionContext = {
     ageBand: sessionState.ageBand,
-    ...(sessionState.historyEnabled && sessionState.parentAccessToken
-      ? { parentAccessToken: sessionState.parentAccessToken }
+    ...(parentCredentials.historyEnabled && parentCredentials.parentAccessToken
+      ? { parentAccessToken: parentCredentials.parentAccessToken }
       : {}),
-    profileId: sessionState.profileId,
+    profileId: parentCredentials.profileId,
     sessionId: sessionState.sessionId,
   };
 
@@ -104,20 +114,15 @@ export const App = () => {
   useEffect(() => {
     window.openai?.setWidgetState?.({
       ageBand: sessionState.ageBand,
-      historyEnabled: sessionState.historyEnabled,
-      parentAccessToken: sessionState.parentAccessToken,
-      parentModeUnlocked: sessionState.parentModeUnlocked,
-      parentPin: sessionState.parentPin,
-      parentPinSet: sessionState.parentPinSet,
-      profileId: sessionState.profileId,
       sessionId: sessionState.sessionId,
       tab: activeTab,
     });
-  }, [activeTab, sessionState]);
+  }, [activeTab, sessionState.ageBand, sessionState.sessionId]);
 
   const createPersistentProfile = async (ageBand: AgeBand, sessionId: string) => {
     const result = (await window.openai?.callTool?.('parent_profile_create', {
       ageBand,
+      historyEnabled: true,
       sessionId,
     })) as ParentProfileCreateResponse | undefined;
     if (!result?.parentAccessToken || !result.profileId || result.historyEnabled !== true) {
@@ -137,58 +142,128 @@ export const App = () => {
       return;
     }
 
-    if (!sessionState.parentPinSet) {
-      const persistedProfile = await createPersistentProfile(
-        sessionState.ageBand,
-        sessionState.sessionId,
-      ).catch(() => undefined);
-      setSessionState((prev) => ({
+    if (!parentPinSet) {
+      setParentCredentials((prev) => ({
         ...prev,
-        ...persistedProfile,
         parentModeUnlocked: true,
         parentPin: pinInput,
-        parentPinSet: true,
       }));
       setPinInput('');
       setPinMessage('Parent controls unlocked.');
       return;
     }
 
-    if (pinInput !== sessionState.parentPin) {
+    if (pinInput !== parentCredentials.parentPin) {
       setPinMessage('PIN did not match.');
       return;
     }
 
-    const persistedProfile = sessionState.parentAccessToken
-      ? undefined
-      : await createPersistentProfile(sessionState.ageBand, sessionState.sessionId).catch(() => undefined);
-    setSessionState((prev) => ({ ...prev, ...persistedProfile, parentModeUnlocked: true }));
+    setParentCredentials((prev) => ({ ...prev, parentModeUnlocked: true }));
     setPinInput('');
     setPinMessage('Parent controls unlocked.');
   };
 
   const lockParentMode = () => {
-    setSessionState((prev) => ({ ...prev, parentModeUnlocked: false }));
+    setParentCredentials((prev) => ({ ...prev, parentModeUnlocked: false }));
     setPinInput('');
     setPinMessage(undefined);
   };
 
   const updateAgeBand = async (ageBand: AgeBand) => {
     setSessionState((prev) => ({ ...prev, ageBand }));
-    if (!sessionState.historyEnabled || !sessionState.parentAccessToken) {
+    if (!parentCredentials.historyEnabled || !parentCredentials.parentAccessToken) {
       return;
     }
-    const result = (await window.openai?.callTool?.('parent_profile_update', {
-      ageBand,
-      parentAccessToken: sessionState.parentAccessToken,
-      profileId: sessionState.profileId,
-    }).catch(() => undefined)) as ParentProfileUpdateResponse | undefined;
-    if (result?.profileId === sessionState.profileId) {
+    setPersistenceStatus({ kind: 'pending', message: 'Updating parent profile…' });
+    try {
+      const result = (await window.openai?.callTool?.('parent_profile_update', {
+        ageBand,
+        parentAccessToken: parentCredentials.parentAccessToken,
+        profileId: parentCredentials.profileId,
+      })) as ParentProfileUpdateResponse | undefined;
+      if (result?.profileId !== parentCredentials.profileId) {
+        throw new Error('Unexpected profile update result.');
+      }
       setSessionState((prev) => ({
         ...prev,
         ageBand: isAgeBand(result.ageBand) ? result.ageBand : prev.ageBand,
-        historyEnabled: result.historyEnabled ?? prev.historyEnabled,
       }));
+      setPersistenceStatus({ kind: 'success', message: 'Parent profile updated.' });
+    } catch {
+      setPersistenceStatus({ kind: 'error', message: 'Profile age could not be updated.' });
+    }
+  };
+
+  const updateHistoryConsent = async (enabled: boolean) => {
+    if (persistencePending) return;
+
+    if (enabled) {
+      setPersistenceStatus({ kind: 'pending', message: 'Enabling history…' });
+      try {
+        const persistedProfile = await createPersistentProfile(
+          sessionState.ageBand,
+          sessionState.sessionId,
+        );
+        if (!persistedProfile) throw new Error('Unexpected profile create result.');
+        setParentCredentials((prev) => ({ ...prev, ...persistedProfile }));
+        setPersistenceStatus({ kind: 'success', message: 'History is enabled.' });
+      } catch {
+        setParentCredentials((prev) => ({ ...prev, historyEnabled: false }));
+        setPersistenceStatus({ kind: 'error', message: 'History could not be enabled.' });
+      }
+      return;
+    }
+
+    if (!parentCredentials.parentAccessToken || parentCredentials.profileId === defaultProfileId) {
+      setParentCredentials((prev) => ({ ...prev, historyEnabled: false }));
+      return;
+    }
+
+    setPersistenceStatus({ kind: 'pending', message: 'Purging saved history…' });
+    try {
+      const result = (await window.openai?.callTool?.('parent_profile_update', {
+        historyEnabled: false,
+        parentAccessToken: parentCredentials.parentAccessToken,
+        profileId: parentCredentials.profileId,
+      })) as ParentProfileUpdateResponse | undefined;
+      if (result?.profileId !== parentCredentials.profileId || result.historyEnabled !== false) {
+        throw new Error('Unexpected profile update result.');
+      }
+      setParentCredentials((prev) => ({ ...prev, historyEnabled: false }));
+      setPersistenceStatus({ kind: 'success', message: 'Saved history was purged.' });
+    } catch {
+      setPersistenceStatus({ kind: 'error', message: 'History could not be disabled.' });
+    }
+  };
+
+  const deleteParentProfile = async () => {
+    if (
+      persistencePending ||
+      !parentCredentials.parentAccessToken ||
+      parentCredentials.profileId === defaultProfileId
+    ) {
+      return;
+    }
+
+    const profileIdToDelete = parentCredentials.profileId;
+    setPersistenceStatus({ kind: 'pending', message: 'Deleting parent profile…' });
+    try {
+      const result = (await window.openai?.callTool?.('parent_profile_delete', {
+        parentAccessToken: parentCredentials.parentAccessToken,
+        profileId: profileIdToDelete,
+      })) as ParentProfileDeleteResponse | undefined;
+      if (result?.deleted !== true || result.profileId !== profileIdToDelete) {
+        throw new Error('Unexpected profile delete result.');
+      }
+      setParentCredentials((prev) => ({
+        ...prev,
+        historyEnabled: false,
+        parentAccessToken: undefined,
+        profileId: defaultProfileId,
+      }));
+      setPersistenceStatus({ kind: 'success', message: 'Parent profile deleted.' });
+    } catch {
+      setPersistenceStatus({ kind: 'error', message: 'Profile could not be deleted.' });
     }
   };
 
@@ -199,33 +274,70 @@ export const App = () => {
         <section className="parent-controls" aria-label="Parent controls">
           <div className="session-summary">
             <span>Age: {sessionState.ageBand}</span>
-            <span>Profile: {sessionState.profileId}</span>
-            <span>History: {sessionState.historyEnabled ? 'On' : 'Local only'}</span>
+            <span>Profile: {parentCredentials.profileId}</span>
+            <span>History: {parentCredentials.historyEnabled ? 'On' : 'Local only'}</span>
           </div>
-          {sessionState.parentModeUnlocked ? (
-            <div className="control-row">
-              <label htmlFor="locked-age">Locked age</label>
-              <select
-                id="locked-age"
-                value={sessionState.ageBand}
-                onChange={(event) => {
-                  void updateAgeBand(event.target.value as AgeBand);
-                }}
-              >
-                {ageBandOptions.map((option) => (
-                  <option key={option.key} value={option.key}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <button type="button" onClick={lockParentMode}>
-                Lock Parent Controls
-              </button>
+          {parentCredentials.parentModeUnlocked ? (
+            <div className="parent-settings">
+              <div className="control-row">
+                <label htmlFor="locked-age">Locked age</label>
+                <select
+                  disabled={persistencePending}
+                  id="locked-age"
+                  value={sessionState.ageBand}
+                  onChange={(event) => {
+                    void updateAgeBand(event.target.value as AgeBand);
+                  }}
+                >
+                  {ageBandOptions.map((option) => (
+                    <option key={option.key} value={option.key}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <button disabled={persistencePending} type="button" onClick={lockParentMode}>
+                  Lock Parent Controls
+                </button>
+              </div>
+              <div className="history-consent">
+                <label htmlFor="history-consent">
+                  <input
+                    checked={parentCredentials.historyEnabled}
+                    disabled={persistencePending}
+                    id="history-consent"
+                    type="checkbox"
+                    onChange={(event) => {
+                      void updateHistoryConsent(event.target.checked);
+                    }}
+                  />
+                  Save activity history
+                </label>
+                <p>
+                  With your consent, activity history is stored for up to 30 days. Leave this off
+                  to keep the session local only.
+                </p>
+              </div>
+              {parentCredentials.parentAccessToken &&
+                parentCredentials.profileId !== defaultProfileId && (
+                  <div className="delete-profile">
+                    <p>Permanently deletes the parent profile and saved history.</p>
+                    <button
+                      className="danger-button"
+                      disabled={persistencePending}
+                      type="button"
+                      onClick={() => {
+                        void deleteParentProfile();
+                      }}
+                    >
+                      Delete parent profile
+                    </button>
+                  </div>
+                )}
             </div>
           ) : (
             <div className="control-row">
               <label htmlFor="parent-pin">
-                {sessionState.parentPinSet ? 'Parent PIN' : 'Create parent PIN'}
+                {parentPinSet ? 'Parent PIN' : 'Create parent PIN'}
               </label>
               <input
                 id="parent-pin"
@@ -237,11 +349,20 @@ export const App = () => {
                 onChange={(event) => setPinInput(event.target.value.replace(/\D/g, '').slice(0, 4))}
               />
               <button type="button" onClick={handleParentSubmit}>
-                {sessionState.parentPinSet ? 'Unlock Parent Controls' : 'Set Parent PIN'}
+                {parentPinSet ? 'Unlock Parent Controls' : 'Set Parent PIN'}
               </button>
             </div>
           )}
           {pinMessage && <p className="parent-message">{pinMessage}</p>}
+          {persistenceStatus && (
+            <p
+              aria-live={persistenceStatus.kind === 'error' ? 'assertive' : 'polite'}
+              className={`persistence-status ${persistenceStatus.kind}`}
+              role={persistenceStatus.kind === 'error' ? 'alert' : 'status'}
+            >
+              {persistenceStatus.message}
+            </p>
+          )}
         </section>
         <nav>
           {tabs.map((tab) => (

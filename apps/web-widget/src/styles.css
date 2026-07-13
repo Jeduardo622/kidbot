@@ -65,6 +65,66 @@ body {
   font-weight: 600;
 }
 
+.parent-settings,
+.history-consent,
+.delete-profile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.history-consent label {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  font-weight: 700;
+}
+
+.history-consent input {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.history-consent p,
+.delete-profile p,
+.persistence-status {
+  margin: 0;
+}
+
+.history-consent p,
+.delete-profile p {
+  max-width: 620px;
+  color: #475569;
+  text-align: center;
+}
+
+.persistence-status {
+  font-weight: 700;
+}
+
+.persistence-status.pending {
+  color: #075985;
+}
+
+.persistence-status.success {
+  color: #166534;
+}
+
+.persistence-status.error {
+  color: #b91c1c;
+}
+
+.kidbot-header button.danger-button {
+  background: #b91c1c;
+  color: #fff;
+}
+
+.kidbot-header button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .locked-age {
   padding: 0.5rem 0.75rem;
   border-radius: 999px;
@@ -153,6 +213,7 @@ main {
 
 .kidbot-header button:focus-visible,
 .panel button:focus-visible,
+.history-consent input:focus-visible,
 .control-row input:focus-visible,
 .control-row select:focus-visible,
 .control-row textarea:focus-visible,

@@ -162,7 +162,11 @@ describe('contract integrity', () => {
     ].join('\n');
 
     const mcpToolIds = [...mcpToolsSource.matchAll(/name:\s*'([^']+)'/g)].map((match) => match[1]).sort();
-    const widgetToolIds = [...widgetSources.matchAll(/callTool\?\.\('([^']+)'/g)].map((match) => match[1]).sort();
+    const widgetToolIds = [
+      ...new Set(
+        [...widgetSources.matchAll(/callTool\?\.\('([^']+)'/g)].map((match) => match[1]),
+      ),
+    ].sort();
     const expectedMcpToolIds = [
       'coloring_outline',
       'parent_history_list',
@@ -174,7 +178,7 @@ describe('contract integrity', () => {
       'voice_chat',
     ];
     const expectedWidgetToolIds = expectedMcpToolIds.filter(
-      (toolId) => toolId !== 'parent_history_list' && toolId !== 'parent_profile_delete',
+      (toolId) => toolId !== 'parent_history_list',
     );
 
     expect(widgetToolIds).toEqual(expectedWidgetToolIds);
