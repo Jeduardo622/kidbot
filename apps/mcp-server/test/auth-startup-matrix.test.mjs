@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { spawn } from 'node:child_process';
 import { test } from 'node:test';
+import Redis from 'ioredis';
 
 const mcpEntry = join(process.cwd(), 'dist', 'server.js');
 const agentEntry = join(process.cwd(), '../agent-service/dist/index.js');
@@ -413,6 +414,88 @@ test('mcp returns a stable tool error when a caller exceeds its request budget',
     assert.match(second.body, /"retryAfter"/);
   } finally {
     stopProcess(mcp);
+  }
+});
+
+test('blocked bogus profile requests do not reach Redis before request controls', async (t) => {
+  const redisUrl = process.env.REDIS_URL;
+  if (!redisUrl || !(await redisAvailable(redisUrl))) {
+    t.skip('REDIS_URL is not available');
+    return;
+  }
+
+  const mcpPort = await getFreePort();
+  const mcpBaseUrl = `http://localhost:${mcpPort}`;
+  const parentSecret = strongToken();
+  const profileId = `kb_profile_preflight${randomInt(100000, 999999)}`;
+  const profileKey = `kidbot:profile:${profileId}`;
+  const observer = new Redis(redisUrl, { maxRetriesPerRequest: 1 });
+  const monitor = await observer.monitor();
+  const waitForMonitorBarrier = async (marker) => {
+    const observed = new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        monitor.off('monitor', onMonitor);
+        reject(new Error(`Timed out waiting for Redis monitor barrier: ${marker}`));
+      }, 2_000);
+      const onMonitor = (_time, args) => {
+        if (args[0]?.toLowerCase() === 'echo' && args[1] === marker) {
+          clearTimeout(timeout);
+          monitor.off('monitor', onMonitor);
+          resolve();
+        }
+      };
+      monitor.on('monitor', onMonitor);
+    });
+    await observer.echo(marker);
+    await observed;
+  };
+  let profileReads = 0;
+  monitor.on('monitor', (_time, args) => {
+    if (args[0]?.toLowerCase() === 'get' && args[1] === profileKey) {
+      profileReads += 1;
+    }
+  });
+  const mcp = spawnProcess(mcpEntry, {
+    FALLBACK_WIDGET: '1',
+    KIDBOT_LOCAL_DEV: '1',
+    MCP_CALLER_REQUESTS_PER_MINUTE: '1',
+    MCP_GLOBAL_REQUESTS_PER_MINUTE: '100',
+    MCP_PORT: String(mcpPort),
+    MCP_REQUEST_CONTROL_STORE: 'memory',
+    PARENT_AUTH_SECRET: parentSecret,
+    PARENT_PROFILE_STORE: 'redis',
+    REDIS_URL: redisUrl,
+  });
+  const payload = {
+    jsonrpc: '2.0',
+    id: 122,
+    method: 'tools/call',
+    params: {
+      name: 'parent_history_list',
+      arguments: {
+        profileId,
+        parentAccessToken: `kb_parent_bogus${randomInt(10000000, 99999999)}token`,
+        limit: 1,
+      },
+    },
+  };
+
+  try {
+    await waitForMcpHealth(mcpBaseUrl);
+    await callMcp(mcpBaseUrl, payload);
+    await waitForMonitorBarrier(`after-allowed-${profileId}`);
+    const readsAfterAllowedRequest = profileReads;
+    assert.ok(readsAfterAllowedRequest >= 1, 'allowed request should validate parent access');
+
+    const blocked = await callMcp(mcpBaseUrl, { ...payload, id: 123 });
+    await waitForMonitorBarrier(`after-blocked-${profileId}`);
+
+    assert.match(blocked.body, /"code":"rate_limited"/);
+    assert.equal(profileReads, readsAfterAllowedRequest);
+  } finally {
+    stopProcess(mcp);
+    monitor.disconnect();
+    observer.disconnect();
   }
 });
 

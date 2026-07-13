@@ -188,15 +188,6 @@ const runControlled = async (
     signal.addEventListener('abort', () => reject(signal.reason), { once: true });
   });
   const execute = async (): Promise<CallToolResult> => {
-    const payload = isRecord(input) ? input : {};
-    const profileId = typeof payload.profileId === 'string' ? payload.profileId : undefined;
-    const parentAccessToken = typeof payload.parentAccessToken === 'string'
-      ? payload.parentAccessToken
-      : undefined;
-    const authorizedProfileId = profileId && parentAccessToken
-      && await parentProfileStore.validateAccess(profileId, parentAccessToken)
-      ? profileId
-      : undefined;
     const subject = typeof extra._meta?.['openai/subject'] === 'string'
       ? extra._meta['openai/subject']
       : undefined;
@@ -206,7 +197,6 @@ const runControlled = async (
     const callerKey = createCallerKey({
       secret,
       subject,
-      profileId: authorizedProfileId,
       headers: extra.requestInfo?.headers ?? {},
       remoteAddress: networkIdentity,
     });
