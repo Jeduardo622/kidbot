@@ -1,8 +1,10 @@
+import { readFileSync } from 'node:fs';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './main.js';
 
 const persistedKeys = ['ageBand', 'sessionId', 'tab'];
+const styleSource = readFileSync('src/styles.css', 'utf8');
 
 describe('App parent/session safety controls', () => {
   const callTool = vi.fn();
@@ -125,6 +127,36 @@ describe('App parent/session safety controls', () => {
     expectSecretFreeWidgetState();
   });
 
+  it('allows parent controls to lock while a persistence request is pending', async () => {
+    callTool.mockImplementationOnce(() => new Promise(() => undefined));
+    render(<App />);
+    await setPin();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /save activity history/i }));
+    await parentControls().findByText('Enabling history…');
+
+    const lockButton = screen.getByRole('button', { name: 'Lock Parent Controls' });
+    expect((lockButton as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(lockButton);
+    expect(screen.getByLabelText('Parent PIN')).toBeTruthy();
+  });
+
+  it('associates consent and destructive controls with their explanatory copy', async () => {
+    render(<App />);
+    await setPin();
+
+    const consent = screen.getByRole('checkbox', { name: /save activity history/i });
+    expect(consent.getAttribute('aria-describedby')).toBe('history-consent-description');
+    expect(document.getElementById('history-consent-description')?.textContent).toContain('30 days');
+
+    await enableHistory();
+    const deleteButton = screen.getByRole('button', { name: 'Delete parent profile' });
+    expect(deleteButton.getAttribute('aria-describedby')).toBe('delete-profile-description');
+    expect(document.getElementById('delete-profile-description')?.textContent).toContain(
+      'Permanently deletes',
+    );
+  });
+
   it('reports enable failures and leaves history off', async () => {
     callTool.mockRejectedValueOnce(new Error('offline'));
     render(<App />);
@@ -184,6 +216,24 @@ describe('App parent/session safety controls', () => {
     ).toBe(true);
   });
 
+  it('keeps the active profile when deletion confirms a different profile id', async () => {
+    render(<App />);
+    await setPin();
+    await enableHistory();
+    callTool.mockResolvedValueOnce({ deleted: true, profileId: 'kb_profile_other123' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete parent profile' }));
+
+    expect((await parentControls().findByRole('alert')).textContent).toContain(
+      'Profile could not be deleted',
+    );
+    expect(screen.getByText('Profile: kb_profile_widget123')).toBeTruthy();
+    expect(
+      (screen.getByRole('checkbox', { name: /save activity history/i }) as HTMLInputElement)
+        .checked,
+    ).toBe(true);
+  });
+
   it('clears the active profile only after confirmed destructive deletion', async () => {
     let resolveDelete: ((value: unknown) => void) | undefined;
     render(<App />);
@@ -217,5 +267,18 @@ describe('App parent/session safety controls', () => {
     expect(screen.getByText('Profile: local-default')).toBeTruthy();
     expect(screen.getByText('History: Local only')).toBeTruthy();
     expectSecretFreeWidgetState();
+  });
+
+  it('keeps destructive hover and disabled colors isolated from generic button styles', () => {
+    const genericHoverIndex = styleSource.indexOf('.kidbot-header button:hover');
+    const dangerHoverIndex = styleSource.indexOf('.kidbot-header button.danger-button:hover');
+
+    expect(dangerHoverIndex).toBeGreaterThan(genericHoverIndex);
+    expect(styleSource).toMatch(
+      /\.kidbot-header button\.danger-button:hover\s*\{[^}]*background:\s*#991b1b;[^}]*color:\s*#fff;[^}]*transform:\s*none;/s,
+    );
+    expect(styleSource).toMatch(
+      /\.kidbot-header button\.danger-button:disabled[^\{]*\{[^}]*background:\s*#7f1d1d;[^}]*color:\s*#fff;[^}]*opacity:\s*1;[^}]*transform:\s*none;/s,
+    );
   });
 });

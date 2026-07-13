@@ -115,11 +115,6 @@ body {
   color: #b91c1c;
 }
 
-.kidbot-header button.danger-button {
-  background: #b91c1c;
-  color: #fff;
-}
-
 .kidbot-header button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
@@ -150,6 +145,22 @@ body {
 .kidbot-header button:hover {
   transform: translateY(-2px);
   background: #c7d2fe;
+}
+
+.kidbot-header button.danger-button,
+.kidbot-header button.danger-button:hover {
+  background: #991b1b;
+  color: #fff;
+  transform: none;
+}
+
+.kidbot-header button.danger-button:disabled,
+.kidbot-header button.danger-button:disabled:hover {
+  background: #7f1d1d;
+  color: #fff;
+  cursor: not-allowed;
+  opacity: 1;
+  transform: none;
 }
 
 main {

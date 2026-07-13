@@ -295,13 +295,14 @@ export const App = () => {
                     </option>
                   ))}
                 </select>
-                <button disabled={persistencePending} type="button" onClick={lockParentMode}>
+                <button type="button" onClick={lockParentMode}>
                   Lock Parent Controls
                 </button>
               </div>
               <div className="history-consent">
                 <label htmlFor="history-consent">
                   <input
+                    aria-describedby="history-consent-description"
                     checked={parentCredentials.historyEnabled}
                     disabled={persistencePending}
                     id="history-consent"
@@ -312,7 +313,7 @@ export const App = () => {
                   />
                   Save activity history
                 </label>
-                <p>
+                <p id="history-consent-description">
                   With your consent, activity history is stored for up to 30 days. Leave this off
                   to keep the session local only.
                 </p>
@@ -320,8 +321,11 @@ export const App = () => {
               {parentCredentials.parentAccessToken &&
                 parentCredentials.profileId !== defaultProfileId && (
                   <div className="delete-profile">
-                    <p>Permanently deletes the parent profile and saved history.</p>
+                    <p id="delete-profile-description">
+                      Permanently deletes the parent profile and saved history.
+                    </p>
                     <button
+                      aria-describedby="delete-profile-description"
                       className="danger-button"
                       disabled={persistencePending}
                       type="button"

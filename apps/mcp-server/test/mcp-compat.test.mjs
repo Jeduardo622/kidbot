@@ -29,6 +29,7 @@ const toolIds = [
   'coloring_outline',
   'science_sim',
   'parent_profile_create',
+  'parent_profile_delete',
   'parent_profile_update',
   'parent_history_list',
 ];
@@ -38,6 +39,7 @@ const toolContractExpectations = {
   coloring_outline: { title: 'Coloring Outline', readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   science_sim: { title: 'Science Simulation', readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   parent_profile_create: { title: 'Create Parent Profile', readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  parent_profile_delete: { title: 'Delete Parent Profile', readOnlyHint: false, destructiveHint: true, openWorldHint: false },
   parent_profile_update: { title: 'Update Parent Profile', readOnlyHint: false, destructiveHint: true, openWorldHint: false },
   parent_history_list: { title: 'List Parent History', readOnlyHint: true, destructiveHint: false, openWorldHint: false },
 };
@@ -269,6 +271,11 @@ test('/mcp tools/list advertises exact Kidbot app contracts', async () => {
     method: 'tools/list',
     params: {},
   });
+
+  assert.deepEqual(
+    response.result.tools.map(({ name }) => name).sort(),
+    [...toolIds].sort(),
+  );
 
   for (const [toolId, expected] of Object.entries(toolContractExpectations)) {
     const tool = response.result.tools.find(({ name }) => name === toolId);
