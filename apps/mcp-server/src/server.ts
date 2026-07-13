@@ -4,12 +4,14 @@ import express from 'express';
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { registerAppResource, RESOURCE_MIME_TYPE } from '@modelcontextprotocol/ext-apps/server';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { asyncRoute } from './async-route.js';
 import { mcpConfig } from './config.js';
 import { parentProfileStore, registerTools, requestControlStore } from './tools.js';
 import type { Mode } from './types.js';
+import { createWidgetResourceMeta, widgetResourceUri } from './widgetMetadata.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,8 +19,6 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
-
-const widgetResourceUri = 'ui://widget/kidbot.html';
 
 const distDir = path.resolve(__dirname, '../../web-widget/dist');
 const assetsDir = path.join(distDir, 'assets');
@@ -64,35 +64,28 @@ const resolveDistHtml = (): string => {
 
 const widgetMode: Mode = fallbackRequested || !hasBundle ? 'fallback' : 'dist';
 const widgetHtml = widgetMode === 'fallback' ? resolveFallbackHtml() : resolveDistHtml();
+const widgetResourceMeta = createWidgetResourceMeta(mcpConfig, widgetMode);
 
 const createMcpServer = (networkIdentity: string): McpServer => {
   const server = new McpServer({ name: 'Kidbot-mcp', version: '0.1.0' });
   registerTools(server, { networkIdentity });
 
-  server.registerResource(
+  registerAppResource(
+    server,
     'kidbot_widget',
     widgetResourceUri,
     {
       title: 'Kidbot Widget',
       description: 'Kidbot interactive widget shell',
-      mimeType: 'text/html+skybridge',
-      _meta: {
-        'openai/widgetDescription': 'Kidbot — safe creative play: voice, comics, coloring, science.',
-        'openai/widgetCSP': { connect_domains: [], resource_domains: [] },
-        mode: widgetMode
-      }
+      _meta: widgetResourceMeta,
     },
     async () => ({
       contents: [
         {
           uri: widgetResourceUri,
-          mimeType: 'text/html+skybridge',
+          mimeType: RESOURCE_MIME_TYPE,
           text: widgetHtml,
-          _meta: {
-            'openai/widgetDescription': 'Kidbot — safe creative play: voice, comics, coloring, science.',
-            'openai/widgetCSP': { connect_domains: [], resource_domains: [] },
-            mode: widgetMode
-          }
+          _meta: widgetResourceMeta,
         }
       ]
     })

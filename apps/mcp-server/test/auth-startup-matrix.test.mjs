@@ -3,14 +3,16 @@ import { randomInt } from 'node:crypto';
 import { createServer } from 'node:http';
 import { createConnection } from 'node:net';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { spawn } from 'node:child_process';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import Redis from 'ioredis';
 
-const mcpEntry = join(process.cwd(), 'dist', 'server.js');
-const agentEntry = join(process.cwd(), '../agent-service/dist/index.js');
+const packageDir = dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
+const mcpEntry = join(packageDir, 'dist', 'server.js');
+const agentEntry = join(packageDir, '../agent-service/dist/index.js');
 
 if (!existsSync(mcpEntry)) {
   throw new Error(
@@ -34,13 +36,15 @@ const toolIds = [
   'parent_history_list',
 ];
 const strongToken = () => `matrix-token-${randomInt(1000, 9999)}-abcdefghijklmnopqrstuvwxyz0123456789`;
-const localEnvBypassPath = join(process.cwd(), '.env.auth-matrix-not-used');
+const localEnvBypassPath = join(packageDir, '.env.auth-matrix-not-used');
 const isolatedEnvKeys = [
   'AGENT_BASE_URL',
   'AGENT_PORT',
   'AGENT_SERVICE_TOKEN',
   'FALLBACK_WIDGET',
   'KIDBOT_LOCAL_DEV',
+  'KIDBOT_WIDGET_DOMAIN',
+  'KIDBOT_WIDGET_RESOURCE_DOMAINS',
   'MCP_PORT',
   'MCP_AGENT_REQUEST_TIMEOUT_MS',
   'MCP_CALLER_CONCURRENCY',
@@ -239,6 +243,80 @@ const redisAvailable = (redisUrl) =>
       resolve(false);
     }
   });
+
+const configImportEnv = {
+  FALLBACK_WIDGET: process.env.FALLBACK_WIDGET,
+  KIDBOT_LOCAL_DEV: process.env.KIDBOT_LOCAL_DEV,
+  NODE_ENV: process.env.NODE_ENV,
+};
+process.env.FALLBACK_WIDGET = '1';
+process.env.KIDBOT_LOCAL_DEV = '1';
+process.env.NODE_ENV = 'test';
+const { parseMcpServerConfig } = await import('../dist/config.js');
+for (const [key, value] of Object.entries(configImportEnv)) {
+  if (value === undefined) {
+    delete process.env[key];
+  } else {
+    process.env[key] = value;
+  }
+}
+
+const productionWidgetEnv = {
+  NODE_ENV: 'production',
+  AGENT_SERVICE_TOKEN: 'a'.repeat(32),
+  MCP_REQUEST_CONTROL_STORE: 'redis',
+  KIDBOT_WIDGET_DOMAIN: 'https://kidbot-production.up.railway.app',
+  KIDBOT_WIDGET_RESOURCE_DOMAINS: 'https://rxnwualzddplucjhclij.supabase.co',
+};
+
+test('widget CSP parses exact production origins', () => {
+  const config = parseMcpServerConfig(productionWidgetEnv);
+
+  assert.equal(config.widgetDomain, 'https://kidbot-production.up.railway.app');
+  assert.deepEqual(config.widgetResourceDomains, [
+    'https://rxnwualzddplucjhclij.supabase.co',
+  ]);
+});
+
+test('widget CSP rejects non-exact production origins', () => {
+  const invalidValues = [
+    'http://rxnwualzddplucjhclij.supabase.co',
+    'https://*.supabase.co',
+    'https://rxnwualzddplucjhclij.supabase.co/storage',
+    'https://rxnwualzddplucjhclij.supabase.co?query=1',
+    'https://rxnwualzddplucjhclij.supabase.co#fragment',
+    'https://user:password@rxnwualzddplucjhclij.supabase.co',
+  ];
+
+  for (const value of invalidValues) {
+    assert.throws(
+      () => parseMcpServerConfig({
+        ...productionWidgetEnv,
+        KIDBOT_WIDGET_RESOURCE_DOMAINS: value,
+      }),
+      /KIDBOT_WIDGET_RESOURCE_DOMAINS/,
+      value,
+    );
+  }
+});
+
+test('widget CSP requires both production values', () => {
+  for (const missingKey of ['KIDBOT_WIDGET_DOMAIN', 'KIDBOT_WIDGET_RESOURCE_DOMAINS']) {
+    const env = { ...productionWidgetEnv };
+    delete env[missingKey];
+    assert.throws(() => parseMcpServerConfig(env), new RegExp(missingKey));
+  }
+});
+
+test('widget CSP uses sandbox defaults outside production', () => {
+  const config = parseMcpServerConfig({
+    FALLBACK_WIDGET: '1',
+    KIDBOT_LOCAL_DEV: '1',
+  });
+
+  assert.equal(config.widgetDomain, 'https://web-sandbox.oaiusercontent.com');
+  assert.deepEqual(config.widgetResourceDomains, []);
+});
 
 test('non-fallback mode without AGENT_SERVICE_TOKEN fails closed at mcp startup', async () => {
   const mcpPort = await getFreePort();

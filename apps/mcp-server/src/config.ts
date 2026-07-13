@@ -15,6 +15,8 @@ export interface McpServerConfig {
   requestControlStore: 'memory' | 'redis';
   requestControlLimits: RequestControlLimits;
   agentRequestTimeoutMs: number;
+  widgetDomain: string;
+  widgetResourceDomains: string[];
 }
 
 type McpServerEnv = Partial<
@@ -24,6 +26,8 @@ type McpServerEnv = Partial<
     | 'AGENT_SERVICE_TOKEN'
     | 'FALLBACK_WIDGET'
     | 'KIDBOT_LOCAL_DEV'
+    | 'KIDBOT_WIDGET_DOMAIN'
+    | 'KIDBOT_WIDGET_RESOURCE_DOMAINS'
     | 'MCP_PORT'
     | 'MCP_AGENT_REQUEST_TIMEOUT_MS'
     | 'MCP_CALLER_CONCURRENCY'
@@ -81,6 +85,30 @@ const parseBaseUrl = (name: string, value: string | undefined): string | undefin
     return url.toString().replace(/\/$/, '');
   } catch {
     throw new Error(`${name} must be a valid http(s) URL.`);
+  }
+};
+
+const parseExactHttpsOrigin = (name: string, value: string | undefined): string => {
+  const trimmed = trimOptional(value);
+  if (!trimmed) {
+    throw new Error(`${name} is required in production.`);
+  }
+
+  const trimmedWithoutTrailingSlash = trimmed.endsWith('/') ? trimmed.slice(0, -1) : trimmed;
+  try {
+    const url = new URL(trimmed);
+    if (
+      url.protocol !== 'https:'
+      || url.username
+      || url.password
+      || trimmed.includes('*')
+      || url.origin !== trimmedWithoutTrailingSlash
+    ) {
+      throw new Error('not an exact HTTPS origin');
+    }
+    return url.origin;
+  } catch {
+    throw new Error(`${name} must contain exact HTTPS origins without credentials, wildcards, paths, queries, or fragments.`);
   }
 };
 
@@ -158,6 +186,15 @@ export const parseMcpServerConfig = (env: McpServerEnv = process.env): McpServer
     env.MCP_AGENT_REQUEST_TIMEOUT_MS,
     45_000,
   );
+  const production = env.NODE_ENV === 'production';
+  const widgetDomain = production
+    ? parseExactHttpsOrigin('KIDBOT_WIDGET_DOMAIN', env.KIDBOT_WIDGET_DOMAIN)
+    : 'https://web-sandbox.oaiusercontent.com';
+  const widgetResourceDomains = production
+    ? (env.KIDBOT_WIDGET_RESOURCE_DOMAINS ?? '')
+      .split(',')
+      .map((value) => parseExactHttpsOrigin('KIDBOT_WIDGET_RESOURCE_DOMAINS', value))
+    : [];
 
   return {
     agentPort,
@@ -211,6 +248,8 @@ export const parseMcpServerConfig = (env: McpServerEnv = process.env): McpServer
       leaseMs: agentRequestTimeoutMs + 5_000,
     },
     agentRequestTimeoutMs,
+    widgetDomain,
+    widgetResourceDomains,
   };
 };
 
