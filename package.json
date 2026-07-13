@@ -16,7 +16,7 @@
     "verify-change": "node ./scripts/verify-change.mjs",
     "eval:ai": "tsx ./scripts/evaluate-ai-outputs.mjs",
     "eval:ai:update-baseline": "tsx ./scripts/update-ai-evaluation-baseline.mjs",
-    "smoke:parent-store-redis": "node ./scripts/smoke-parent-store.mjs local",
+    "smoke:parent-store-redis": "pnpm --filter @kidbot/agent-service run build && pnpm --filter @kidbot/mcp-server run build && node ./scripts/smoke-parent-store.mjs local",
     "smoke:parent-store-remote": "node ./scripts/smoke-parent-store.mjs remote",
     "smoke:provider-preflight:ci": "node ./scripts/smoke-provider-preflight.mjs --ci-config-check",
     "smoke:provider-preflight": "node ./scripts/smoke-provider-preflight.mjs",

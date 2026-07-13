@@ -82,6 +82,15 @@ test('secured posture verification builds its required agent-service artifact fi
   );
 });
 
+test('parent store Redis smoke builds both required service artifacts first', async () => {
+  const packageJson = JSON.parse(await readFile('package.json', 'utf8'));
+
+  assert.equal(
+    packageJson.scripts['smoke:parent-store-redis'],
+    'pnpm --filter @kidbot/agent-service run build && pnpm --filter @kidbot/mcp-server run build && node ./scripts/smoke-parent-store.mjs local',
+  );
+});
+
 test('typed linting uses a project that includes every linted TypeScript surface', async () => {
   const eslintConfig = await readFile('eslint.config.js', 'utf8');
   const lintProject = JSON.parse(await readFile('tsconfig.eslint.json', 'utf8'));
