@@ -1025,12 +1025,21 @@ test('mcp concurrency rejection matches the advertised output contract', async (
   const agentPort = await getFreePort();
   const mcpPort = await getFreePort();
   const mcpBaseUrl = `http://localhost:${mcpPort}`;
+  let markRequestReceived;
+  const requestReceived = new Promise((resolve) => {
+    markRequestReceived = resolve;
+  });
+  let releaseFirstResponse;
+  const firstResponseReleased = new Promise((resolve) => {
+    releaseFirstResponse = resolve;
+  });
   const fakeAgent = createServer((req, res) => {
     if (req.method === 'POST' && req.url === '/voice') {
-      setTimeout(() => {
+      markRequestReceived();
+      void firstResponseReleased.then(() => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ blocked: false, persona: 'robot', text: 'Ready.' }));
-      }, 300);
+      });
       return;
     }
     res.writeHead(404).end();
@@ -1056,13 +1065,15 @@ test('mcp concurrency rejection matches the advertised output contract', async (
     await waitForMcpHealth(mcpBaseUrl);
     const descriptor = await getToolDescriptor(mcpBaseUrl, 'voice_chat');
     const first = callMcp(mcpBaseUrl, payload(710));
-    await delay(50);
+    await requestReceived;
     const second = await callMcp(mcpBaseUrl, payload(711));
     const result = parseMcpResponse(second.body).result;
     assert.equal(result.structuredContent.code, 'concurrency_limited');
     assertMatchesAdvertisedOutput(descriptor, result.structuredContent);
+    releaseFirstResponse();
     await first;
   } finally {
+    releaseFirstResponse();
     stopProcess(mcp);
     await closeServer(fakeAgent);
   }

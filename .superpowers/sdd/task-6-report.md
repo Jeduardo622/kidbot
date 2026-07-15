@@ -1,8 +1,8 @@
-# Task 6 Step 1 local verification report
+# Task 6 verification and final-review report
 
 Status: **DONE_WITH_CONCERNS**
 
-The requested local verification completed successfully. No product defect was exposed, so no product file was edited. The concerns are non-fatal harness warnings documented below; protected human review remains required.
+The opening Step 1 section below is the pre-fix verification snapshot: that run exposed no defect and made no product edit. The later **Consolidated final-review fix wave** section records the subsequent product edits, RED/GREEN evidence, and final protected verification. The concerns are non-fatal harness warnings documented below; protected human review remains required.
 
 ## Scope and route classification
 
@@ -29,11 +29,12 @@ The requested local verification completed successfully. No product defect was e
 
 - Read-only refresh: `git fetch origin main --prune` exited `0`.
 - Branch: `codex/launch-blockers-3-4`
-- Initial status: clean (`git status --short --branch` showed only the branch header).
-- HEAD: `9178aac510d2392189938cddc1a387f1d2d2c767`
+- Current status before the final evidence/test-isolation cleanup: clean (`git status --short --branch` showed only the branch header).
+- Current HEAD after the product fix wave: `36932b695a708ab4985a0dd44b1ade49c41af395`.
 - `origin/main`: `25e67013ca70645be54895c5ad15577b08494232`
 - Merge-base: `25e67013ca70645be54895c5ad15577b08494232`
-- `git rev-list --left-right --count HEAD...origin/main`: `17 0` — branch is 17 commits ahead and 0 behind.
+- `git rev-list --left-right --count HEAD...origin/main`: `18 0` — branch is 18 commits ahead and 0 behind.
+- The executed verification counts immediately below remain the historical pre-fix Step 1 results at `9178aac`; final post-fix counts are recorded later and must not be conflated with this snapshot.
 
 ## Executed verification
 
@@ -127,3 +128,15 @@ Runtime: bundled Node `v24.14.0`; pnpm `11.7.0`. Disposable Redis container `kid
 - `pnpm run verify-change -- --base origin/main`: exit `0`; classification `protected`; selected `pnpm run verify:local`; status `passed`; human review `required`.
 - Verifier counts: web-widget 47 passed; agent-service 81 passed; MCP workspace 49 passed; root harness 221 passed and 1 platform-conditional skip out of 222; MCP compatibility 12 passed; deterministic AI evaluation 17 cases at 100 with 22 unchanged baseline metrics and overall mean 100.00.
 - Non-fatal harness warning: concurrent Vitest startup printed `WebSocket server error: Port is already in use`; all workspace suites completed with zero failures and the protected verifier exited `0`.
+
+## Final evidence and test-isolation cleanup
+
+- Scope: test and evidence files only; no product source or behavior changed.
+- Corrected the opening Git snapshot to the post-product-wave HEAD `36932b695a708ab4985a0dd44b1ade49c41af395`, 18 commits ahead and 0 behind `origin/main`, and explicitly separated the historical pre-fix Step 1 counts from the consolidated final-wave evidence.
+- Replaced the concurrency test's fixed 50 ms hold assumption with a deterministic fake-agent request-received barrier plus an explicit response-release barrier. The test still validates the real `concurrency_limited` structured result against the advertised output schema.
+- Changed the agent service auth-boundary teardown to await the `server.close` callback and propagate close errors.
+- Focused MCP concurrency test: `node --test --test-name-pattern "mcp concurrency rejection" apps/mcp-server/test/auth-startup-matrix.test.mjs` — 1 passed, 0 failed, 0 skipped.
+- Full MCP auth/startup/admission matrix against disposable Redis at `redis://127.0.0.1:32768`: 24 passed, 0 failed, 0 skipped.
+- Focused agent auth-boundary suite: `pnpm --filter @kidbot/agent-service exec vitest --run src/__tests__/serviceAuthBoundary.test.ts` — 1 file passed; 20 tests passed, 0 failed.
+- Required package builds before the focused checks: `@kidbot/agent-service` and `@kidbot/mcp-server` both exited `0`.
+- `git diff --check`: exit `0`; only PowerShell/Git CRLF conversion warnings were emitted.

@@ -64,7 +64,10 @@ const withEnv = async <T>(
 
 const withServer = async (
   app: {
-    listen: (port: number) => { close: () => void; address: () => AddressInfo | string | null };
+    listen: (port: number) => {
+      close: (callback: (error?: Error) => void) => void;
+      address: () => AddressInfo | string | null;
+    };
   },
   run: (baseUrl: string) => Promise<void>,
 ) => {
@@ -74,7 +77,15 @@ const withServer = async (
   try {
     await run(baseUrl);
   } finally {
-    server.close();
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
   }
 };
 
