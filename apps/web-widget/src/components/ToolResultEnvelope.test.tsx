@@ -13,17 +13,19 @@ import {
 
 describe('ChatGPT tool-result envelopes', () => {
   const callTool = vi.fn();
-  let getContextSpy: ReturnType<typeof vi.spyOn>;
+  let restoreGetContext: (() => void) | undefined;
 
   beforeEach(() => {
     callTool.mockReset();
-    getContextSpy = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+    const getContextSpy = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+    restoreGetContext = () => getContextSpy.mockRestore();
     (window as { openai?: unknown }).openai = { callTool, setWidgetState: vi.fn() };
   });
 
   afterEach(() => {
     cleanup();
-    getContextSpy.mockRestore();
+    restoreGetContext?.();
+    restoreGetContext = undefined;
     delete (window as { openai?: unknown }).openai;
   });
 
