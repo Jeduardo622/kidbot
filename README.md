@@ -183,7 +183,7 @@ For production MCP connector coverage, run the manual `Production MCP Story Pane
 
 ### Parent/Session Safety MVP
 
-The source-backed privacy disclosure is published at [`PRIVACY.md`](PRIVACY.md) and served by the MCP server at `/privacy`. It identifies the OpenAI, Railway, Supabase, and browser speech data paths; the 30-day consented history and 24-hour image retention settings; deletion limitations; and the support contact. Privacy and legal review is required before public launch; this repository does not claim legal certification.
+The source-backed privacy disclosure is published at [`PRIVACY.md`](PRIVACY.md) and served by the MCP server at `/privacy`. It identifies the OpenAI, Railway, Supabase, and browser speech data paths; the 30-day consented history and 24-hour image expiry target with periodic best-effort cleanup; deletion limitations; and the support contact. Privacy and legal review is required before public launch; this repository does not claim legal certification.
 
 The widget creates a local `sessionId`, uses the non-PII `profileId` value `local-default`, and stores the locked age band in ChatGPT widget state. Parent controls are gated by a 4-digit session PIN; the PIN is session-scoped widget state only and is not an account, authentication factor, persistent parent identity, or server-side access control.
 

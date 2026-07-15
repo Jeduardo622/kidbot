@@ -85,7 +85,7 @@ Empower kids to *learn through play* by interacting with a trusted digital frien
 |------|-------------|
 | Unsafe content generation | Layered moderation (`moderate()` + model filters) |
 | Voice latency / mispronunciation | Local fallback, pre-cached responses |
-| Child data retention | Explicit-consent metadata history expires after 30 days; generated images use 24-hour best-effort cleanup; deletion cannot recall provider, backup, or cache copies |
+| Child data retention | Explicit-consent metadata history expires after 30 days; generated images use a 24-hour expiry target with periodic best-effort cleanup; deletion cannot recall provider, backup, or cache copies |
 | Hardware variability (touch input) | Canvas auto-scale + sensitivity tuning |
 | Privacy or legal requirements drift | Privacy and legal review required before public launch; keep `PRIVACY.md` synchronized with runtime and provider configuration |
 

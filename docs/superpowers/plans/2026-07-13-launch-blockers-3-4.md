@@ -15,7 +15,7 @@
 - PINs, parent bearer tokens, unlock state, history state, and persistent profile IDs never enter ChatGPT widget state.
 - Optional profile/history retention is 30 days and history opt-in is unchecked by default.
 - Disabling history purges saved history immediately; profile deletion invalidates the token and removes all profile-owned metadata.
-- Generated images are public and scheduled for cleanup within 24 hours; profile deletion does not claim immediate image deletion.
+- Generated images are public and use a 24-hour expiry target with periodic best-effort cleanup; profile deletion does not claim immediate image deletion.
 - No COPPA, GDPR-K, or legal-certification claim is introduced.
 - Every behavior change follows red-green-refactor and every protected change receives reviewer, safety, tester, and UI-hardener review.
 
