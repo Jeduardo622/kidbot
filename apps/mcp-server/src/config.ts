@@ -152,6 +152,10 @@ export const parseMcpServerConfig = (env: McpServerEnv = process.env): McpServer
   const parentProfileStore = parentProfileStoreRaw;
   const parentAuthSecret = trimOptional(env.PARENT_AUTH_SECRET);
 
+  if (fallbackMode && env.NODE_ENV === 'production') {
+    throw new Error('FALLBACK_WIDGET=1 is not allowed in production.');
+  }
+
   if (fallbackMode && !localDevIntent) {
     throw new Error('FALLBACK_WIDGET=1 requires KIDBOT_LOCAL_DEV=1 for explicit local fallback posture.');
   }

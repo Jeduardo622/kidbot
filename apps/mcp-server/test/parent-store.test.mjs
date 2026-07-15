@@ -350,6 +350,23 @@ test('memory parent store expires profiles and releases their sessions', async (
   assert.notEqual(replacement.profileId, profile.profileId);
 });
 
+test('memory create prunes expired ownership before checking session reuse', async () => {
+  const store = createMemoryParentProfileStore({
+    maxEvents: 10,
+    retentionDays: 0,
+    secret: strongSecret,
+  });
+  const sessionId = 'kb_session_expired_direct_reuse';
+  await store.createProfile({ ageBand: '7-9', historyEnabled: true, sessionId });
+
+  const replacement = await store.createProfile({
+    ageBand: '10-12',
+    historyEnabled: true,
+    sessionId,
+  });
+  assert.equal(replacement.ageBand, '10-12');
+});
+
 test('memory parent store purges history when disabled', async () => {
   const store = createMemoryParentProfileStore({
     maxEvents: 10,
@@ -543,6 +560,29 @@ test('redis parent store smoke records capped metadata when REDIS_URL is availab
       for (const key of ownedKeys) await ttlClient.pexpire(key, 1_000);
       assert.equal(await store.validateAccess(profile.profileId, profile.parentAccessToken), true);
       for (const key of ownedKeys) assert.ok(await ttlClient.pttl(key) > 1_000, `${key} must renew`);
+
+      for (const key of ownedKeys) await ttlClient.pexpire(key, 1_000);
+      await store.updateProfile({
+        profileId: profile.profileId,
+        parentAccessToken: profile.parentAccessToken,
+        ageBand: '10-12',
+      });
+      for (const key of ownedKeys) assert.ok(await ttlClient.pttl(key) > 1_000, `${key} must renew after update`);
+
+      for (const key of ownedKeys) await ttlClient.pexpire(key, 1_000);
+      assert.equal(await store.recordEvent(
+        eventForProfile(profile, profileSessionId, 'kb_event_ttl_record'),
+        profile.parentAccessToken,
+      ), true);
+      for (const key of ownedKeys) assert.ok(await ttlClient.pttl(key) > 1_000, `${key} must renew after record`);
+
+      for (const key of ownedKeys) await ttlClient.pexpire(key, 1_000);
+      await store.listHistory({
+        profileId: profile.profileId,
+        parentAccessToken: profile.parentAccessToken,
+        limit: 1,
+      });
+      for (const key of ownedKeys) assert.ok(await ttlClient.pttl(key) > 1_000, `${key} must renew after list`);
 
       const purgeSessionId = `kb_session_purge${Date.now()}`;
       cleanupSessionIds.push(purgeSessionId);

@@ -13,9 +13,10 @@ import { widgetResourceUri } from './widgetMetadata.js';
 
 const noAuth = [{ type: 'noauth' as const }];
 
-export const createToolMeta = () => ({
+export const createToolMeta = (appOnly = false) => ({
   securitySchemes: noAuth,
-  ui: { resourceUri: widgetResourceUri, visibility: ['model', 'app'] as const },
+  ui: { resourceUri: widgetResourceUri, visibility: appOnly ? ['app'] as const : ['model', 'app'] as const },
+  ...(appOnly ? { 'openai/visibility': 'private' as const } : {}),
   'openai/outputTemplate': widgetResourceUri,
   'openai/widgetAccessible': true,
 });
@@ -123,7 +124,6 @@ const parentProfileShape = {
 export const parentProfileCreateSuccessSchema = z
   .object({
     ...parentProfileShape,
-    parentAccessToken: z.string().optional(),
   })
   .strict();
 
@@ -290,8 +290,9 @@ export interface KidbotToolConfig {
   resultSchema: z.ZodTypeAny;
   successSchema: z.AnyZodObject;
   annotations: Required<
-    Pick<ToolAnnotations, 'readOnlyHint' | 'destructiveHint' | 'openWorldHint'>
+    Pick<ToolAnnotations, 'readOnlyHint' | 'destructiveHint' | 'openWorldHint' | 'idempotentHint'>
   >;
+  appOnly?: boolean;
 }
 
 export const registerKidbotTool = (
@@ -315,7 +316,7 @@ export const registerKidbotTool = (
     name,
     {
       ...descriptor,
-      _meta: createToolMeta(),
+      _meta: createToolMeta(config.appOnly === true),
     },
     validateCallback(callback),
   );

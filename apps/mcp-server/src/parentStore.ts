@@ -182,6 +182,10 @@ export const createMemoryParentProfileStore = (options: StoreOptions): ParentPro
     mode: 'memory',
     async createProfile(input) {
       requireHistoryConsent(input.historyEnabled);
+      const existingSession = sessions.get(input.sessionId);
+      if (existingSession) {
+        readAuthorizedProfile(existingSession.profileId, '');
+      }
       if (sessions.has(input.sessionId)) {
         throw new Error('Parent profile could not be created.');
       }

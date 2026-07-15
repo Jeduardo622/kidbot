@@ -19,7 +19,9 @@ describe('App parent/session safety controls', () => {
     hostState = undefined;
     (window as { openai?: unknown }).openai = {
       callTool,
-      getWidgetState: () => hostState,
+      get widgetState() {
+        return hostState;
+      },
       requestDisplayMode,
       setWidgetState,
     };
@@ -47,10 +49,12 @@ describe('App parent/session safety controls', () => {
 
   const enableHistory = async () => {
     callTool.mockResolvedValueOnce({
-      ageBand: '7-9',
-      historyEnabled: true,
-      parentAccessToken: 'kb_parent_widgettoken1234567890',
-      profileId: 'kb_profile_widget123',
+      structuredContent: {
+        ageBand: '7-9',
+        historyEnabled: true,
+        profileId: 'kb_profile_widget123',
+      },
+      _meta: { parentAccessToken: 'kb_parent_widgettoken1234567890' },
     });
     fireEvent.click(screen.getByRole('checkbox', { name: /save activity history/i }));
     await screen.findByText('History is enabled.');
@@ -93,6 +97,15 @@ describe('App parent/session safety controls', () => {
     expectSecretFreeWidgetState();
   });
 
+  it('moves keyboard focus into parent settings after unlock', async () => {
+    render(<App />);
+    await setPin();
+
+    expect(document.activeElement).toBe(
+      screen.getByRole('checkbox', { name: /save activity history/i }),
+    );
+  });
+
   it('requires explicit consent and exposes pending state while enabling history', async () => {
     let resolveCreate: ((value: unknown) => void) | undefined;
     callTool.mockImplementationOnce(
@@ -116,10 +129,12 @@ describe('App parent/session safety controls', () => {
     expect((checkbox as HTMLInputElement).disabled).toBe(true);
 
     resolveCreate?.({
-      ageBand: '7-9',
-      historyEnabled: true,
-      parentAccessToken: 'kb_parent_widgettoken1234567890',
-      profileId: 'kb_profile_widget123',
+      structuredContent: {
+        ageBand: '7-9',
+        historyEnabled: true,
+        profileId: 'kb_profile_widget123',
+      },
+      _meta: { parentAccessToken: 'kb_parent_widgettoken1234567890' },
     });
 
     await screen.findByText('History is enabled.');
@@ -179,9 +194,11 @@ describe('App parent/session safety controls', () => {
     await setPin();
     await enableHistory();
     callTool.mockResolvedValueOnce({
-      ageBand: '7-9',
-      historyEnabled: false,
-      profileId: 'kb_profile_widget123',
+      structuredContent: {
+        ageBand: '7-9',
+        historyEnabled: false,
+        profileId: 'kb_profile_widget123',
+      },
     });
 
     fireEvent.click(screen.getByRole('checkbox', { name: /save activity history/i }));
@@ -195,6 +212,22 @@ describe('App parent/session safety controls', () => {
     });
     expect(await screen.findByText('Saved history was purged.')).toBeTruthy();
     expect(screen.getByText('History: Local only')).toBeTruthy();
+  });
+
+  it('keeps consent enabled and announces an error when history purge fails', async () => {
+    render(<App />);
+    await setPin();
+    await enableHistory();
+    callTool.mockRejectedValueOnce(new Error('offline'));
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /save activity history/i }));
+
+    expect((await parentControls().findByRole('alert')).textContent).toContain(
+      'History could not be disabled',
+    );
+    expect(
+      (screen.getByRole('checkbox', { name: /save activity history/i }) as HTMLInputElement).checked,
+    ).toBe(true);
   });
 
   it('keeps the active profile when destructive deletion fails', async () => {
@@ -220,7 +253,9 @@ describe('App parent/session safety controls', () => {
     render(<App />);
     await setPin();
     await enableHistory();
-    callTool.mockResolvedValueOnce({ deleted: true, profileId: 'kb_profile_other123' });
+    callTool.mockResolvedValueOnce({
+      structuredContent: { deleted: true, profileId: 'kb_profile_other123' },
+    });
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete parent profile' }));
 
@@ -261,7 +296,7 @@ describe('App parent/session safety controls', () => {
         .disabled,
     ).toBe(true);
 
-    resolveDelete?.({ deleted: true, profileId: 'kb_profile_widget123' });
+    resolveDelete?.({ structuredContent: { deleted: true, profileId: 'kb_profile_widget123' } });
 
     expect(await screen.findByText('Parent profile deleted.')).toBeTruthy();
     expect(screen.getByText('Profile: local-default')).toBeTruthy();

@@ -13,12 +13,53 @@ import { parentProfileStore, registerTools, requestControlStore } from './tools.
 import type { Mode } from './types.js';
 import { createWidgetResourceMeta, widgetResourceUri } from './widgetMetadata.js';
 import { privacyPolicyHtml } from './privacyPolicy.js';
+import { createNetworkKey } from './requestControls.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(cors());
+
+app.use('/mcp', (req, res, next) => {
+  const networkIdentity = req.socket.remoteAddress ?? 'unknown';
+  const secret = mcpConfig.serviceAuthToken ?? mcpConfig.parentAuthSecret ?? 'kidbot-local-control';
+  const networkKey = createNetworkKey({ secret, networkIdentity });
+  void requestControlStore.acquire({
+    callerKey: networkKey,
+    networkKey,
+    cost: 1,
+    limits: {
+      ...mcpConfig.requestControlLimits,
+      callerRequestsPerMinute: Number.MAX_SAFE_INTEGER,
+      callerCostPerMinute: Number.MAX_SAFE_INTEGER,
+      callerConcurrency: Number.MAX_SAFE_INTEGER,
+    },
+    scope: 'admission',
+  }).then((lease) => {
+    if (!lease.allowed) {
+      res.status(429).json({
+        jsonrpc: '2.0',
+        error: { code: -32029, message: 'rate_limited', data: { retryAfterMs: lease.retryAfterMs } },
+        id: null,
+      });
+      return;
+    }
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      void lease.release().catch(() => {
+        // Lease expiry remains the fail-safe when cleanup fails.
+      });
+    };
+    res.once('finish', release);
+    res.once('close', release);
+    res.once('error', release);
+    next();
+  }).catch(next);
+});
+
 app.use(express.json({ limit: '1mb' }));
 
 const distDir = path.resolve(__dirname, '../../web-widget/dist');

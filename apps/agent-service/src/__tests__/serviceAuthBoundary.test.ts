@@ -477,6 +477,21 @@ describe('service auth boundary', () => {
     }
   });
 
+  it('rejects local fallback intent in production', async () => {
+    await withEnv(
+      {
+        NODE_ENV: 'production',
+        FALLBACK_WIDGET: '1',
+        KIDBOT_LOCAL_DEV: '1',
+        AGENT_SERVICE_TOKEN: undefined,
+        OPENAI_API_KEY: undefined,
+      },
+      async () => {
+        await expect(import('../index.js')).rejects.toThrow(/production.*fallback|fallback.*production/i);
+      },
+    );
+  });
+
   it('omits session audit references in local fallback posture', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     const sessionId = 'kb_session_local123';

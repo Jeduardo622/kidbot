@@ -20,7 +20,7 @@ Browser speech recognition may send microphone audio to the browser, operating-s
 
 ## Retention
 
-In production, Kidbot retains an explicitly enabled parent profile and its metadata-only session history for exactly 30 days from activity, subject to the configured history event limit. Production startup fails if a conflicting retention override is supplied. Development and test environments may use explicit shorter values. History does not include prompts, responses, PINs, tokens, or generated artifacts.
+In production, Kidbot retains an explicitly enabled parent profile and its metadata-only session history for exactly 30 days from activity, subject to the configured history event limit. Authorized profile updates, history recording, and viewing saved history count as activity and renew the 30-day window. Production startup fails if a conflicting retention override is supplied. Development and test environments may use explicit shorter values. History does not include prompts, responses, PINs, tokens, or generated artifacts.
 
 In production, generated story images are configured for exactly 24 hours of retention. Production startup fails if a conflicting image-retention override is supplied. Development and test environments may use explicit shorter values. Cleanup of local or Supabase image objects is best effort, and cached copies may remain outside Kidbot after the source object expires.
 

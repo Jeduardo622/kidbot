@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useState } from 'react';
+import { StrictMode, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ColoringBook } from './components/ColoringBook.js';
 import { ComicBoard } from './components/ComicBoard.js';
@@ -47,7 +47,7 @@ declare global {
     openai?: {
       callTool?: (name: string, input: unknown) => Promise<unknown>;
       setWidgetState?: (state: Record<string, unknown>) => void;
-      getWidgetState?: () => Record<string, unknown> | undefined;
+      widgetState?: Record<string, unknown>;
       requestDisplayMode?: (options: { mode: 'fullscreen' | 'windowed' }) => void;
     };
   }
@@ -57,7 +57,7 @@ const isTabKey = (value: unknown): value is TabKey =>
   typeof value === 'string' && tabs.some((tab) => tab.key === value);
 
 const readInitialState = (): PersistedWidgetState => {
-  const saved = window.openai?.getWidgetState?.();
+  const saved = window.openai?.widgetState;
   const savedSessionId = typeof saved?.sessionId === 'string' ? saved.sessionId : undefined;
   return {
     ageBand: isAgeBand(saved?.ageBand) ? saved.ageBand : '7-9',
@@ -84,7 +84,26 @@ interface ParentProfileDeleteResponse {
   profileId?: string;
 }
 
+interface ToolResultEnvelope {
+  structuredContent?: unknown;
+  _meta?: unknown;
+}
+
+const readRecord = (value: unknown): Record<string, unknown> | undefined =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+
+const readToolEnvelope = (value: unknown) => {
+  const envelope = readRecord(value) as ToolResultEnvelope | undefined;
+  return {
+    structuredContent: readRecord(envelope?.structuredContent),
+    meta: readRecord(envelope?._meta),
+  };
+};
+
 export const App = () => {
+  const historyConsentRef = useRef<HTMLInputElement>(null);
   const [sessionState, setSessionState] = useState<PersistedWidgetState>(() => readInitialState());
   const [parentCredentials, setParentCredentials] = useState<ParentCredentialState>({
     historyEnabled: false,
@@ -119,19 +138,27 @@ export const App = () => {
     });
   }, [activeTab, sessionState.ageBand, sessionState.sessionId]);
 
+  useEffect(() => {
+    if (parentCredentials.parentModeUnlocked) {
+      historyConsentRef.current?.focus();
+    }
+  }, [parentCredentials.parentModeUnlocked]);
+
   const createPersistentProfile = async (ageBand: AgeBand, sessionId: string) => {
-    const result = (await window.openai?.callTool?.('parent_profile_create', {
+    const envelope = readToolEnvelope(await window.openai?.callTool?.('parent_profile_create', {
       ageBand,
       historyEnabled: true,
       sessionId,
-    })) as ParentProfileCreateResponse | undefined;
-    if (!result?.parentAccessToken || !result.profileId || result.historyEnabled !== true) {
+    }));
+    const result = envelope.structuredContent as ParentProfileCreateResponse | undefined;
+    const parentAccessToken = envelope.meta?.parentAccessToken;
+    if (typeof parentAccessToken !== 'string' || !result?.profileId || result.historyEnabled !== true) {
       return undefined;
     }
     return {
       ageBand: isAgeBand(result.ageBand) ? result.ageBand : ageBand,
       historyEnabled: true,
-      parentAccessToken: result.parentAccessToken,
+      parentAccessToken,
       profileId: result.profileId,
     };
   };
@@ -176,17 +203,18 @@ export const App = () => {
     }
     setPersistenceStatus({ kind: 'pending', message: 'Updating parent profile…' });
     try {
-      const result = (await window.openai?.callTool?.('parent_profile_update', {
+      const { structuredContent: result } = readToolEnvelope(await window.openai?.callTool?.('parent_profile_update', {
         ageBand,
         parentAccessToken: parentCredentials.parentAccessToken,
         profileId: parentCredentials.profileId,
-      })) as ParentProfileUpdateResponse | undefined;
-      if (result?.profileId !== parentCredentials.profileId) {
+      }));
+      const updateResult = result as ParentProfileUpdateResponse | undefined;
+      if (updateResult?.profileId !== parentCredentials.profileId) {
         throw new Error('Unexpected profile update result.');
       }
       setSessionState((prev) => ({
         ...prev,
-        ageBand: isAgeBand(result.ageBand) ? result.ageBand : prev.ageBand,
+        ageBand: isAgeBand(updateResult.ageBand) ? updateResult.ageBand : prev.ageBand,
       }));
       setPersistenceStatus({ kind: 'success', message: 'Parent profile updated.' });
     } catch {
@@ -221,12 +249,13 @@ export const App = () => {
 
     setPersistenceStatus({ kind: 'pending', message: 'Purging saved history…' });
     try {
-      const result = (await window.openai?.callTool?.('parent_profile_update', {
+      const { structuredContent: result } = readToolEnvelope(await window.openai?.callTool?.('parent_profile_update', {
         historyEnabled: false,
         parentAccessToken: parentCredentials.parentAccessToken,
         profileId: parentCredentials.profileId,
-      })) as ParentProfileUpdateResponse | undefined;
-      if (result?.profileId !== parentCredentials.profileId || result.historyEnabled !== false) {
+      }));
+      const updateResult = result as ParentProfileUpdateResponse | undefined;
+      if (updateResult?.profileId !== parentCredentials.profileId || updateResult.historyEnabled !== false) {
         throw new Error('Unexpected profile update result.');
       }
       setParentCredentials((prev) => ({ ...prev, historyEnabled: false }));
@@ -248,11 +277,12 @@ export const App = () => {
     const profileIdToDelete = parentCredentials.profileId;
     setPersistenceStatus({ kind: 'pending', message: 'Deleting parent profile…' });
     try {
-      const result = (await window.openai?.callTool?.('parent_profile_delete', {
+      const { structuredContent: result } = readToolEnvelope(await window.openai?.callTool?.('parent_profile_delete', {
         parentAccessToken: parentCredentials.parentAccessToken,
         profileId: profileIdToDelete,
-      })) as ParentProfileDeleteResponse | undefined;
-      if (result?.deleted !== true || result.profileId !== profileIdToDelete) {
+      }));
+      const deleteResult = result as ParentProfileDeleteResponse | undefined;
+      if (deleteResult?.deleted !== true || deleteResult.profileId !== profileIdToDelete) {
         throw new Error('Unexpected profile delete result.');
       }
       setParentCredentials((prev) => ({
@@ -302,6 +332,7 @@ export const App = () => {
               <div className="history-consent">
                 <label htmlFor="history-consent">
                   <input
+                    ref={historyConsentRef}
                     aria-describedby="history-consent-description"
                     checked={parentCredentials.historyEnabled}
                     disabled={persistencePending}
@@ -315,7 +346,8 @@ export const App = () => {
                 </label>
                 <p id="history-consent-description">
                   With your consent, activity history is stored for up to 30 days. Leave this off
-                  to keep the session local only.
+                  to keep the session local only. Viewing saved history counts as activity and
+                  renews the 30-day window.
                 </p>
               </div>
               {parentCredentials.parentAccessToken &&

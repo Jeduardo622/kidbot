@@ -34,14 +34,14 @@ const toolIds = [
   'parent_history_list',
 ];
 const toolContractExpectations = {
-  voice_chat: { title: 'Voice Chat', readOnlyHint: false, destructiveHint: false, openWorldHint: true },
-  story_panels: { title: 'Story Panels', readOnlyHint: false, destructiveHint: false, openWorldHint: true },
-  coloring_outline: { title: 'Coloring Outline', readOnlyHint: false, destructiveHint: false, openWorldHint: true },
-  science_sim: { title: 'Science Simulation', readOnlyHint: false, destructiveHint: false, openWorldHint: true },
-  parent_profile_create: { title: 'Create Parent Profile', readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-  parent_profile_delete: { title: 'Delete Parent Profile', readOnlyHint: false, destructiveHint: true, openWorldHint: false },
-  parent_profile_update: { title: 'Update Parent Profile', readOnlyHint: false, destructiveHint: true, openWorldHint: false },
-  parent_history_list: { title: 'List Parent History', readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  voice_chat: { title: 'Voice Chat', readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
+  story_panels: { title: 'Story Panels', readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
+  coloring_outline: { title: 'Coloring Outline', readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
+  science_sim: { title: 'Science Simulation', readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
+  parent_profile_create: { title: 'Create Parent Profile', readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: false, appOnly: true },
+  parent_profile_delete: { title: 'Delete Parent Profile', readOnlyHint: false, destructiveHint: true, openWorldHint: false, idempotentHint: true, appOnly: true },
+  parent_profile_update: { title: 'Update Parent Profile', readOnlyHint: false, destructiveHint: true, openWorldHint: false, idempotentHint: false, appOnly: true },
+  parent_history_list: { title: 'List Parent History', readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: false, appOnly: true },
 };
 const port = randomInt(3200, 3899);
 const baseUrl = `http://localhost:${port}`;
@@ -178,7 +178,7 @@ before(async () => {
       MCP_REQUEST_CONTROL_STORE: 'redis',
       NODE_ENV: 'production',
       PARENT_PROFILE_STORE: 'disabled',
-      REDIS_URL: 'redis://127.0.0.1:1'
+      REDIS_URL: process.env.REDIS_URL ?? 'redis://127.0.0.1:1'
     },
     stdio: 'ignore'
   });
@@ -186,13 +186,16 @@ before(async () => {
   await Promise.all([waitForHealth(), waitForServer(productionBaseUrl)]);
 });
 
-after(() => {
-  if (serverProcess && !serverProcess.killed) {
-    serverProcess.kill();
-  }
-  if (productionServerProcess && !productionServerProcess.killed) {
-    productionServerProcess.kill();
-  }
+after(async () => {
+  const stop = async (child) => {
+    if (!child || child.exitCode !== null) return;
+    child.kill();
+    await Promise.race([
+      new Promise((resolve) => child.once('exit', resolve)),
+      delay(2_000),
+    ]);
+  };
+  await Promise.all([stop(serverProcess), stop(productionServerProcess)]);
 });
 
 test('/mcp resources/list returns the current widget resource metadata', async () => {
@@ -287,7 +290,8 @@ test('/mcp tools/list advertises exact Kidbot app contracts', async () => {
     assert.deepEqual(tool.securitySchemes, [{ type: 'noauth' }]);
     assert.deepEqual(tool._meta.securitySchemes, tool.securitySchemes);
     assert.equal(tool._meta.ui.resourceUri, 'ui://widget/kidbot-v2.html');
-    assert.deepEqual(tool._meta.ui.visibility, ['model', 'app']);
+    assert.deepEqual(tool._meta.ui.visibility, expected.appOnly ? ['app'] : ['model', 'app']);
+    assert.equal(tool._meta['openai/visibility'], expected.appOnly ? 'private' : undefined);
     assert.equal(tool._meta['ui/resourceUri'], 'ui://widget/kidbot-v2.html');
     assert.equal(tool._meta['openai/outputTemplate'], 'ui://widget/kidbot-v2.html');
     assert.equal(tool._meta['openai/widgetAccessible'], true);
@@ -295,7 +299,9 @@ test('/mcp tools/list advertises exact Kidbot app contracts', async () => {
       readOnlyHint: expected.readOnlyHint,
       destructiveHint: expected.destructiveHint,
       openWorldHint: expected.openWorldHint,
+      idempotentHint: expected.idempotentHint,
     });
+    assert.equal(JSON.stringify(tool.outputSchema).includes('parentAccessToken'), false);
   }
 });
 

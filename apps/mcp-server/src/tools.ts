@@ -59,7 +59,7 @@ const outputMeta = {
   'openai/widgetDescription': 'Kidbot — safe creative play: voice, comics, coloring, science.',
   'openai/widgetCSP': {
     connect_domains: [] as string[],
-    resource_domains: [] as string[]
+    resource_domains: mcpConfig.widgetResourceDomains
   }
 };
 
@@ -511,12 +511,14 @@ export const registerTools = (
     outputSchema: parentProfileCreateToolOutputSchema,
     resultSchema: parentProfileCreateToolOutputUnion,
     successSchema: parentProfileCreateSuccessSchema,
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: false },
+    appOnly: true,
   };
   registerKidbotTool(server, parentCreateTool.name, parentCreateTool, async (input: unknown, extra) =>
     runControlled(parentCreateTool.name, input, extra as ToolRequestExtra, networkIdentity, async () => {
       const parsed = parentProfileCreateSchema.parse(input);
       const profile = await parentProfileStore.createProfile(parsed);
+      const { parentAccessToken, ...publicProfile } = profile;
       return {
       content: [
         {
@@ -524,9 +526,10 @@ export const registerTools = (
           text: profile.historyEnabled ? 'Parent profile ready.' : 'Parent profile storage is disabled.'
         }
       ],
-      structuredContent: profile as unknown as Record<string, unknown>,
+      structuredContent: publicProfile,
       _meta: {
         ...outputMeta,
+        parentAccessToken,
         'openai/widgetAccessible': true
       }
       };
@@ -540,7 +543,8 @@ export const registerTools = (
     outputSchema: parentProfileUpdateToolOutputSchema,
     resultSchema: parentProfileUpdateToolOutputUnion,
     successSchema: parentProfileUpdateSuccessSchema,
-    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false, idempotentHint: false },
+    appOnly: true,
   };
   registerKidbotTool(server, parentUpdateTool.name, parentUpdateTool, async (input: unknown, extra) =>
     runControlled(parentUpdateTool.name, input, extra as ToolRequestExtra, networkIdentity, async () => {
@@ -569,7 +573,8 @@ export const registerTools = (
     outputSchema: parentProfileDeleteToolOutputSchema,
     resultSchema: parentProfileDeleteToolOutputUnion,
     successSchema: parentProfileDeleteSuccessSchema,
-    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false, idempotentHint: true },
+    appOnly: true,
   };
   registerKidbotTool(server, parentDeleteTool.name, parentDeleteTool, async (input: unknown, extra) =>
     runControlled(parentDeleteTool.name, input, extra as ToolRequestExtra, networkIdentity, async () => {
@@ -588,12 +593,13 @@ export const registerTools = (
   const parentHistoryTool = {
     name: 'parent_history_list',
     title: 'List Parent History',
-    description: 'List saved Kidbot session metadata for parent review',
+    description: 'List saved Kidbot session metadata for parent review; viewing history counts as activity and renews the 30-day retention window',
     inputSchema: parentHistoryListSchema,
     outputSchema: parentHistoryListToolOutputSchema,
     resultSchema: parentHistoryListToolOutputUnion,
     successSchema: parentHistoryListSuccessSchema,
-    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: false },
+    appOnly: true,
   };
   registerKidbotTool(server, parentHistoryTool.name, parentHistoryTool, async (input: unknown, extra) =>
     runControlled(parentHistoryTool.name, input, extra as ToolRequestExtra, networkIdentity, async () => {
@@ -622,7 +628,7 @@ export const registerTools = (
     outputSchema: voiceToolOutputSchema,
     resultSchema: voiceToolOutputUnion,
     successSchema: voiceSuccessSchema,
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
   };
   registerKidbotTool(server, voiceTool.name, voiceTool, async (input: unknown, extra) =>
     runControlled(voiceTool.name, input, extra as ToolRequestExtra, networkIdentity, async (signal) =>
@@ -653,7 +659,7 @@ export const registerTools = (
     outputSchema: storyPanelsToolOutputSchema,
     resultSchema: storyPanelsToolOutputUnion,
     successSchema: storyPanelsSuccessSchema,
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
   };
   registerKidbotTool(server, storyTool.name, storyTool, async (input: unknown, extra) =>
     runControlled(storyTool.name, input, extra as ToolRequestExtra, networkIdentity, async (signal) =>
@@ -684,7 +690,7 @@ export const registerTools = (
     outputSchema: coloringOutlineToolOutputSchema,
     resultSchema: coloringOutlineToolOutputUnion,
     successSchema: coloringOutlineSuccessSchema,
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
   };
   registerKidbotTool(server, coloringTool.name, coloringTool, async (input: unknown, extra) =>
     runControlled(coloringTool.name, input, extra as ToolRequestExtra, networkIdentity, async (signal) =>
@@ -711,7 +717,7 @@ export const registerTools = (
     outputSchema: scienceSimToolOutputSchema,
     resultSchema: scienceSimToolOutputUnion,
     successSchema: scienceSimSuccessSchema,
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
   };
   registerKidbotTool(server, scienceTool.name, scienceTool, async (input: unknown, extra) =>
     runControlled(scienceTool.name, input, extra as ToolRequestExtra, networkIdentity, async (signal) =>
