@@ -358,7 +358,7 @@ const providerFailureFallback = <T extends Record<string, unknown>>(
   if (!providerFailurePolicy.allowFallback) {
     throw error instanceof ProviderError
       ? error
-      : new ProviderUnavailableError(safeProviderErrorSummary(error));
+      : new ProviderUnavailableError();
   }
 
   // eslint-disable-next-line no-console

@@ -187,6 +187,14 @@ export const parseMcpServerConfig = (env: McpServerEnv = process.env): McpServer
     45_000,
   );
   const production = env.NODE_ENV === 'production';
+  const parentHistoryRetentionDays = parsePositiveInteger(
+    'PARENT_HISTORY_RETENTION_DAYS',
+    env.PARENT_HISTORY_RETENTION_DAYS,
+    30,
+  );
+  if (production && parentHistoryRetentionDays !== 30) {
+    throw new Error('PARENT_HISTORY_RETENTION_DAYS must be 30 in production.');
+  }
   const widgetDomain = production
     ? parseExactHttpsOrigin('KIDBOT_WIDGET_DOMAIN', env.KIDBOT_WIDGET_DOMAIN)
     : 'https://web-sandbox.oaiusercontent.com';
@@ -206,11 +214,7 @@ export const parseMcpServerConfig = (env: McpServerEnv = process.env): McpServer
     startupPosture,
     parentProfileStore,
     parentAuthSecret,
-    parentHistoryRetentionDays: parsePositiveInteger(
-      'PARENT_HISTORY_RETENTION_DAYS',
-      env.PARENT_HISTORY_RETENTION_DAYS,
-      30,
-    ),
+    parentHistoryRetentionDays,
     parentHistoryMaxEvents: parsePositiveInteger(
       'PARENT_HISTORY_MAX_EVENTS',
       env.PARENT_HISTORY_MAX_EVENTS,

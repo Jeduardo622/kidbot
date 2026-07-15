@@ -345,6 +345,21 @@ test('widget CSP uses sandbox defaults outside production', () => {
   assert.deepEqual(config.widgetResourceDomains, []);
 });
 
+test('production parent retention fails closed unless it is exactly 30 days', () => {
+  assert.throws(
+    () => parseMcpServerConfig({
+      ...productionWidgetEnv,
+      PARENT_HISTORY_RETENTION_DAYS: '7',
+    }),
+    /PARENT_HISTORY_RETENTION_DAYS must be 30 in production/i,
+  );
+
+  assert.equal(parseMcpServerConfig({
+    ...productionWidgetEnv,
+    PARENT_HISTORY_RETENTION_DAYS: '30',
+  }).parentHistoryRetentionDays, 30);
+});
+
 test('non-fallback mode without AGENT_SERVICE_TOKEN fails closed at mcp startup', async () => {
   const mcpPort = await getFreePort();
   const mcp = spawnProcess(mcpEntry, {
@@ -498,13 +513,13 @@ test('privacy route publishes the source-backed data and retention contract', as
     assert.equal(response.status, 200);
     assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
     for (const disclosure of [
-      /OpenAI/i,
-      /Railway/i,
-      /Supabase/i,
-      /browser speech/i,
-      /30 days/i,
-      /24 hours/i,
-      /delet/i,
+      /OpenAI processes prompts and generated outputs/i,
+      /Railway hosts the Kidbot services and Redis deployment/i,
+      /Supabase Storage stores generated story-panel images/i,
+      /Browser speech recognition may send microphone audio/i,
+      /In production, Kidbot retains[^.]*exactly 30 days/i,
+      /In production, generated story images[^.]*exactly 24 hours/i,
+      /deletion cannot recall data[^.]*OpenAI, Railway, Supabase/i,
       /github\.com\/Jeduardo622\/kidbot\/issues/i,
     ]) {
       assert.match(html, disclosure);
@@ -514,11 +529,24 @@ test('privacy route publishes the source-backed data and retention contract', as
     assert.match(diag, /href="\/privacy"/i);
 
     const privacyMarkdown = readFileSync(join(repositoryRoot, 'PRIVACY.md'), 'utf8');
-    assert.match(privacyMarkdown, /OpenAI/i);
-    assert.match(privacyMarkdown, /Railway/i);
-    assert.match(privacyMarkdown, /Supabase/i);
-    assert.match(privacyMarkdown, /30 days/i);
-    assert.match(privacyMarkdown, /24 hours/i);
+    const decodeHtml = (value) => value
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&rsquo;/g, '’');
+    const normalizeDisclosure = (value) => decodeHtml(value)
+      .replace(/<head>[\s\S]*?<\/head>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/^#{1,6}\s+/gm, '')
+      .replace(/^[-*]\s+/gm, '')
+      .replace(/\*\*/g, '')
+      .replace(/<([^>]+)>/g, '$1')
+      .replace(/\s+/g, ' ')
+      .replace(/\s+([.,;:!?])/g, '$1')
+      .trim();
+    assert.equal(normalizeDisclosure(html), normalizeDisclosure(privacyMarkdown));
 
     const readme = readFileSync(join(repositoryRoot, 'README.md'), 'utf8');
     const spec = readFileSync(join(repositoryRoot, 'EXECUTSPEC.md'), 'utf8');

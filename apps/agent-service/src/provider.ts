@@ -125,7 +125,6 @@ export const withProviderRetry = async <T>(
   { timeoutMs, retries }: ProviderRetryOptions,
   outerSignal?: AbortSignal,
 ): Promise<T> => {
-  let lastError: unknown;
   for (let attempt = 0; attempt <= retries; attempt += 1) {
     if (outerSignal?.aborted) {
       throw new ProviderUnavailableError('Provider request cancelled');
@@ -153,23 +152,43 @@ export const withProviderRetry = async <T>(
       if (error instanceof ProviderError) {
         throw error;
       }
-      lastError = error;
     } finally {
       clearTimeout(timer);
     }
   }
 
-  throw new ProviderUnavailableError(summarizeProviderError(lastError));
+  throw new ProviderUnavailableError();
 };
 
-const summarizeProviderError = (error: unknown): string => {
-  if (error instanceof Error) {
-    return `${error.name}: ${error.message}`.slice(0, 160);
+export interface SafeProviderErrorSummary {
+  classification: ProviderFallbackReason;
+  status?: number;
+}
+
+const readProviderStatus = (error: unknown): number | undefined => {
+  try {
+    if (typeof error !== 'object' || error === null || !('status' in error)) {
+      return undefined;
+    }
+    const status = Reflect.get(error, 'status');
+    return typeof status === 'number'
+      && Number.isInteger(status)
+      && status >= 400
+      && status <= 599
+      ? status
+      : undefined;
+  } catch {
+    return undefined;
   }
-  return 'Unknown provider error';
 };
 
-export const safeProviderErrorSummary = summarizeProviderError;
+export const safeProviderErrorSummary = (error: unknown): SafeProviderErrorSummary => {
+  const status = readProviderStatus(error);
+  return {
+    classification: classifyProviderError(error),
+    ...(status === undefined ? {} : { status }),
+  };
+};
 
 export const createOpenAIProvider = (apiKey: string | undefined): ModelProvider | undefined => {
   if (!apiKey?.trim()) {
@@ -243,9 +262,8 @@ export const createOpenAIProvider = (apiKey: string | undefined): ModelProvider 
           outerSignal,
         );
       } catch (error) {
-        throw error instanceof ProviderError
-          ? new ModerationFailureError(error.message)
-          : new ModerationFailureError();
+        void error;
+        throw new ModerationFailureError();
       }
 
       const result = response.results[0];

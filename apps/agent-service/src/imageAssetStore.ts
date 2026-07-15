@@ -20,6 +20,7 @@ export interface ImageAssetStorageConfig {
 type ImageAssetStorageEnv = Partial<
   Record<
     | 'KIDBOT_IMAGE_STORAGE_MODE'
+    | 'NODE_ENV'
     | 'KIDBOT_IMAGE_STORAGE_DIR'
     | 'KIDBOT_IMAGE_PUBLIC_BASE_URL'
     | 'KIDBOT_IMAGE_MAX_BYTES'
@@ -122,15 +123,21 @@ export const parseImageAssetStorageConfig = (
     (mode === 'supabase' && supabaseUrl && supabaseBucket
       ? `${supabaseUrl}/storage/v1/object/public/${supabaseBucket}`
       : '/generated-images');
+  const ttlSeconds = parsePositiveInteger(
+    'KIDBOT_IMAGE_TTL_SECONDS',
+    env.KIDBOT_IMAGE_TTL_SECONDS,
+    86_400,
+  );
+  if (env.NODE_ENV === 'production' && ttlSeconds !== 86_400) {
+    throw new Error('KIDBOT_IMAGE_TTL_SECONDS must be 86400 in production.');
+  }
 
   return {
     mode,
     directory: env.KIDBOT_IMAGE_STORAGE_DIR?.trim() || '.kidbot/generated-images',
     publicBaseUrl,
     maxBytes: parsePositiveInteger('KIDBOT_IMAGE_MAX_BYTES', env.KIDBOT_IMAGE_MAX_BYTES, 2_500_000),
-    ttlMs:
-      parsePositiveInteger('KIDBOT_IMAGE_TTL_SECONDS', env.KIDBOT_IMAGE_TTL_SECONDS, 86_400) *
-      1_000,
+    ttlMs: ttlSeconds * 1_000,
     ...(mode === 'supabase'
       ? {
           supabaseUrl,

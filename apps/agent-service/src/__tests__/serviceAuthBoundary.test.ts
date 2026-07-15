@@ -941,15 +941,20 @@ describe('service auth boundary', () => {
     );
   });
 
-  it('uses safe placeholder panels when story image generation fails under fallback policy', async () => {
+  it('uses safe placeholder panels without leaking provider or request data to warnings', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const serviceToken = 'sentinel-service-token';
+    const profileId = 'sentinel-profile-id';
+    const sessionId = 'kb_session_sentinel-session-id';
+    const prompt = 'sentinel private story prompt';
+    const imageUrl = 'https://private.example/image.png?token=sentinel-image-token';
     try {
       await withEnv(
         {
           NODE_ENV: 'test',
           FALLBACK_WIDGET: '0',
           KIDBOT_LOCAL_DEV: undefined,
-          AGENT_SERVICE_TOKEN: 'test-service-token',
+          AGENT_SERVICE_TOKEN: serviceToken,
           OPENAI_API_KEY: 'test-provider-key',
           PROVIDER_FAILURE_POLICY: 'fallback',
         },
@@ -978,7 +983,12 @@ describe('service auth boundary', () => {
                   });
                 },
                 async generateImage() {
-                  throw new actual.ProviderUnavailableError('image provider unavailable');
+                  throw Object.assign(
+                    new actual.ProviderUnavailableError(
+                      `${prompt} ${serviceToken} ${profileId} ${sessionId} ${imageUrl}`,
+                    ),
+                    { status: 503 },
+                  );
                 },
                 async moderateText() {
                   return { blocked: false };
@@ -992,14 +1002,16 @@ describe('service auth boundary', () => {
             const response = await fetch(`${baseUrl}/story-panels`, {
               method: 'POST',
               headers: {
-                Authorization: 'Bearer test-service-token',
+                Authorization: `Bearer ${serviceToken}`,
                 'x-kidbot-startup-posture': 'secured',
                 'Content-Type': 'application/json',
               },
               body: JSON.stringify({
-                theme: 'A bean grows',
+                theme: prompt,
                 panels: 2,
                 ageBand: '7-9',
+                profileId,
+                sessionId,
               }),
             });
             const body = (await response.json()) as {
@@ -1015,6 +1027,13 @@ describe('service auth boundary', () => {
             expect(body.fallbackReason).toBe('provider_unavailable');
             expect(body.panels).toHaveLength(2);
             expect(body.panels?.every((panel) => panel.imageUrl === null)).toBe(true);
+
+            const warnings = warnSpy.mock.calls.map((call) => String(call[0])).join('\n');
+            expect(warnings).toContain('provider_unavailable');
+            expect(warnings).toContain('503');
+            for (const sentinel of [serviceToken, profileId, sessionId, prompt, imageUrl]) {
+              expect(warnings).not.toContain(sentinel);
+            }
           });
         },
       );

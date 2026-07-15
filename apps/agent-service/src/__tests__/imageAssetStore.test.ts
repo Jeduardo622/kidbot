@@ -54,6 +54,22 @@ describe('image asset storage', () => {
     ).toThrow(/KIDBOT_IMAGE_TTL_SECONDS must be/i);
   });
 
+  it('fails closed when production image retention differs from 24 hours', () => {
+    expect(() =>
+      parseImageAssetStorageConfig({
+        NODE_ENV: 'production',
+        KIDBOT_IMAGE_TTL_SECONDS: '60',
+      }),
+    ).toThrow(/KIDBOT_IMAGE_TTL_SECONDS must be 86400 in production/i);
+
+    expect(
+      parseImageAssetStorageConfig({
+        NODE_ENV: 'production',
+        KIDBOT_IMAGE_TTL_SECONDS: '86400',
+      }).ttlMs,
+    ).toBe(86_400_000);
+  });
+
   it('parses Supabase storage config and requires server-only credentials', () => {
     const config = parseImageAssetStorageConfig({
       KIDBOT_IMAGE_STORAGE_MODE: 'supabase',
