@@ -58,24 +58,65 @@ const readRecord = (value: unknown): ToolResultRecord | undefined =>
 const isOptionalString = (value: unknown) => value === undefined || typeof value === 'string';
 const isStringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((item) => typeof item === 'string');
+const hasExactKeys = (value: ToolResultRecord, allowed: readonly string[]): boolean => {
+  const allowedKeys = new Set(allowed);
+  return Object.keys(value).every((key) => allowedKeys.has(key));
+};
 
-const isCommonResult = (value: ToolResultRecord): value is CommonToolResult =>
-  typeof value.blocked === 'boolean' &&
-  (value.degraded === undefined || value.degraded === true) &&
+const generationMetadataKeys = [
+  'source',
+  'providerFallback',
+  'fallbackReason',
+  'correlationId',
+  'message',
+] as const;
+
+const hasValidGenerationMetadata = (value: ToolResultRecord): boolean =>
+  (value.source === undefined ||
+    value.source === 'fixture' ||
+    value.source === 'stub' ||
+    value.source === 'local' ||
+    value.source === 'agent') &&
+  (value.providerFallback === undefined || typeof value.providerFallback === 'boolean') &&
+  isOptionalString(value.fallbackReason) &&
+  isOptionalString(value.correlationId) &&
   isOptionalString(value.message);
 
-const isFailureResult = (value: ToolResultRecord): boolean =>
-  (value.blocked === true && typeof value.message === 'string') ||
-  (value.blocked === false && value.degraded === true && typeof value.message === 'string');
+const isBlockedFailure = (value: ToolResultRecord): boolean =>
+  hasExactKeys(value, ['blocked', 'message']) &&
+  value.blocked === true &&
+  typeof value.message === 'string';
+
+const isDegradedFailure = (value: ToolResultRecord): boolean =>
+  hasExactKeys(value, ['blocked', 'degraded', 'message', 'fallbackReason', 'correlationId']) &&
+  value.blocked === false &&
+  value.degraded === true &&
+  typeof value.message === 'string' &&
+  isOptionalString(value.fallbackReason) &&
+  isOptionalString(value.correlationId);
+
+const isRequestControlFailure = (value: ToolResultRecord): boolean =>
+  hasExactKeys(value, ['error', 'code', 'retryAfter']) &&
+  value.error === true &&
+  typeof value.code === 'string' &&
+  requestControlCodes.has(value.code) &&
+  (value.retryAfter === undefined ||
+    (typeof value.retryAfter === 'number' &&
+      Number.isInteger(value.retryAfter) &&
+      value.retryAfter > 0));
+
+const isGenerationFailure = (value: ToolResultRecord): boolean =>
+  isBlockedFailure(value) || isDegradedFailure(value) || isRequestControlFailure(value);
 
 export const isVoiceResult: ResultValidator<VoiceResult> = (value): value is VoiceResult => {
-  if (!isCommonResult(value)) return false;
-  if (isFailureResult(value)) return true;
+  if (isGenerationFailure(value)) return true;
   return (
+    hasExactKeys(value, ['blocked', 'persona', 'text', 'ssml', ...generationMetadataKeys]) &&
     value.blocked === false &&
     (value.persona === 'robot' || value.persona === 'fairy' || value.persona === 'explorer') &&
     typeof value.text === 'string' &&
-    isOptionalString(value.ssml)
+    isOptionalString(value.ssml) &&
+    hasValidGenerationMetadata(value)
   );
 };
 
@@ -83,6 +124,7 @@ const isStoryPanel = (value: unknown): value is StoryPanel => {
   const panel = readRecord(value);
   return Boolean(
     panel &&
+      hasExactKeys(panel, ['title', 'caption', 'imagePrompt', 'imageUrl']) &&
       typeof panel.title === 'string' &&
       typeof panel.caption === 'string' &&
       typeof panel.imagePrompt === 'string' &&
@@ -91,45 +133,65 @@ const isStoryPanel = (value: unknown): value is StoryPanel => {
 };
 
 export const isStoryResult: ResultValidator<StoryResult> = (value): value is StoryResult => {
-  if (!isCommonResult(value)) return false;
-  if (isFailureResult(value)) return true;
+  if (isGenerationFailure(value)) return true;
   return (
+    hasExactKeys(value, ['blocked', 'theme', 'panels', ...generationMetadataKeys]) &&
     value.blocked === false &&
     Array.isArray(value.panels) &&
     value.panels.every(isStoryPanel) &&
-    isOptionalString(value.theme)
+    typeof value.theme === 'string' &&
+    hasValidGenerationMetadata(value)
   );
 };
 
 export const isColoringResult: ResultValidator<ColoringResult> = (value): value is ColoringResult => {
-  if (!isCommonResult(value)) return false;
-  if (isFailureResult(value)) return true;
-  return value.blocked === false && typeof value.svg === 'string';
+  if (isGenerationFailure(value)) return true;
+  return (
+    hasExactKeys(value, ['blocked', 'svg', ...generationMetadataKeys]) &&
+    value.blocked === false &&
+    typeof value.svg === 'string' &&
+    hasValidGenerationMetadata(value)
+  );
 };
 
 const isPrediction = (value: unknown): boolean => {
   const prediction = readRecord(value);
   return Boolean(
     prediction &&
+      hasExactKeys(prediction, ['question', 'choices', 'answerIndex']) &&
       typeof prediction.question === 'string' &&
       isStringArray(prediction.choices) &&
       Number.isInteger(prediction.answerIndex) &&
-      (prediction.answerIndex as number) >= 0,
+      (prediction.answerIndex as number) >= 0 &&
+      (prediction.answerIndex as number) < (prediction.choices as unknown[]).length,
   );
 };
 
 export const isScienceResult: ResultValidator<ScienceResult> = (value): value is ScienceResult => {
-  if (!isCommonResult(value)) return false;
-  if (isFailureResult(value)) return true;
+  if (isGenerationFailure(value)) return true;
   return (
+    hasExactKeys(value, [
+      'blocked',
+      'title',
+      'objective',
+      'materials',
+      'steps',
+      'prediction',
+      'explanation',
+      'supervision',
+      'topic',
+      ...generationMetadataKeys,
+    ]) &&
     value.blocked === false &&
     typeof value.title === 'string' &&
     typeof value.objective === 'string' &&
     isStringArray(value.materials) &&
     isStringArray(value.steps) &&
-    (value.prediction === undefined || isPrediction(value.prediction)) &&
-    isOptionalString(value.explanation) &&
-    isOptionalString(value.supervision)
+    isPrediction(value.prediction) &&
+    typeof value.explanation === 'string' &&
+    typeof value.supervision === 'string' &&
+    typeof value.topic === 'string' &&
+    hasValidGenerationMetadata(value)
   );
 };
 
@@ -180,6 +242,6 @@ export const readStructuredContent = <T extends ToolResultRecord>(
 export const isStaleParentCredentialFailure = (value: unknown): boolean => {
   const envelope = readToolEnvelope(value);
   if (!envelope.isError) return false;
-  const message = envelope.structuredContent.message;
-  return typeof message === 'string' && /expired|not found|unauthori[sz]ed|invalid (?:access )?token|access denied/i.test(message);
+  return envelope.structuredContent.error === true &&
+    envelope.structuredContent.code === 'invalid_parent_access';
 };

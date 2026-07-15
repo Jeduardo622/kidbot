@@ -39,9 +39,9 @@ const toolContractExpectations = {
   coloring_outline: { title: 'Coloring Outline', readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
   science_sim: { title: 'Science Simulation', readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
   parent_profile_create: { title: 'Create Parent Profile', readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: false, appOnly: true },
-  parent_profile_delete: { title: 'Delete Parent Profile', readOnlyHint: false, destructiveHint: true, openWorldHint: false, idempotentHint: true, appOnly: true },
-  parent_profile_update: { title: 'Update Parent Profile', readOnlyHint: false, destructiveHint: true, openWorldHint: false, idempotentHint: false, appOnly: true },
-  parent_history_list: { title: 'List Parent History', readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: false, appOnly: true },
+  parent_profile_delete: { title: 'Delete Parent Profile', readOnlyHint: false, destructiveHint: true, openWorldHint: false, idempotentHint: true, appOnly: true, invalidParentAccess: true },
+  parent_profile_update: { title: 'Update Parent Profile', readOnlyHint: false, destructiveHint: true, openWorldHint: false, idempotentHint: false, appOnly: true, invalidParentAccess: true },
+  parent_history_list: { title: 'List Parent History', readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: false, appOnly: true, invalidParentAccess: true },
 };
 const port = randomInt(3200, 3899);
 const baseUrl = `http://localhost:${port}`;
@@ -285,8 +285,17 @@ test('/mcp tools/list advertises exact Kidbot app contracts', async () => {
     assert.ok(tool, `missing ${toolId}`);
     assert.equal(tool.title, expected.title);
     assert.equal(tool.outputSchema?.type, 'object');
-    assert.equal(tool.outputSchema?.anyOf?.length, 4);
+    assert.equal(tool.outputSchema?.anyOf?.length, expected.invalidParentAccess ? 5 : 4);
     assert.equal(schemaValidator.getValidator(tool.outputSchema)({ blocked: false }).valid, false);
+    const outputValidator = schemaValidator.getValidator(tool.outputSchema);
+    assert.equal(
+      outputValidator({ error: true, code: 'invalid_parent_access' }).valid,
+      expected.invalidParentAccess === true,
+    );
+    assert.equal(
+      outputValidator({ error: true, code: 'invalid_parent_access', retryAfter: 1 }).valid,
+      false,
+    );
     assert.deepEqual(tool.securitySchemes, [{ type: 'noauth' }]);
     assert.deepEqual(tool._meta.securitySchemes, tool.securitySchemes);
     assert.equal(tool._meta.ui.resourceUri, 'ui://widget/kidbot-v2.html');

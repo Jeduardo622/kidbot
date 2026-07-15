@@ -23,6 +23,7 @@ describe('ComicBoard artwork rendering', () => {
   it('renders an accessible placeholder for a null imageUrl without dropping panel layout', async () => {
     callTool.mockResolvedValueOnce(hostResult({
       blocked: false,
+      theme: 'A brave turtle shares snacks',
       panels: [
         {
           title: 'Quiet Cave',
@@ -55,6 +56,7 @@ describe('ComicBoard artwork rendering', () => {
   it('renders a real imageUrl as an image with stable prompt-based alt text', async () => {
     callTool.mockResolvedValueOnce(hostResult({
       blocked: false,
+      theme: 'A brave turtle shares snacks',
       panels: [
         {
           title: 'New Friends',
@@ -77,6 +79,7 @@ describe('ComicBoard artwork rendering', () => {
   it('replaces artwork that fails to load with the accessible placeholder', async () => {
     callTool.mockResolvedValueOnce(hostResult({
       blocked: false,
+      theme: 'A brave turtle shares snacks',
       panels: [
         {
           title: 'Forest Friends',
@@ -132,6 +135,7 @@ describe('ComicBoard artwork rendering', () => {
   it('clears stale panels when a later response is blocked', async () => {
     callTool.mockResolvedValueOnce(hostResult({
       blocked: false,
+      theme: 'A brave turtle shares snacks',
       panels: [
         {
           title: 'Sunny Start',
@@ -164,6 +168,7 @@ describe('ComicBoard artwork rendering', () => {
   it('clears stale panels when a later response is degraded', async () => {
     callTool.mockResolvedValueOnce(hostResult({
       blocked: false,
+      theme: 'A brave turtle shares snacks',
       panels: [
         {
           title: 'Bright Path',

@@ -156,6 +156,7 @@ Base HEAD: `ae0f5aa101b2a2a08ea250c0c9eccd9a47a6cad6`. Scope remained inside the
 - Full web-widget suite: 9 files, 59 passed, 0 failed.
 - `pnpm run lint`: exit `0`.
 - `pnpm run typecheck`: exit `0`.
+
 - `pnpm run route-task -- --base origin/main --json`: exit `0`; classification `protected`; selected `pnpm run verify:local`; human review required.
 - Disposable Redis 7 container `kidbot-ui-hardener` was mapped to `redis://127.0.0.1:5778` for protected verification.
 - `pnpm run verify-change -- --base origin/main`: exit `0`; classification `protected`; status `passed`; human review `required`. The run included web-widget 59 passed, agent-service 81 passed, MCP workspace 49 passed, root harness 221 passed plus 1 Windows capability skip out of 222, MCP compatibility 12 passed, deterministic AI evaluation 17 cases at 100 with 22 unchanged metrics, provider configuration preflight, and secured-posture smoke.
@@ -201,3 +202,34 @@ Base HEAD before this wave: `28715ec783fed07459a5b11e87e76d34ceddf50a`. Route co
 ### Authoritative final-current-state evidence
 
 The verified implementation/evidence commit created after the checks above was `d72df37377bbcf737cee49d90c9c1e02db73d0ab`. At that committed state, `git rev-list --left-right --count HEAD...origin/main` returned `21 0`: 21 commits ahead and 0 behind. This paragraph is the single evidence-only amend requested after observing that commit; it does not claim the pre-amend object ID remains the amended commit's identity. No product or test content changed in the amend.
+
+## Final current-head parent error and strict-result contract wave
+
+Base HEAD before this wave: `56959446b7416c9d3b05fdaac45853c90d3cad44`. Fresh explicit-path routing classified the MCP contract/runtime, widget state/parser, tests, and this report as `protected`, selected `pnpm run verify:local`, and required human review. Scope remained limited to parent app-tool error envelopes, parent widget state transitions, generation result validation, contract fixtures, and this evidence report. No agent, PR, deployment, hosted system, production data, or secret-backed action was used.
+
+### RED evidence
+
+- Focused widget command: `pnpm --filter @kidbot/web-widget exec vitest --run --environment jsdom src/App.sessionState.test.tsx src/components/ToolResultEnvelope.test.tsx` exited `1`; 52 tests ran with 16 expected failures. Ten failures proved the four generation validators accepted extra/mixed success fields or rejected exact request-control branches. Six failures proved success-shaped `isError` envelopes could mutate create, age update, re-enable, disable, and delete state, and the old stale-credential detector did not recognize the required stable code.
+- Redis-backed actual MCP call command: `node --test --test-name-pattern "mcp strips parent token" apps/mcp-server/test/auth-startup-matrix.test.mjs` exited `1`; the invalid-token delete call had `isError: true` but no `structuredContent`, reproducing the SDK's generic text-only exception envelope.
+- After the first flat advertised-code implementation, MCP compatibility intentionally failed its new exact-schema assertion because parent update/delete/history still advertised four variants and permitted `retryAfter` on `invalid_parent_access`. The final contract advertises a distinct fifth exact branch only for those three tools.
+
+### Implementation and focused GREEN evidence
+
+- Parent update, delete, and history callbacks now translate only the store's exact invalid-access failure into `{ isError: true, structuredContent: { error: true, code: "invalid_parent_access" } }`; the public text is generic and neither bearer nor raw token is returned. Zod result unions and exact wire schemas share the same dedicated branch.
+- Parent create, age update, retained-profile re-enable, disable, and delete now reject `isError` before inspecting any success-shaped structured content or component-only metadata. Credentials are cleared only for the exact `invalid_parent_access` code. That action stays failed with consent off and no implicit create; the next explicit retry creates. A rejected bridge promise remains visible and retains the credential.
+- Voice, story, coloring, and science validators now accept only exact success, blocked, degraded, or request-control shapes. Science requires topic, steps, prediction, nonempty bounded choice selection, explanation, and supervision; nested prediction and story panel objects are strict.
+- Focused widget GREEN: 2 files, 54 passed, 0 failed.
+- Redis-backed actual MCP invalid-access GREEN: 1 passed, 0 failed; update, delete, and history all returned the exact structured code, validated against tools/list output schemas, and did not disclose either supplied bearer.
+- MCP compatibility: 12 passed, 0 failed. Parent update/delete/history advertise five variants with an exact no-`retryAfter` `invalid_parent_access` branch; every other tool advertises four and rejects that code.
+- Full Redis-backed auth/startup matrix: 24 passed, 0 failed, 0 skipped.
+- Full web-widget suite: 9 files, 88 passed, 0 failed.
+- `pnpm run lint`: exit `0`.
+- `pnpm run typecheck`: exit `0`.
+
+### Protected verifier and residual policy
+
+- Disposable Redis 7 container `kidbot-parent-error-contract` used its Docker-assigned localhost port; `redis-cli PING` returned `PONG` immediately before verification.
+- `REDIS_URL=<disposable localhost Redis> pnpm run verify-change -- --base 5695944`: exit `0`; classification `protected`; selected `pnpm run verify:local`; status `passed`; human review `required`.
+- The verifier included web-widget 88 passed; agent-service 81 passed; MCP workspace 49 passed with no Redis skips; root harness 221 passed plus 1 Windows capability skip out of 222; MCP compatibility 12 passed; deterministic AI evaluation 17 cases at 100 with 22 unchanged metrics and overall mean 100.00; provider configuration preflight; and secured-posture smoke.
+- The known non-fatal concurrent Vitest `WebSocket server error: Port is already in use` warning appeared; every suite completed with zero failures and the verifier exited `0`.
+- No external secret, production service, or live provider was used. The provider preflight reported `live: false`. Protected non-author human review remains required.

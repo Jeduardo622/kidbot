@@ -23,6 +23,7 @@ describe('ComicBoard stale-state handling', () => {
   it('clears previous panels when a later request fails', async () => {
     callTool.mockResolvedValueOnce(hostResult({
       blocked: false,
+      theme: 'A brave turtle shares snacks',
       panels: [
         {
           title: 'Panel One',

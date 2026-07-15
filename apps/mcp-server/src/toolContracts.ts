@@ -46,6 +46,13 @@ const requestControlFailureSchema = z
   })
   .strict();
 
+export const invalidParentAccessFailureSchema = z
+  .object({
+    error: z.literal(true),
+    code: z.literal('invalid_parent_access'),
+  })
+  .strict();
+
 export const commonFailureSchema = z.union([
   blockedFailureSchema,
   degradedFailureSchema,
@@ -143,8 +150,14 @@ export const storyPanelsToolOutputUnion = outputUnion(storyPanelsSuccessSchema);
 export const coloringOutlineToolOutputUnion = outputUnion(coloringOutlineSuccessSchema);
 export const scienceSimToolOutputUnion = outputUnion(scienceSimSuccessSchema);
 export const parentProfileCreateToolOutputUnion = outputUnion(parentProfileCreateSuccessSchema);
-export const parentProfileUpdateToolOutputUnion = outputUnion(parentProfileUpdateSuccessSchema);
-export const parentHistoryListToolOutputUnion = outputUnion(parentHistoryListSuccessSchema);
+const parentAccessOutputUnion = <Success extends z.ZodTypeAny>(successSchema: Success) =>
+  z.union([successSchema, commonFailureSchema, invalidParentAccessFailureSchema]);
+export const parentProfileUpdateToolOutputUnion = parentAccessOutputUnion(
+  parentProfileUpdateSuccessSchema,
+);
+export const parentHistoryListToolOutputUnion = parentAccessOutputUnion(
+  parentHistoryListSuccessSchema,
+);
 
 const advertisedFailureShape = {
   blocked: z.boolean().optional(),
@@ -157,14 +170,31 @@ const advertisedFailureShape = {
   retryAfter: z.number().int().positive().optional(),
 };
 
-const advertiseObjectUnion = <Shape extends z.ZodRawShape>(successShape: Shape) => {
+const parentAccessAdvertisedFailureShape = {
+  ...advertisedFailureShape,
+  code: z
+    .enum([
+      'rate_limited',
+      'concurrency_limited',
+      'request_timeout',
+      'invalid_parent_access',
+    ])
+    .optional(),
+};
+
+const advertiseObjectUnion = <Shape extends z.ZodRawShape>(
+  successShape: Shape,
+  allowInvalidParentAccess = false,
+) => {
   const optionalSuccessShape = Object.fromEntries(
     Object.entries(successShape).map(([key, schema]) => [key, schema.optional()]),
   ) as { [Key in keyof Shape]: z.ZodOptional<Shape[Key]> };
   return z
     .object({
       ...optionalSuccessShape,
-      ...advertisedFailureShape,
+      ...(allowInvalidParentAccess
+        ? parentAccessAdvertisedFailureShape
+        : advertisedFailureShape),
     })
     .strict();
 };
@@ -180,9 +210,11 @@ export const parentProfileCreateToolOutputSchema = advertiseObjectUnion(
 );
 export const parentProfileUpdateToolOutputSchema = advertiseObjectUnion(
   parentProfileUpdateSuccessSchema.shape,
+  true,
 );
 export const parentHistoryListToolOutputSchema = advertiseObjectUnion(
   parentHistoryListSuccessSchema.shape,
+  true,
 );
 
 type JsonSchema = {
@@ -228,6 +260,9 @@ const exactAdvertisedOutputSchema = (schema: JsonSchema, successSchema: z.AnyZod
   const successOverrides: Record<string, JsonSchema> = successKeys.includes('blocked')
     ? { blocked: { type: 'boolean', const: false } }
     : {};
+  const advertisesInvalidParentAccess = JSON.stringify(properties.code).includes(
+    'invalid_parent_access',
+  );
 
   return {
     $schema: schema.$schema,
@@ -247,7 +282,19 @@ const exactAdvertisedOutputSchema = (schema: JsonSchema, successSchema: z.AnyZod
       ),
       variant(['error', 'code', 'retryAfter'], ['error', 'code'], {
         error: { type: 'boolean', const: true },
+        code: {
+          type: 'string',
+          enum: ['rate_limited', 'concurrency_limited', 'request_timeout'],
+        },
       }),
+      ...(advertisesInvalidParentAccess
+        ? [
+            variant(['error', 'code'], ['error', 'code'], {
+              error: { type: 'boolean', const: true },
+              code: { type: 'string', const: 'invalid_parent_access' },
+            }),
+          ]
+        : []),
     ],
   };
 };

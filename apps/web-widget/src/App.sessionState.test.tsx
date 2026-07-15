@@ -208,6 +208,28 @@ describe('App parent/session safety controls', () => {
     expect(screen.getByText('History: Local only')).toBeTruthy();
   });
 
+  it('rejects a success-shaped isError create result without retaining credentials', async () => {
+    callTool.mockResolvedValueOnce({
+      isError: true,
+      structuredContent: {
+        ageBand: '7-9',
+        historyEnabled: true,
+        profileId: 'kb_profile_must_not_persist',
+      },
+      _meta: { parentAccessToken: 'kb_parent_must_not_persist1234567890' },
+    });
+    render(<App />);
+    await setPin();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /save activity history/i }));
+
+    expect((await parentControls().findByRole('alert')).textContent).toContain(
+      'History could not be enabled',
+    );
+    expect(screen.getByText('Profile: local-default')).toBeTruthy();
+    expect(screen.getByText('History: Local only')).toBeTruthy();
+  });
+
   it('purges saved history when consent is disabled', async () => {
     render(<App />);
     await setPin();
@@ -270,6 +292,61 @@ describe('App parent/session safety controls', () => {
     expect(screen.getByText('Profile: kb_profile_widget123')).toBeTruthy();
   });
 
+  it('rejects a success-shaped isError re-enable result and keeps the retained credential', async () => {
+    render(<App />);
+    await setPin();
+    await enableHistory();
+    callTool.mockResolvedValueOnce({
+      structuredContent: {
+        ageBand: '7-9',
+        historyEnabled: false,
+        profileId: 'kb_profile_widget123',
+      },
+    });
+    fireEvent.click(screen.getByRole('checkbox', { name: /save activity history/i }));
+    await screen.findByText('Saved history was purged.');
+
+    callTool.mockResolvedValueOnce({
+      isError: true,
+      structuredContent: {
+        ageBand: '7-9',
+        historyEnabled: true,
+        profileId: 'kb_profile_widget123',
+      },
+    });
+    fireEvent.click(screen.getByRole('checkbox', { name: /save activity history/i }));
+
+    expect((await parentControls().findByRole('alert')).textContent).toContain(
+      'History could not be enabled',
+    );
+    expect(screen.getByText('Profile: kb_profile_widget123')).toBeTruthy();
+    expect(screen.getByText('History: Local only')).toBeTruthy();
+  });
+
+  it('reports a rejected re-enable bridge promise without clearing the retained credential', async () => {
+    render(<App />);
+    await setPin();
+    await enableHistory();
+    callTool.mockResolvedValueOnce({
+      structuredContent: {
+        ageBand: '7-9',
+        historyEnabled: false,
+        profileId: 'kb_profile_widget123',
+      },
+    });
+    fireEvent.click(screen.getByRole('checkbox', { name: /save activity history/i }));
+    await screen.findByText('Saved history was purged.');
+
+    callTool.mockRejectedValueOnce(new Error('bridge unavailable'));
+    fireEvent.click(screen.getByRole('checkbox', { name: /save activity history/i }));
+
+    expect((await parentControls().findByRole('alert')).textContent).toContain(
+      'History could not be enabled',
+    );
+    expect(screen.getByText('Profile: kb_profile_widget123')).toBeTruthy();
+    expect(screen.getByText('History: Local only')).toBeTruthy();
+  });
+
   it('clears only an expired retained credential after re-enable fails and creates on the next retry', async () => {
     render(<App />);
     await setPin();
@@ -286,7 +363,7 @@ describe('App parent/session safety controls', () => {
 
     callTool.mockResolvedValueOnce({
       isError: true,
-      structuredContent: { blocked: true, message: 'Parent profile was not found.' },
+      structuredContent: { error: true, code: 'invalid_parent_access' },
     });
     fireEvent.click(screen.getByRole('checkbox', { name: /save activity history/i }));
 
@@ -341,11 +418,55 @@ describe('App parent/session safety controls', () => {
     }
   });
 
+  it('rejects a success-shaped isError age update without changing local state', async () => {
+    render(<App />);
+    await setPin();
+    await enableHistory();
+    callTool.mockResolvedValueOnce({
+      isError: true,
+      structuredContent: {
+        ageBand: '10-12',
+        historyEnabled: true,
+        profileId: 'kb_profile_widget123',
+      },
+    });
+
+    fireEvent.change(screen.getByLabelText('Locked age'), { target: { value: '10-12' } });
+
+    expect((await parentControls().findByRole('alert')).textContent).toContain(
+      'Profile age could not be updated.',
+    );
+    expect((screen.getByLabelText('Locked age') as HTMLSelectElement).value).toBe('7-9');
+  });
+
   it('keeps consent enabled and announces an error when history purge fails', async () => {
     render(<App />);
     await setPin();
     await enableHistory();
     callTool.mockRejectedValueOnce(new Error('offline'));
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /save activity history/i }));
+
+    expect((await parentControls().findByRole('alert')).textContent).toContain(
+      'History could not be disabled',
+    );
+    expect(
+      (screen.getByRole('checkbox', { name: /save activity history/i }) as HTMLInputElement).checked,
+    ).toBe(true);
+  });
+
+  it('rejects a success-shaped isError disable result and keeps consent enabled', async () => {
+    render(<App />);
+    await setPin();
+    await enableHistory();
+    callTool.mockResolvedValueOnce({
+      isError: true,
+      structuredContent: {
+        ageBand: '7-9',
+        historyEnabled: false,
+        profileId: 'kb_profile_widget123',
+      },
+    });
 
     fireEvent.click(screen.getByRole('checkbox', { name: /save activity history/i }));
 
@@ -394,6 +515,24 @@ describe('App parent/session safety controls', () => {
       (screen.getByRole('checkbox', { name: /save activity history/i }) as HTMLInputElement)
         .checked,
     ).toBe(true);
+  });
+
+  it('rejects a success-shaped isError delete result and keeps the active profile', async () => {
+    render(<App />);
+    await setPin();
+    await enableHistory();
+    callTool.mockResolvedValueOnce({
+      isError: true,
+      structuredContent: { deleted: true, profileId: 'kb_profile_widget123' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete parent profile' }));
+
+    expect((await parentControls().findByRole('alert')).textContent).toContain(
+      'Profile could not be deleted',
+    );
+    expect(screen.getByText('Profile: kb_profile_widget123')).toBeTruthy();
+    expect(screen.getByText('History: On')).toBeTruthy();
   });
 
   it('clears the active profile only after confirmed destructive deletion', async () => {

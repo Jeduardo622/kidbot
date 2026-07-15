@@ -4,6 +4,12 @@ import { ColoringBook } from './ColoringBook.js';
 import { ComicBoard } from './ComicBoard.js';
 import { ScienceLab } from './ScienceLab.js';
 import { VoiceBar } from './VoiceBar.js';
+import {
+  isColoringResult,
+  isScienceResult,
+  isStoryResult,
+  isVoiceResult,
+} from '../utils/toolResult.js';
 
 describe('ChatGPT tool-result envelopes', () => {
   const callTool = vi.fn();
@@ -43,6 +49,7 @@ describe('ChatGPT tool-result envelopes', () => {
     callTool.mockResolvedValueOnce({
       structuredContent: {
         blocked: false,
+        theme: 'Kindness',
         panels: [{ title: 'Envelope Panel', caption: 'Ready.', imagePrompt: 'sun', imageUrl: null }],
       },
     });
@@ -84,11 +91,89 @@ describe('ChatGPT tool-result envelopes', () => {
         objective: 'Observe envelopes.',
         materials: [],
         steps: [],
+        topic: 'Envelopes',
+        prediction: { question: 'What happens?', choices: ['A', 'B'], answerIndex: 0 },
+        explanation: 'Observe the result.',
+        supervision: 'Ask an adult to help.',
       },
     });
     render(<ScienceLab />);
     fireEvent.click(screen.getByRole('button', { name: 'Generate Experiment' }));
     expect(await screen.findByText('Envelope Experiment')).toBeTruthy();
+  });
+
+  it.each([
+    ['voice', isVoiceResult, { blocked: false, persona: 'robot', text: 'Hi', unexpected: 'render me' }],
+    ['story', isStoryResult, { blocked: false, theme: 'Kindness', panels: [], unexpected: [] }],
+    ['coloring', isColoringResult, { blocked: false, svg: '<svg />', unexpected: '<script />' }],
+    [
+      'science',
+      isScienceResult,
+      {
+        blocked: false,
+        title: 'Test',
+        objective: 'Observe.',
+        materials: [],
+        steps: [],
+        topic: 'Testing',
+        prediction: { question: 'Which?', choices: ['A'], answerIndex: 1 },
+        explanation: 'Because.',
+        supervision: 'Adult help.',
+      },
+    ],
+  ])('%s validator rejects values outside the exact advertised success shape', (_name, validate, value) => {
+    expect(validate(value)).toBe(false);
+  });
+
+  it.each([
+    ['voice', isVoiceResult, { blocked: true, message: 'Paused.', text: 'unexpected' }],
+    ['story', isStoryResult, { blocked: false, degraded: true, message: 'Unavailable.', panels: [] }],
+    ['coloring', isColoringResult, { error: true, code: 'request_timeout', svg: '<svg />' }],
+    ['science', isScienceResult, { blocked: false, title: 'Missing required science fields' }],
+  ])('%s validator rejects mixed or incomplete branches', (_name, validate, value) => {
+    expect(validate(value)).toBe(false);
+  });
+
+  it.each([isVoiceResult, isStoryResult, isColoringResult, isScienceResult])(
+    'generation validator accepts each exact blocked, degraded, and request-control branch',
+    (validate) => {
+      expect(validate({ blocked: true, message: 'Paused.' })).toBe(true);
+      expect(validate({ blocked: false, degraded: true, message: 'Unavailable.' })).toBe(true);
+      expect(validate({ error: true, code: 'request_timeout' })).toBe(true);
+    },
+  );
+
+  it('ScienceLab requires every advertised renderable field and a bounded answerIndex', () => {
+    const validScience = {
+      blocked: false,
+      title: 'Test',
+      objective: 'Observe.',
+      materials: ['Cup'],
+      steps: ['Look'],
+      topic: 'Testing',
+      prediction: { question: 'Which?', choices: ['A', 'B'], answerIndex: 1 },
+      explanation: 'Because.',
+      supervision: 'Adult help.',
+    };
+    expect(isScienceResult(validScience)).toBe(true);
+    for (const field of [
+      'title',
+      'objective',
+      'materials',
+      'steps',
+      'topic',
+      'prediction',
+      'explanation',
+      'supervision',
+    ]) {
+      const incomplete = { ...validScience } as Record<string, unknown>;
+      delete incomplete[field];
+      expect(isScienceResult(incomplete), field).toBe(false);
+    }
+    expect(isScienceResult({
+      ...validScience,
+      prediction: { ...validScience.prediction, choices: ['A'], answerIndex: 1 },
+    })).toBe(false);
   });
 
   it('rejects a malformed envelope as an error instead of treating it as tool content', async () => {

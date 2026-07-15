@@ -138,6 +138,7 @@ export const App = () => {
       historyEnabled: true,
       sessionId,
     }));
+    if (envelope.isError) throw new Error('Parent profile creation failed.');
     const result = envelope.structuredContent as ParentProfileCreateResponse | undefined;
     const parentAccessToken = envelope.meta?.parentAccessToken;
     if (typeof parentAccessToken !== 'string' || !result?.profileId || result.historyEnabled !== true) {
@@ -192,11 +193,13 @@ export const App = () => {
     setPinStatus(undefined);
     setPersistenceStatus({ kind: 'pending', message: 'Updating parent profile…' });
     try {
-      const { structuredContent: result } = readToolEnvelope(await window.openai?.callTool?.('parent_profile_update', {
+      const envelope = readToolEnvelope(await window.openai?.callTool?.('parent_profile_update', {
         ageBand,
         parentAccessToken: parentCredentials.parentAccessToken,
         profileId: parentCredentials.profileId,
       }));
+      if (envelope.isError) throw new Error('Parent profile update failed.');
+      const { structuredContent: result } = envelope;
       const updateResult = result as ParentProfileUpdateResponse | undefined;
       if (updateResult?.profileId !== parentCredentials.profileId) {
         throw new Error('Unexpected profile update result.');
@@ -236,7 +239,9 @@ export const App = () => {
             }));
             throw new Error('Retained parent credential is no longer valid.');
           }
-          const { structuredContent: result } = readToolEnvelope(rawResult);
+          const envelope = readToolEnvelope(rawResult);
+          if (envelope.isError) throw new Error('Parent profile update failed.');
+          const { structuredContent: result } = envelope;
           const updateResult = result as ParentProfileUpdateResponse;
           if (
             updateResult.profileId !== parentCredentials.profileId ||
@@ -268,11 +273,13 @@ export const App = () => {
 
     setPersistenceStatus({ kind: 'pending', message: 'Purging saved history…' });
     try {
-      const { structuredContent: result } = readToolEnvelope(await window.openai?.callTool?.('parent_profile_update', {
+      const envelope = readToolEnvelope(await window.openai?.callTool?.('parent_profile_update', {
         historyEnabled: false,
         parentAccessToken: parentCredentials.parentAccessToken,
         profileId: parentCredentials.profileId,
       }));
+      if (envelope.isError) throw new Error('Parent profile update failed.');
+      const { structuredContent: result } = envelope;
       const updateResult = result as ParentProfileUpdateResponse | undefined;
       if (updateResult?.profileId !== parentCredentials.profileId || updateResult.historyEnabled !== false) {
         throw new Error('Unexpected profile update result.');
@@ -297,10 +304,12 @@ export const App = () => {
     setPinStatus(undefined);
     setPersistenceStatus({ kind: 'pending', message: 'Deleting parent profile…' });
     try {
-      const { structuredContent: result } = readToolEnvelope(await window.openai?.callTool?.('parent_profile_delete', {
+      const envelope = readToolEnvelope(await window.openai?.callTool?.('parent_profile_delete', {
         parentAccessToken: parentCredentials.parentAccessToken,
         profileId: profileIdToDelete,
       }));
+      if (envelope.isError) throw new Error('Parent profile deletion failed.');
+      const { structuredContent: result } = envelope;
       const deleteResult = result as ParentProfileDeleteResponse | undefined;
       if (deleteResult?.deleted !== true || deleteResult.profileId !== profileIdToDelete) {
         throw new Error('Unexpected profile delete result.');

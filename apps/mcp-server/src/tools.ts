@@ -28,6 +28,7 @@ import {
   coloringOutlineToolOutputSchema,
   coloringOutlineToolOutputUnion,
   coloringOutlineSuccessSchema,
+  invalidParentAccessFailureSchema,
   parentHistoryListToolOutputSchema,
   parentHistoryListToolOutputUnion,
   parentHistoryListSuccessSchema,
@@ -75,12 +76,18 @@ const parentProfileDeleteFailureSchema = z.object({
 const parentProfileDeleteToolOutputUnion = z.union([
   parentProfileDeleteSuccessSchema,
   parentProfileDeleteFailureSchema,
+  invalidParentAccessFailureSchema,
 ]);
 const parentProfileDeleteToolOutputSchema = z.object({
   deleted: z.literal(true).optional(),
   profileId: z.string().optional(),
   error: z.literal(true).optional(),
-  code: z.enum(['rate_limited', 'concurrency_limited', 'request_timeout']).optional(),
+  code: z.enum([
+    'rate_limited',
+    'concurrency_limited',
+    'request_timeout',
+    'invalid_parent_access',
+  ]).optional(),
   retryAfter: z.number().int().positive().optional(),
 }).strict();
 
@@ -212,6 +219,31 @@ const controlErrorResponse = (
     'openai/widgetAccessible': true,
   },
 });
+
+const invalidParentAccessResponse = (): CallToolResult => ({
+  isError: true,
+  content: [{
+    type: 'text',
+    text: 'Parent access is no longer valid.',
+  }],
+  structuredContent: {
+    error: true,
+    code: 'invalid_parent_access',
+  },
+});
+
+const runParentAccessOperation = async (
+  operation: () => Promise<CallToolResult>,
+): Promise<CallToolResult> => {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Invalid parent access token.') {
+      return invalidParentAccessResponse();
+    }
+    throw error;
+  }
+};
 
 const isConcurrencyReason = (reason: RequestControlRejectionReason) =>
   reason === 'caller_concurrency'
@@ -547,7 +579,8 @@ export const registerTools = (
     appOnly: true,
   };
   registerKidbotTool(server, parentUpdateTool.name, parentUpdateTool, async (input: unknown, extra) =>
-    runControlled(parentUpdateTool.name, input, extra as ToolRequestExtra, networkIdentity, async () => {
+    runControlled(parentUpdateTool.name, input, extra as ToolRequestExtra, networkIdentity, async () =>
+      runParentAccessOperation(async () => {
       const parsed = parentProfileUpdateSchema.parse(input);
       const profile = await parentProfileStore.updateProfile(parsed);
       return {
@@ -563,7 +596,7 @@ export const registerTools = (
         'openai/widgetAccessible': true
       }
       };
-    }));
+      })));
 
   const parentDeleteTool = {
     name: 'parent_profile_delete',
@@ -577,7 +610,8 @@ export const registerTools = (
     appOnly: true,
   };
   registerKidbotTool(server, parentDeleteTool.name, parentDeleteTool, async (input: unknown, extra) =>
-    runControlled(parentDeleteTool.name, input, extra as ToolRequestExtra, networkIdentity, async () => {
+    runControlled(parentDeleteTool.name, input, extra as ToolRequestExtra, networkIdentity, async () =>
+      runParentAccessOperation(async () => {
       const parsed = parentProfileDeleteSchema.parse(input);
       const result = await parentProfileStore.deleteProfile(parsed);
       return {
@@ -588,7 +622,7 @@ export const registerTools = (
           'openai/widgetAccessible': true
         }
       };
-    }));
+      })));
 
   const parentHistoryTool = {
     name: 'parent_history_list',
@@ -602,7 +636,8 @@ export const registerTools = (
     appOnly: true,
   };
   registerKidbotTool(server, parentHistoryTool.name, parentHistoryTool, async (input: unknown, extra) =>
-    runControlled(parentHistoryTool.name, input, extra as ToolRequestExtra, networkIdentity, async () => {
+    runControlled(parentHistoryTool.name, input, extra as ToolRequestExtra, networkIdentity, async () =>
+      runParentAccessOperation(async () => {
       const parsed = parentHistoryListSchema.parse(input);
       const events = await parentProfileStore.listHistory(parsed);
       return {
@@ -618,7 +653,7 @@ export const registerTools = (
         'openai/widgetAccessible': true
       }
       };
-    }));
+      })));
 
   const voiceTool = {
     name: 'voice_chat',

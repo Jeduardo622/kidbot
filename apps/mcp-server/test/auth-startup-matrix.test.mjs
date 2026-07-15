@@ -1332,6 +1332,31 @@ test('mcp strips parent token and saves metadata history with valid parent auth'
     const wrongTokenHistoryJson = parseMcpResponse(wrongTokenHistoryResponse.body);
     assert.equal(wrongTokenHistoryJson.result.structuredContent.events.length, 0);
 
+    const foreignUpdateResponse = await callMcp(mcpBaseUrl, {
+      jsonrpc: '2.0',
+      id: 1101,
+      method: 'tools/call',
+      params: {
+        name: 'parent_profile_update',
+        arguments: {
+          profileId: profile.profileId,
+          parentAccessToken: otherProfile.parentAccessToken,
+          historyEnabled: false,
+        },
+      },
+    });
+    const foreignUpdateJson = parseMcpResponse(foreignUpdateResponse.body);
+    assert.equal(foreignUpdateJson.result.isError, true);
+    assert.deepEqual(foreignUpdateJson.result.structuredContent, {
+      error: true,
+      code: 'invalid_parent_access',
+    });
+    assert.equal(foreignUpdateResponse.body.includes(otherProfile.parentAccessToken), false);
+    assertMatchesAdvertisedOutput(
+      await getToolDescriptor(mcpBaseUrl, 'parent_profile_update'),
+      foreignUpdateJson.result.structuredContent,
+    );
+
     const foreignDeleteResponse = await callMcp(mcpBaseUrl, {
       jsonrpc: '2.0',
       id: 111,
@@ -1344,7 +1369,17 @@ test('mcp strips parent token and saves metadata history with valid parent auth'
         },
       },
     });
-    assert.match(foreignDeleteResponse.body, /invalid parent access token/i);
+    const foreignDeleteJson = parseMcpResponse(foreignDeleteResponse.body);
+    assert.equal(foreignDeleteJson.result.isError, true);
+    assert.deepEqual(foreignDeleteJson.result.structuredContent, {
+      error: true,
+      code: 'invalid_parent_access',
+    });
+    assert.equal(foreignDeleteResponse.body.includes(otherProfile.parentAccessToken), false);
+    assertMatchesAdvertisedOutput(
+      await getToolDescriptor(mcpBaseUrl, 'parent_profile_delete'),
+      foreignDeleteJson.result.structuredContent,
+    );
 
     const deleteResponse = await callMcp(mcpBaseUrl, {
       jsonrpc: '2.0',
@@ -1375,7 +1410,17 @@ test('mcp strips parent token and saves metadata history with valid parent auth'
         },
       },
     });
-    assert.match(deletedTokenHistoryResponse.body, /invalid parent access token/i);
+    const deletedTokenHistoryJson = parseMcpResponse(deletedTokenHistoryResponse.body);
+    assert.equal(deletedTokenHistoryJson.result.isError, true);
+    assert.deepEqual(deletedTokenHistoryJson.result.structuredContent, {
+      error: true,
+      code: 'invalid_parent_access',
+    });
+    assert.equal(deletedTokenHistoryResponse.body.includes(profile.parentAccessToken), false);
+    assertMatchesAdvertisedOutput(
+      await getToolDescriptor(mcpBaseUrl, 'parent_history_list'),
+      deletedTokenHistoryJson.result.structuredContent,
+    );
   } finally {
     stopProcess(mcp);
     await closeServer(fakeAgent);
