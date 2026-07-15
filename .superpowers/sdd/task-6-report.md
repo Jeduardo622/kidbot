@@ -140,3 +140,31 @@ Runtime: bundled Node `v24.14.0`; pnpm `11.7.0`. Disposable Redis container `kid
 - Focused agent auth-boundary suite: `pnpm --filter @kidbot/agent-service exec vitest --run src/__tests__/serviceAuthBoundary.test.ts` — 1 file passed; 20 tests passed, 0 failed.
 - Required package builds before the focused checks: `@kidbot/agent-service` and `@kidbot/mcp-server` both exited `0`.
 - `git diff --check`: exit `0`; only PowerShell/Git CRLF conversion warnings were emitted.
+
+## UI-hardener rejection fix wave
+
+Base HEAD: `ae0f5aa101b2a2a08ea250c0c9eccd9a47a6cad6`. Scope remained inside the web widget, shared widget utilities, widget tests, styles, and this evidence report. No agent, PR, deployment, hosted system, or secret-backed action was used.
+
+### RED evidence
+
+- `pnpm --filter @kidbot/web-widget exec vitest --run --environment jsdom src/App.sessionState.test.tsx src/components/ToolResultEnvelope.test.tsx`: exit `1`; 13 expected failures. The failures reproduced missing host-envelope parsing in all four tool widgets, retained-profile re-enable creating again, failed age updates remaining visible, missing lock-to-PIN focus and PIN live-region semantics, absent active-nav state, and absent narrow-width sizing rules.
+- The first full widget run after production envelope parsing exited `1` with 14 legacy fixture failures because older VoiceBar and ComicBoard tests still returned direct tool content. Those fixtures were converted to current host-realistic `{ structuredContent }` envelopes before the accepted full-suite run.
+
+### GREEN and verification evidence
+
+- Focused App + envelope regressions: 2 files, 25 passed, 0 failed.
+- Full web-widget suite: 9 files, 59 passed, 0 failed.
+- `pnpm run lint`: exit `0`.
+- `pnpm run typecheck`: exit `0`.
+- `pnpm run route-task -- --base origin/main --json`: exit `0`; classification `protected`; selected `pnpm run verify:local`; human review required.
+- Disposable Redis 7 container `kidbot-ui-hardener` was mapped to `redis://127.0.0.1:5778` for protected verification.
+- `pnpm run verify-change -- --base origin/main`: exit `0`; classification `protected`; status `passed`; human review `required`. The run included web-widget 59 passed, agent-service 81 passed, MCP workspace 49 passed, root harness 221 passed plus 1 Windows capability skip out of 222, MCP compatibility 12 passed, deterministic AI evaluation 17 cases at 100 with 22 unchanged metrics, provider configuration preflight, and secured-posture smoke.
+- `git diff --check`: exit `0`; only Git CRLF conversion warnings were emitted.
+
+### Result and residual policy
+
+- VoiceBar, ComicBoard, ColoringBook, and ScienceLab validate and unwrap only object-valued `.structuredContent`; malformed envelopes fail closed through existing visible error handling.
+- The parent create bearer is still read only from component-visible `_meta`. Host-persisted `widgetState` remains limited to `ageBand`, `sessionId`, and `tab`.
+- Re-enabling a retained profile performs authenticated `parent_profile_update { historyEnabled: true }`; failed persisted age changes leave both visible and host-persisted age unchanged.
+- Locking parent controls focuses the PIN input. PIN failures use assertive alerts; unlock success uses a polite status. Active nav uses `aria-pressed`; global border-box and narrow-width containment rules cover mobile overflow.
+- The protected verifier emitted the known non-fatal concurrent Vitest `WebSocket server error: Port is already in use`; every suite completed with zero failures and the verifier exited `0`. Protected non-author human review remains required.

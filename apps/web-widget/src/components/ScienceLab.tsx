@@ -7,8 +7,9 @@ import {
   unavailableMessageFromError,
 } from '../utils/degradation.js';
 import { defaultSessionContext, type SessionContext } from '../utils/sessionContext.js';
+import { readStructuredContent, type ToolResultRecord } from '../utils/toolResult.js';
 
-interface ScienceResponse {
+interface ScienceResponse extends ToolResultRecord {
   blocked: boolean;
   degraded?: boolean;
   message?: string;
@@ -51,13 +52,10 @@ export const ScienceLab = ({ sessionContext = defaultSessionContext }: ScienceLa
     setShowExplanation(false);
     setSelectedChoice(undefined);
     try {
-      const result = (await window.openai?.callTool?.('science_sim', {
+      const result = readStructuredContent<ScienceResponse>(await window.openai?.callTool?.('science_sim', {
         ...sessionContext,
         topic,
-      })) as ScienceResponse | undefined;
-      if (!result) {
-        throw new Error('Widget bridge unavailable.');
-      }
+      }));
       const unavailableMessage = degradedMessage(result);
       if (unavailableMessage) {
         setUnavailable(unavailableMessage);

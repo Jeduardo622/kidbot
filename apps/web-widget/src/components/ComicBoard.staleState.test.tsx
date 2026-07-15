@@ -2,6 +2,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ComicBoard } from './ComicBoard.js';
 
+const hostResult = (structuredContent: Record<string, unknown>) => ({ structuredContent });
+
 describe('ComicBoard stale-state handling', () => {
   const callTool = vi.fn();
 
@@ -19,7 +21,7 @@ describe('ComicBoard stale-state handling', () => {
   });
 
   it('clears previous panels when a later request fails', async () => {
-    callTool.mockResolvedValueOnce({
+    callTool.mockResolvedValueOnce(hostResult({
       blocked: false,
       panels: [
         {
@@ -29,7 +31,7 @@ describe('ComicBoard stale-state handling', () => {
           imageUrl: null,
         },
       ],
-    });
+    }));
     callTool.mockRejectedValueOnce(new Error('Unauthorized'));
 
     render(<ComicBoard />);
@@ -48,12 +50,12 @@ describe('ComicBoard stale-state handling', () => {
   });
 
   it('shows provider degradation without rendering it as a story safety pause', async () => {
-    callTool.mockResolvedValueOnce({
+    callTool.mockResolvedValueOnce(hostResult({
       blocked: false,
       degraded: true,
       message:
         'Kidbot is having trouble reaching its idea engine right now. Please try again in a moment.',
-    });
+    }));
 
     render(<ComicBoard />);
 

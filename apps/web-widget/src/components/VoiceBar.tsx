@@ -7,6 +7,7 @@ import {
   unavailableMessageFromError,
 } from '../utils/degradation.js';
 import { defaultSessionContext, type SessionContext } from '../utils/sessionContext.js';
+import { readStructuredContent, type ToolResultRecord } from '../utils/toolResult.js';
 import {
   createVoiceCapture,
   isVoiceCaptureAvailable,
@@ -26,7 +27,7 @@ const permissionErrorPattern = /not-allowed|permission|service-not-allowed/i;
 const voiceCaptureErrorMessage = (message: string): string =>
   permissionErrorPattern.test(message) ? permissionBlockedMessage : retryVoiceInputMessage;
 
-interface VoiceResult {
+interface VoiceResult extends ToolResultRecord {
   blocked: boolean;
   degraded?: boolean;
   message?: string;
@@ -147,14 +148,11 @@ export const VoiceBar = ({ sessionContext = defaultSessionContext }: VoiceBarPro
     setUnavailable(undefined);
     setResponse(undefined);
     try {
-      const result = (await window.openai?.callTool?.('voice_chat', {
+      const result = readStructuredContent<VoiceResult>(await window.openai?.callTool?.('voice_chat', {
         ...sessionContext,
         text,
         persona,
-      })) as VoiceResult | undefined;
-      if (!result) {
-        throw new Error('Widget bridge unavailable.');
-      }
+      }));
       const unavailableMessage = degradedMessage(result);
       if (unavailableMessage) {
         setUnavailable(unavailableMessage);

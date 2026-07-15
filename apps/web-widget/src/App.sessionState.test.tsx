@@ -153,7 +153,26 @@ describe('App parent/session safety controls', () => {
     const lockButton = screen.getByRole('button', { name: 'Lock Parent Controls' });
     expect((lockButton as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(lockButton);
-    expect(screen.getByLabelText('Parent PIN')).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByLabelText('Parent PIN'));
+  });
+
+  it('announces PIN failures assertively and unlock success politely', async () => {
+    render(<App />);
+
+    fireEvent.change(screen.getByLabelText('Create parent PIN'), { target: { value: '12' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Set Parent PIN' }));
+    expect(screen.getByRole('alert').textContent).toContain('Enter a 4-digit PIN.');
+
+    fireEvent.change(screen.getByLabelText('Create parent PIN'), { target: { value: '1234' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Set Parent PIN' }));
+    expect((await parentControls().findByRole('status')).textContent).toContain(
+      'Parent controls unlocked.',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Lock Parent Controls' }));
+    fireEvent.change(screen.getByLabelText('Parent PIN'), { target: { value: '9999' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Unlock Parent Controls' }));
+    expect(screen.getByRole('alert').textContent).toContain('PIN did not match.');
   });
 
   it('associates consent and destructive controls with their explanatory copy', async () => {
@@ -212,6 +231,62 @@ describe('App parent/session safety controls', () => {
     });
     expect(await screen.findByText('Saved history was purged.')).toBeTruthy();
     expect(screen.getByText('History: Local only')).toBeTruthy();
+  });
+
+  it('re-enables history by updating the retained profile instead of creating another one', async () => {
+    render(<App />);
+    await setPin();
+    await enableHistory();
+    callTool.mockResolvedValueOnce({
+      structuredContent: {
+        ageBand: '7-9',
+        historyEnabled: false,
+        profileId: 'kb_profile_widget123',
+      },
+    });
+    fireEvent.click(screen.getByRole('checkbox', { name: /save activity history/i }));
+    await screen.findByText('Saved history was purged.');
+
+    callTool.mockResolvedValueOnce({
+      structuredContent: {
+        ageBand: '7-9',
+        historyEnabled: true,
+        profileId: 'kb_profile_widget123',
+      },
+    });
+    fireEvent.click(screen.getByRole('checkbox', { name: /save activity history/i }));
+    await screen.findByText('History is enabled.');
+
+    expect(callTool.mock.calls.map(([name]) => name)).toEqual([
+      'parent_profile_create',
+      'parent_profile_update',
+      'parent_profile_update',
+    ]);
+    expect(callTool).toHaveBeenLastCalledWith('parent_profile_update', {
+      historyEnabled: true,
+      parentAccessToken: 'kb_parent_widgettoken1234567890',
+      profileId: 'kb_profile_widget123',
+    });
+    expect(screen.getByText('Profile: kb_profile_widget123')).toBeTruthy();
+  });
+
+  it('keeps the visible and persisted age unchanged when profile update fails', async () => {
+    render(<App />);
+    await setPin();
+    await enableHistory();
+    setWidgetState.mockClear();
+    callTool.mockRejectedValueOnce(new Error('offline'));
+
+    fireEvent.change(screen.getByLabelText('Locked age'), { target: { value: '10-12' } });
+
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Profile age could not be updated.',
+    );
+    expect((screen.getByLabelText('Locked age') as HTMLSelectElement).value).toBe('7-9');
+    expect(screen.getAllByText('Age: 7-9')).toHaveLength(2);
+    for (const [state] of setWidgetState.mock.calls) {
+      expect((state as Record<string, unknown>).ageBand).toBe('7-9');
+    }
   });
 
   it('keeps consent enabled and announces an error when history purge fails', async () => {
@@ -315,5 +390,21 @@ describe('App parent/session safety controls', () => {
     expect(styleSource).toMatch(
       /\.kidbot-header button\.danger-button:disabled[^\{]*\{[^}]*background:\s*#7f1d1d;[^}]*color:\s*#fff;[^}]*opacity:\s*1;[^}]*transform:\s*none;/s,
     );
+  });
+
+  it('marks the active navigation item for assistive technology', () => {
+    render(<App />);
+
+    expect(screen.getByRole('button', { name: 'Voice' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Comics' }).getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(screen.getByRole('button', { name: 'Comics' }));
+    expect(screen.getByRole('button', { name: 'Comics' }).getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('applies border-box sizing and narrow viewport overflow containment', () => {
+    expect(styleSource).toMatch(/\*,\s*\*::before,\s*\*::after\s*\{\s*box-sizing:\s*border-box;/s);
+    expect(styleSource).toMatch(/@media\s*\(max-width:\s*480px\)/);
+    expect(styleSource).toMatch(/\.kidbot-app\s*\{[^}]*padding:\s*0\.75rem;/s);
+    expect(styleSource).toMatch(/\.control-row\s*>\s*input,[^{]*\{[^}]*min-width:\s*0;[^}]*max-width:\s*100%;/s);
   });
 });

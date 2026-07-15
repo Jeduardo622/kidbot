@@ -65,6 +65,12 @@ body {
   font-weight: 600;
 }
 
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 .parent-settings,
 .history-consent,
 .delete-profile {
@@ -412,6 +418,33 @@ img.panel-artwork {
 
 .choices button.selected {
   background: linear-gradient(135deg, #22d3ee, #818cf8);
+}
+
+@media (max-width: 480px) {
+  .kidbot-app {
+    padding: 0.75rem;
+  }
+
+  .panel {
+    padding: 1rem;
+  }
+
+  .control-row > input,
+  .control-row > select,
+  .control-row > textarea {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .parent-controls,
+  .parent-settings,
+  .history-consent,
+  .delete-profile,
+  .panel,
+  .coloring-stage {
+    min-width: 0;
+    max-width: 100%;
+  }
 }
 
 .explanation {

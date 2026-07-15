@@ -11,6 +11,7 @@ import {
   type AgeBand,
   type SessionContext,
 } from './utils/sessionContext.js';
+import { readToolEnvelope } from './utils/toolResult.js';
 import './styles.css';
 
 type TabKey = 'voice' | 'comics' | 'coloring' | 'science';
@@ -41,6 +42,8 @@ interface ParentCredentialState {
 type PersistenceStatus =
   | { kind: 'error' | 'pending' | 'success'; message: string }
   | undefined;
+
+type PinStatus = { kind: 'error' | 'success'; message: string } | undefined;
 
 declare global {
   interface Window {
@@ -84,26 +87,9 @@ interface ParentProfileDeleteResponse {
   profileId?: string;
 }
 
-interface ToolResultEnvelope {
-  structuredContent?: unknown;
-  _meta?: unknown;
-}
-
-const readRecord = (value: unknown): Record<string, unknown> | undefined =>
-  typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined;
-
-const readToolEnvelope = (value: unknown) => {
-  const envelope = readRecord(value) as ToolResultEnvelope | undefined;
-  return {
-    structuredContent: readRecord(envelope?.structuredContent),
-    meta: readRecord(envelope?._meta),
-  };
-};
-
 export const App = () => {
   const historyConsentRef = useRef<HTMLInputElement>(null);
+  const parentPinRef = useRef<HTMLInputElement>(null);
   const [sessionState, setSessionState] = useState<PersistedWidgetState>(() => readInitialState());
   const [parentCredentials, setParentCredentials] = useState<ParentCredentialState>({
     historyEnabled: false,
@@ -112,7 +98,7 @@ export const App = () => {
   });
   const [activeTab, setActiveTab] = useState<TabKey>('voice');
   const [pinInput, setPinInput] = useState('');
-  const [pinMessage, setPinMessage] = useState<string | undefined>();
+  const [pinStatus, setPinStatus] = useState<PinStatus>();
   const [persistenceStatus, setPersistenceStatus] = useState<PersistenceStatus>();
   const persistencePending = persistenceStatus?.kind === 'pending';
   const parentPinSet = Boolean(parentCredentials.parentPin);
@@ -141,8 +127,10 @@ export const App = () => {
   useEffect(() => {
     if (parentCredentials.parentModeUnlocked) {
       historyConsentRef.current?.focus();
+    } else if (parentPinSet) {
+      parentPinRef.current?.focus();
     }
-  }, [parentCredentials.parentModeUnlocked]);
+  }, [parentCredentials.parentModeUnlocked, parentPinSet]);
 
   const createPersistentProfile = async (ageBand: AgeBand, sessionId: string) => {
     const envelope = readToolEnvelope(await window.openai?.callTool?.('parent_profile_create', {
@@ -165,7 +153,7 @@ export const App = () => {
 
   const handleParentSubmit = async () => {
     if (!/^\d{4}$/.test(pinInput)) {
-      setPinMessage('Enter a 4-digit PIN.');
+      setPinStatus({ kind: 'error', message: 'Enter a 4-digit PIN.' });
       return;
     }
 
@@ -176,31 +164,32 @@ export const App = () => {
         parentPin: pinInput,
       }));
       setPinInput('');
-      setPinMessage('Parent controls unlocked.');
+      setPinStatus({ kind: 'success', message: 'Parent controls unlocked.' });
       return;
     }
 
     if (pinInput !== parentCredentials.parentPin) {
-      setPinMessage('PIN did not match.');
+      setPinStatus({ kind: 'error', message: 'PIN did not match.' });
       return;
     }
 
     setParentCredentials((prev) => ({ ...prev, parentModeUnlocked: true }));
     setPinInput('');
-    setPinMessage('Parent controls unlocked.');
+    setPinStatus({ kind: 'success', message: 'Parent controls unlocked.' });
   };
 
   const lockParentMode = () => {
     setParentCredentials((prev) => ({ ...prev, parentModeUnlocked: false }));
     setPinInput('');
-    setPinMessage(undefined);
+    setPinStatus(undefined);
   };
 
   const updateAgeBand = async (ageBand: AgeBand) => {
-    setSessionState((prev) => ({ ...prev, ageBand }));
     if (!parentCredentials.historyEnabled || !parentCredentials.parentAccessToken) {
+      setSessionState((prev) => ({ ...prev, ageBand }));
       return;
     }
+    setPinStatus(undefined);
     setPersistenceStatus({ kind: 'pending', message: 'Updating parent profile…' });
     try {
       const { structuredContent: result } = readToolEnvelope(await window.openai?.callTool?.('parent_profile_update', {
@@ -224,16 +213,38 @@ export const App = () => {
 
   const updateHistoryConsent = async (enabled: boolean) => {
     if (persistencePending) return;
+    setPinStatus(undefined);
 
     if (enabled) {
       setPersistenceStatus({ kind: 'pending', message: 'Enabling history…' });
       try {
-        const persistedProfile = await createPersistentProfile(
-          sessionState.ageBand,
-          sessionState.sessionId,
-        );
-        if (!persistedProfile) throw new Error('Unexpected profile create result.');
-        setParentCredentials((prev) => ({ ...prev, ...persistedProfile }));
+        if (
+          parentCredentials.parentAccessToken &&
+          parentCredentials.profileId !== defaultProfileId
+        ) {
+          const { structuredContent: result } = readToolEnvelope(
+            await window.openai?.callTool?.('parent_profile_update', {
+              historyEnabled: true,
+              parentAccessToken: parentCredentials.parentAccessToken,
+              profileId: parentCredentials.profileId,
+            }),
+          );
+          const updateResult = result as ParentProfileUpdateResponse;
+          if (
+            updateResult.profileId !== parentCredentials.profileId ||
+            updateResult.historyEnabled !== true
+          ) {
+            throw new Error('Unexpected profile update result.');
+          }
+          setParentCredentials((prev) => ({ ...prev, historyEnabled: true }));
+        } else {
+          const persistedProfile = await createPersistentProfile(
+            sessionState.ageBand,
+            sessionState.sessionId,
+          );
+          if (!persistedProfile) throw new Error('Unexpected profile create result.');
+          setParentCredentials((prev) => ({ ...prev, ...persistedProfile }));
+        }
         setPersistenceStatus({ kind: 'success', message: 'History is enabled.' });
       } catch {
         setParentCredentials((prev) => ({ ...prev, historyEnabled: false }));
@@ -275,6 +286,7 @@ export const App = () => {
     }
 
     const profileIdToDelete = parentCredentials.profileId;
+    setPinStatus(undefined);
     setPersistenceStatus({ kind: 'pending', message: 'Deleting parent profile…' });
     try {
       const { structuredContent: result } = readToolEnvelope(await window.openai?.callTool?.('parent_profile_delete', {
@@ -376,6 +388,7 @@ export const App = () => {
                 {parentPinSet ? 'Parent PIN' : 'Create parent PIN'}
               </label>
               <input
+                ref={parentPinRef}
                 id="parent-pin"
                 inputMode="numeric"
                 maxLength={4}
@@ -389,7 +402,15 @@ export const App = () => {
               </button>
             </div>
           )}
-          {pinMessage && <p className="parent-message">{pinMessage}</p>}
+          {pinStatus && (
+            <p
+              aria-live={pinStatus.kind === 'error' ? 'assertive' : 'polite'}
+              className="parent-message"
+              role={pinStatus.kind === 'error' ? 'alert' : 'status'}
+            >
+              {pinStatus.message}
+            </p>
+          )}
           {persistenceStatus && (
             <p
               aria-live={persistenceStatus.kind === 'error' ? 'assertive' : 'polite'}
@@ -403,6 +424,7 @@ export const App = () => {
         <nav>
           {tabs.map((tab) => (
             <button
+              aria-pressed={activeTab === tab.key}
               key={tab.key}
               className={activeTab === tab.key ? 'active' : ''}
               type="button"

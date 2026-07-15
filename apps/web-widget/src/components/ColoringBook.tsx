@@ -9,10 +9,11 @@ import {
   unavailableMessageFromError,
 } from '../utils/degradation.js';
 import { defaultSessionContext, type SessionContext } from '../utils/sessionContext.js';
+import { readStructuredContent, type ToolResultRecord } from '../utils/toolResult.js';
 
 type OutlineStyle = 'animals' | 'space' | 'underwater' | undefined;
 
-interface ColoringResponse {
+interface ColoringResponse extends ToolResultRecord {
   blocked: boolean;
   degraded?: boolean;
   message?: string;
@@ -154,14 +155,11 @@ export const ColoringBook = ({ sessionContext = defaultSessionContext }: Colorin
     setUnavailable(undefined);
     setOutline(undefined);
     try {
-      const result = (await window.openai?.callTool?.('coloring_outline', {
+      const result = readStructuredContent<ColoringResponse>(await window.openai?.callTool?.('coloring_outline', {
         ...sessionContext,
         scene,
         style,
-      })) as ColoringResponse | undefined;
-      if (!result) {
-        throw new Error('Widget bridge unavailable.');
-      }
+      }));
       const unavailableMessage = degradedMessage(result);
       if (unavailableMessage) {
         setOutline(undefined);

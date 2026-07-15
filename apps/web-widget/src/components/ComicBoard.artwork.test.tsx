@@ -2,6 +2,8 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ComicBoard, PanelArtwork } from './ComicBoard.js';
 
+const hostResult = (structuredContent: Record<string, unknown>) => ({ structuredContent });
+
 describe('ComicBoard artwork rendering', () => {
   const callTool = vi.fn();
 
@@ -19,7 +21,7 @@ describe('ComicBoard artwork rendering', () => {
   });
 
   it('renders an accessible placeholder for a null imageUrl without dropping panel layout', async () => {
-    callTool.mockResolvedValueOnce({
+    callTool.mockResolvedValueOnce(hostResult({
       blocked: false,
       panels: [
         {
@@ -29,7 +31,7 @@ describe('ComicBoard artwork rendering', () => {
           imageUrl: null,
         },
       ],
-    });
+    }));
 
     render(<ComicBoard />);
 
@@ -51,7 +53,7 @@ describe('ComicBoard artwork rendering', () => {
   });
 
   it('renders a real imageUrl as an image with stable prompt-based alt text', async () => {
-    callTool.mockResolvedValueOnce({
+    callTool.mockResolvedValueOnce(hostResult({
       blocked: false,
       panels: [
         {
@@ -61,7 +63,7 @@ describe('ComicBoard artwork rendering', () => {
           imageUrl: 'https://cdn.example.test/story/new-friends.png',
         },
       ],
-    });
+    }));
 
     render(<ComicBoard />);
 
@@ -73,7 +75,7 @@ describe('ComicBoard artwork rendering', () => {
   });
 
   it('replaces artwork that fails to load with the accessible placeholder', async () => {
-    callTool.mockResolvedValueOnce({
+    callTool.mockResolvedValueOnce(hostResult({
       blocked: false,
       panels: [
         {
@@ -83,7 +85,7 @@ describe('ComicBoard artwork rendering', () => {
           imageUrl: 'https://cdn.example.test/story/expired.png',
         },
       ],
-    });
+    }));
 
     render(<ComicBoard />);
 
@@ -128,7 +130,7 @@ describe('ComicBoard artwork rendering', () => {
   });
 
   it('clears stale panels when a later response is blocked', async () => {
-    callTool.mockResolvedValueOnce({
+    callTool.mockResolvedValueOnce(hostResult({
       blocked: false,
       panels: [
         {
@@ -138,11 +140,11 @@ describe('ComicBoard artwork rendering', () => {
           imageUrl: null,
         },
       ],
-    });
-    callTool.mockResolvedValueOnce({
+    }));
+    callTool.mockResolvedValueOnce(hostResult({
       blocked: true,
       message: 'Kidbot paused this story idea.',
-    });
+    }));
 
     render(<ComicBoard />);
 
@@ -160,7 +162,7 @@ describe('ComicBoard artwork rendering', () => {
   });
 
   it('clears stale panels when a later response is degraded', async () => {
-    callTool.mockResolvedValueOnce({
+    callTool.mockResolvedValueOnce(hostResult({
       blocked: false,
       panels: [
         {
@@ -170,12 +172,12 @@ describe('ComicBoard artwork rendering', () => {
           imageUrl: null,
         },
       ],
-    });
-    callTool.mockResolvedValueOnce({
+    }));
+    callTool.mockResolvedValueOnce(hostResult({
       blocked: false,
       degraded: true,
       message: 'Kidbot is having trouble reaching its idea engine right now. Please try again in a moment.',
-    });
+    }));
 
     render(<ComicBoard />);
 
@@ -196,11 +198,11 @@ describe('ComicBoard artwork rendering', () => {
   });
 
   it('keeps requested panel count and theme behavior unchanged', async () => {
-    callTool.mockResolvedValueOnce({
+    callTool.mockResolvedValueOnce(hostResult({
       blocked: false,
       theme: 'A tiny inventor builds a kite',
       panels: [],
-    });
+    }));
 
     render(<ComicBoard />);
 
