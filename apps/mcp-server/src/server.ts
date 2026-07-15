@@ -4,21 +4,63 @@ import express from 'express';
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { registerAppResource, RESOURCE_MIME_TYPE } from '@modelcontextprotocol/ext-apps/server';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { asyncRoute } from './async-route.js';
 import { mcpConfig } from './config.js';
 import { parentProfileStore, registerTools, requestControlStore } from './tools.js';
 import type { Mode } from './types.js';
+import { createWidgetResourceMeta, widgetResourceUri } from './widgetMetadata.js';
+import { privacyPolicyHtml } from './privacyPolicy.js';
+import { createNetworkKey } from './requestControls.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: '1mb' }));
 
-const widgetResourceUri = 'ui://widget/kidbot.html';
+app.use('/mcp', (req, res, next) => {
+  const networkIdentity = req.socket.remoteAddress ?? 'unknown';
+  const secret = mcpConfig.serviceAuthToken ?? mcpConfig.parentAuthSecret ?? 'kidbot-local-control';
+  const networkKey = createNetworkKey({ secret, networkIdentity });
+  void requestControlStore.acquire({
+    callerKey: networkKey,
+    networkKey,
+    cost: 1,
+    limits: {
+      ...mcpConfig.requestControlLimits,
+      callerRequestsPerMinute: Number.MAX_SAFE_INTEGER,
+      callerCostPerMinute: Number.MAX_SAFE_INTEGER,
+      callerConcurrency: Number.MAX_SAFE_INTEGER,
+    },
+    scope: 'admission',
+  }).then((lease) => {
+    if (!lease.allowed) {
+      res.status(429).json({
+        jsonrpc: '2.0',
+        error: { code: -32029, message: 'rate_limited', data: { retryAfterMs: lease.retryAfterMs } },
+        id: null,
+      });
+      return;
+    }
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      void lease.release().catch(() => {
+        // Lease expiry remains the fail-safe when cleanup fails.
+      });
+    };
+    res.once('finish', release);
+    res.once('close', release);
+    res.once('error', release);
+    next();
+  }).catch(next);
+});
+
+app.use(express.json({ limit: '1mb' }));
 
 const distDir = path.resolve(__dirname, '../../web-widget/dist');
 const assetsDir = path.join(distDir, 'assets');
@@ -64,35 +106,28 @@ const resolveDistHtml = (): string => {
 
 const widgetMode: Mode = fallbackRequested || !hasBundle ? 'fallback' : 'dist';
 const widgetHtml = widgetMode === 'fallback' ? resolveFallbackHtml() : resolveDistHtml();
+const widgetResourceMeta = createWidgetResourceMeta(mcpConfig, widgetMode);
 
 const createMcpServer = (networkIdentity: string): McpServer => {
   const server = new McpServer({ name: 'Kidbot-mcp', version: '0.1.0' });
   registerTools(server, { networkIdentity });
 
-  server.registerResource(
+  registerAppResource(
+    server,
     'kidbot_widget',
     widgetResourceUri,
     {
       title: 'Kidbot Widget',
       description: 'Kidbot interactive widget shell',
-      mimeType: 'text/html+skybridge',
-      _meta: {
-        'openai/widgetDescription': 'Kidbot — safe creative play: voice, comics, coloring, science.',
-        'openai/widgetCSP': { connect_domains: [], resource_domains: [] },
-        mode: widgetMode
-      }
+      _meta: widgetResourceMeta,
     },
     async () => ({
       contents: [
         {
           uri: widgetResourceUri,
-          mimeType: 'text/html+skybridge',
+          mimeType: RESOURCE_MIME_TYPE,
           text: widgetHtml,
-          _meta: {
-            'openai/widgetDescription': 'Kidbot — safe creative play: voice, comics, coloring, science.',
-            'openai/widgetCSP': { connect_domains: [], resource_domains: [] },
-            mode: widgetMode
-          }
+          _meta: widgetResourceMeta,
         }
       ]
     })
@@ -128,6 +163,10 @@ app.get('/healthz', asyncRoute(async (_req, res) => {
   });
 }));
 
+app.get('/privacy', (_req, res) => {
+  res.type('html').send(privacyPolicyHtml);
+});
+
 app.get('/diag', (_req, res) => {
   const links: string[] = [];
   if (existsSync(fallbackHtmlPath)) {
@@ -137,6 +176,7 @@ app.get('/diag', (_req, res) => {
     links.push('<li><a href="/public/diagnostic.html">Open diagnostic harness</a></li>');
   }
   links.push('<li><a href="/healthz">Health JSON</a></li>');
+  links.push('<li><a href="/privacy">Privacy policy</a></li>');
 
   res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"/><title>Kidbot Diagnostics</title><style>body{font-family:system-ui;margin:32px;color:#111;} a{color:#0066cc;} .tag{display:inline-block;padding:4px 8px;border-radius:999px;background:#eef;border:1px solid #ccd;margin-left:8px;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;}</style></head><body><h1>Kidbot Diagnostics <span class="tag">${widgetMode}</span></h1><p>Server port: ${mcpConfig.mcpPort}</p><ul>${links.join('')}</ul><p>Fixtures served from: ${existsSync(fixturesDir) ? '/fixtures' : 'not available'}</p></body></html>`);
 });

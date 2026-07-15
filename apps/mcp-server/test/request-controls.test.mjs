@@ -13,6 +13,11 @@ const {
 } = await import('../dist/requestControls.js');
 const { parseMcpServerConfig } = await import('../dist/config.js');
 
+const productionWidgetEnv = {
+  KIDBOT_WIDGET_DOMAIN: 'https://kidbot-production.up.railway.app',
+  KIDBOT_WIDGET_RESOURCE_DOMAINS: 'https://rxnwualzddplucjhclij.supabase.co',
+};
+
 const limits = {
   callerRequestsPerMinute: 10,
   networkRequestsPerMinute: 10,
@@ -36,6 +41,7 @@ test('tool costs reflect provider fan-out', () => {
 
 test('production parent storage defaults MCP controls to shared Redis with bounded limits', () => {
   const config = parseMcpServerConfig({
+    ...productionWidgetEnv,
     AGENT_SERVICE_TOKEN: 'service-token-abcdefghijklmnopqrstuvwxyz0123456789',
     FALLBACK_WIDGET: '0',
     NODE_ENV: 'production',
@@ -72,6 +78,7 @@ test('MCP control configuration rejects unsafe numeric values', () => {
 
 test('Redis control configuration fails closed without REDIS_URL', () => {
   const config = parseMcpServerConfig({
+    ...productionWidgetEnv,
     AGENT_SERVICE_TOKEN: 'service-token-abcdefghijklmnopqrstuvwxyz0123456789',
     FALLBACK_WIDGET: '0',
     NODE_ENV: 'production',

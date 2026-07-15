@@ -4,3 +4,6 @@ packages:
   - apps/mcp-server
   - apps/web-widget
   - apps/agent-service
+
+allowBuilds:
+  esbuild: true

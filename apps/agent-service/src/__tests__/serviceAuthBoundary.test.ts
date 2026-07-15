@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -63,7 +64,10 @@ const withEnv = async <T>(
 
 const withServer = async (
   app: {
-    listen: (port: number) => { close: () => void; address: () => AddressInfo | string | null };
+    listen: (port: number) => {
+      close: (callback: (error?: Error) => void) => void;
+      address: () => AddressInfo | string | null;
+    };
   },
   run: (baseUrl: string) => Promise<void>,
 ) => {
@@ -73,7 +77,15 @@ const withServer = async (
   try {
     await run(baseUrl);
   } finally {
-    server.close();
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
   }
 };
 
@@ -408,15 +420,20 @@ describe('service auth boundary', () => {
     );
   });
 
-  it('logs safe session audit metadata without PIN values', async () => {
+  it('logs keyed session audit references without raw request data', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const serviceToken = 'test-service-token';
+    const sessionId = 'kb_session_audit123';
+    const profileId = 'local-default';
+    const prompt = 'Tell me a cheerful moon fact.';
+    const imageUrl = 'https://images.example.test/private/generated-image.png?token=raw-image-token';
     try {
       await withEnv(
         {
           NODE_ENV: 'test',
           FALLBACK_WIDGET: '0',
           KIDBOT_LOCAL_DEV: undefined,
-          AGENT_SERVICE_TOKEN: 'test-service-token',
+          AGENT_SERVICE_TOKEN: serviceToken,
           OPENAI_API_KEY: undefined,
         },
         async () => {
@@ -425,17 +442,18 @@ describe('service auth boundary', () => {
             const response = await fetch(`${baseUrl}/voice`, {
               method: 'POST',
               headers: {
-                Authorization: 'Bearer test-service-token',
+                Authorization: `Bearer ${serviceToken}`,
                 'x-kidbot-startup-posture': 'secured',
                 'Content-Type': 'application/json',
               },
               body: JSON.stringify({
-                text: 'Tell me a cheerful moon fact.',
+                text: prompt,
                 persona: 'robot',
                 ageBand: '4-6',
-                profileId: 'local-default',
-                sessionId: 'kb_session_audit123',
+                profileId,
+                sessionId,
                 parentPin: '1234',
+                imageUrl,
               }),
             });
 
@@ -445,10 +463,82 @@ describe('service auth boundary', () => {
       );
 
       const logs = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
-      expect(logs).toContain('"sessionId":"kb_session_audit123"');
-      expect(logs).toContain('"profileId":"local-default"');
+      const sessionRef = createHmac('sha256', serviceToken)
+        .update(`session:${sessionId}`)
+        .digest('base64url')
+        .slice(0, 24);
+      const profileRef = createHmac('sha256', serviceToken)
+        .update(`profile:${profileId}`)
+        .digest('base64url')
+        .slice(0, 24);
+      expect(logs).toContain(`"sessionRef":"${sessionRef}"`);
+      expect(logs).toContain(`"profileRef":"${profileRef}"`);
+      expect(sessionRef).toMatch(/^[A-Za-z0-9_-]{16,64}$/);
+      expect(profileRef).toMatch(/^[A-Za-z0-9_-]{16,64}$/);
       expect(logs).toContain('"ageBand":"4-6"');
+      expect(logs).not.toContain(sessionId);
+      expect(logs).not.toContain(profileId);
+      expect(logs).not.toContain(prompt);
+      expect(logs).not.toContain(serviceToken);
+      expect(logs).not.toContain(imageUrl);
+      expect(logs).not.toContain('raw-image-token');
       expect(logs).not.toContain('1234');
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it('rejects local fallback intent in production', async () => {
+    await withEnv(
+      {
+        NODE_ENV: 'production',
+        FALLBACK_WIDGET: '1',
+        KIDBOT_LOCAL_DEV: '1',
+        AGENT_SERVICE_TOKEN: undefined,
+        OPENAI_API_KEY: undefined,
+      },
+      async () => {
+        await expect(import('../index.js')).rejects.toThrow(/production.*fallback|fallback.*production/i);
+      },
+    );
+  });
+
+  it('omits session audit references in local fallback posture', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const sessionId = 'kb_session_local123';
+    const profileId = 'local-default';
+    try {
+      await withEnv(
+        {
+          NODE_ENV: 'test',
+          FALLBACK_WIDGET: '1',
+          KIDBOT_LOCAL_DEV: '1',
+          AGENT_SERVICE_TOKEN: undefined,
+          OPENAI_API_KEY: undefined,
+        },
+        async () => {
+          const mod = await import('../index.js');
+          await withServer(mod.app, async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/voice`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                text: 'Tell me a moon fact.',
+                persona: 'robot',
+                profileId,
+                sessionId,
+              }),
+            });
+            expect(response.status).toBe(200);
+          });
+        },
+      );
+
+      const logs = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
+      expect(logs).not.toContain('sessionRef');
+      expect(logs).not.toContain('profileRef');
+      expect(logs).not.toContain(sessionId);
+      expect(logs).not.toContain(profileId);
     } finally {
       logSpy.mockRestore();
     }
@@ -877,15 +967,20 @@ describe('service auth boundary', () => {
     );
   });
 
-  it('uses safe placeholder panels when story image generation fails under fallback policy', async () => {
+  it('uses safe placeholder panels without leaking provider or request data to warnings', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const serviceToken = 'sentinel-service-token';
+    const profileId = 'sentinel-profile-id';
+    const sessionId = 'kb_session_sentinel-session-id';
+    const prompt = 'sentinel private story prompt';
+    const imageUrl = 'https://private.example/image.png?token=sentinel-image-token';
     try {
       await withEnv(
         {
           NODE_ENV: 'test',
           FALLBACK_WIDGET: '0',
           KIDBOT_LOCAL_DEV: undefined,
-          AGENT_SERVICE_TOKEN: 'test-service-token',
+          AGENT_SERVICE_TOKEN: serviceToken,
           OPENAI_API_KEY: 'test-provider-key',
           PROVIDER_FAILURE_POLICY: 'fallback',
         },
@@ -914,7 +1009,12 @@ describe('service auth boundary', () => {
                   });
                 },
                 async generateImage() {
-                  throw new actual.ProviderUnavailableError('image provider unavailable');
+                  throw Object.assign(
+                    new actual.ProviderUnavailableError(
+                      `${prompt} ${serviceToken} ${profileId} ${sessionId} ${imageUrl}`,
+                    ),
+                    { status: 503 },
+                  );
                 },
                 async moderateText() {
                   return { blocked: false };
@@ -928,14 +1028,16 @@ describe('service auth boundary', () => {
             const response = await fetch(`${baseUrl}/story-panels`, {
               method: 'POST',
               headers: {
-                Authorization: 'Bearer test-service-token',
+                Authorization: `Bearer ${serviceToken}`,
                 'x-kidbot-startup-posture': 'secured',
                 'Content-Type': 'application/json',
               },
               body: JSON.stringify({
-                theme: 'A bean grows',
+                theme: prompt,
                 panels: 2,
                 ageBand: '7-9',
+                profileId,
+                sessionId,
               }),
             });
             const body = (await response.json()) as {
@@ -951,6 +1053,13 @@ describe('service auth boundary', () => {
             expect(body.fallbackReason).toBe('provider_unavailable');
             expect(body.panels).toHaveLength(2);
             expect(body.panels?.every((panel) => panel.imageUrl === null)).toBe(true);
+
+            const warnings = warnSpy.mock.calls.map((call) => String(call[0])).join('\n');
+            expect(warnings).toContain('provider_unavailable');
+            expect(warnings).toContain('503');
+            for (const sentinel of [serviceToken, profileId, sessionId, prompt, imageUrl]) {
+              expect(warnings).not.toContain(sentinel);
+            }
           });
         },
       );

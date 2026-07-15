@@ -7,19 +7,11 @@ import {
   unavailableMessageFromError,
 } from '../utils/degradation.js';
 import { defaultSessionContext, type SessionContext } from '../utils/sessionContext.js';
-
-interface ScienceResponse {
-  blocked: boolean;
-  degraded?: boolean;
-  message?: string;
-  title?: string;
-  objective?: string;
-  materials?: string[];
-  steps?: string[];
-  prediction?: { question: string; choices: string[]; answerIndex: number };
-  explanation?: string;
-  supervision?: string;
-}
+import {
+  isScienceResult,
+  readStructuredContent,
+  type ScienceResult,
+} from '../utils/toolResult.js';
 
 const topics = ['Buoyancy', 'Magnetism', 'Rainbows', 'Plant Growth'];
 
@@ -29,7 +21,7 @@ interface ScienceLabProps {
 
 export const ScienceLab = ({ sessionContext = defaultSessionContext }: ScienceLabProps) => {
   const [topic, setTopic] = useState('Buoyancy');
-  const [plan, setPlan] = useState<ScienceResponse | undefined>();
+  const [plan, setPlan] = useState<ScienceResult | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [unavailable, setUnavailable] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
@@ -51,13 +43,10 @@ export const ScienceLab = ({ sessionContext = defaultSessionContext }: ScienceLa
     setShowExplanation(false);
     setSelectedChoice(undefined);
     try {
-      const result = (await window.openai?.callTool?.('science_sim', {
+      const result = readStructuredContent(await window.openai?.callTool?.('science_sim', {
         ...sessionContext,
         topic,
-      })) as ScienceResponse | undefined;
-      if (!result) {
-        throw new Error('Widget bridge unavailable.');
-      }
+      }), isScienceResult);
       const unavailableMessage = degradedMessage(result);
       if (unavailableMessage) {
         setUnavailable(unavailableMessage);

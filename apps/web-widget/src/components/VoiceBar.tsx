@@ -8,13 +8,18 @@ import {
 } from '../utils/degradation.js';
 import { defaultSessionContext, type SessionContext } from '../utils/sessionContext.js';
 import {
+  isVoiceResult,
+  readStructuredContent,
+  type Persona,
+  type VoiceResult,
+} from '../utils/toolResult.js';
+import {
   createVoiceCapture,
   isVoiceCaptureAvailable,
   type VoiceCaptureSession,
 } from '../utils/voiceCapture.js';
 import { speakText } from '../utils/voicePlayback.js';
 
-type Persona = 'robot' | 'fairy' | 'explorer';
 type CaptureState = 'idle' | 'listening' | 'unsupported';
 
 const permissionBlockedMessage =
@@ -25,15 +30,6 @@ const permissionErrorPattern = /not-allowed|permission|service-not-allowed/i;
 
 const voiceCaptureErrorMessage = (message: string): string =>
   permissionErrorPattern.test(message) ? permissionBlockedMessage : retryVoiceInputMessage;
-
-interface VoiceResult {
-  blocked: boolean;
-  degraded?: boolean;
-  message?: string;
-  persona?: Persona;
-  text?: string;
-  ssml?: string;
-}
 
 const personas: Array<{ key: Persona; label: string }> = [
   { key: 'robot', label: 'Robot Buddy' },
@@ -147,14 +143,11 @@ export const VoiceBar = ({ sessionContext = defaultSessionContext }: VoiceBarPro
     setUnavailable(undefined);
     setResponse(undefined);
     try {
-      const result = (await window.openai?.callTool?.('voice_chat', {
+      const result = readStructuredContent(await window.openai?.callTool?.('voice_chat', {
         ...sessionContext,
         text,
         persona,
-      })) as VoiceResult | undefined;
-      if (!result) {
-        throw new Error('Widget bridge unavailable.');
-      }
+      }), isVoiceResult);
       const unavailableMessage = degradedMessage(result);
       if (unavailableMessage) {
         setUnavailable(unavailableMessage);

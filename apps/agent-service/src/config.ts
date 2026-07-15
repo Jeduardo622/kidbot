@@ -1,6 +1,7 @@
 export interface AgentServiceConfig {
   providerApiKey: string | undefined;
   serviceAuthToken: string | undefined;
+  logSubjectSecret: string | undefined;
   fallbackMode: boolean;
   localDevIntent: boolean;
   requireServiceAuth: boolean;
@@ -70,6 +71,10 @@ export const parseAgentServiceConfig = (
   const startupPosture = fallbackMode ? 'local-fallback' : 'secured';
   const serviceAuthToken = trimOptional(env.AGENT_SERVICE_TOKEN);
 
+  if (fallbackMode && env.NODE_ENV === 'production') {
+    throw new Error('FALLBACK_WIDGET=1 is not allowed in production.');
+  }
+
   if (fallbackMode && !localDevIntent) {
     throw new Error(
       'FALLBACK_WIDGET=1 requires KIDBOT_LOCAL_DEV=1 for explicit local fallback posture.',
@@ -85,6 +90,7 @@ export const parseAgentServiceConfig = (
   return {
     providerApiKey: trimOptional(env.OPENAI_API_KEY),
     serviceAuthToken,
+    logSubjectSecret: requireServiceAuth ? serviceAuthToken : undefined,
     fallbackMode,
     localDevIntent,
     requireServiceAuth,

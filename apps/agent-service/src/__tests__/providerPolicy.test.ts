@@ -8,6 +8,7 @@ import {
   classifyProviderError,
   bindProviderSignal,
   parseProviderFailurePolicy,
+  safeProviderErrorSummary,
   withProviderRetry,
 } from '../provider.js';
 
@@ -65,6 +66,22 @@ describe('provider failure policy', () => {
     expect(classifyProviderError(new ProviderUnavailableError('provider unavailable'))).toBe(
       'provider_unavailable',
     );
+  });
+
+  it('summarizes provider errors without serializing arbitrary error text', () => {
+    const sentinel = 'prompt=PRIVATE token=SECRET profile=profile-123 session=session-456 https://private.example/image.png?token=SECRET';
+    const error = Object.assign(new Error(sentinel), { status: 503 });
+
+    const serialized = JSON.stringify(safeProviderErrorSummary(error));
+
+    expect(serialized).toContain('provider_unavailable');
+    expect(serialized).toContain('503');
+    expect(serialized).not.toContain(sentinel);
+    expect(serialized).not.toContain('PRIVATE');
+    expect(serialized).not.toContain('SECRET');
+    expect(serialized).not.toContain('profile-123');
+    expect(serialized).not.toContain('session-456');
+    expect(serialized).not.toContain('https://private.example');
   });
 
   it('wraps slow provider calls as generation timeouts', async () => {

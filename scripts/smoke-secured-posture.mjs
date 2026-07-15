@@ -147,6 +147,10 @@ const wrongTokenMcpPort = await getFreePort();
 const agentBaseUrl = `http://127.0.0.1:${agentPort}`;
 const mcpBaseUrl = `http://127.0.0.1:${mcpPort}`;
 const wrongTokenMcpBaseUrl = `http://127.0.0.1:${wrongTokenMcpPort}`;
+const widgetProductionEnv = {
+  KIDBOT_WIDGET_DOMAIN: 'https://kidbot-production.up.railway.app',
+  KIDBOT_WIDGET_RESOURCE_DOMAINS: 'https://rxnwualzddplucjhclij.supabase.co',
+};
 
 const agent = spawnService(agentEntry, {
   AGENT_SERVICE_TOKEN: token,
@@ -158,6 +162,7 @@ const agent = spawnService(agentEntry, {
   RATE_LIMIT_STORE: 'memory',
 });
 const mcp = spawnService(mcpEntry, {
+  ...widgetProductionEnv,
   AGENT_PORT: String(agentPort),
   AGENT_SERVICE_TOKEN: token,
   FALLBACK_WIDGET: '0',
@@ -166,6 +171,7 @@ const mcp = spawnService(mcpEntry, {
   NODE_ENV: 'production',
 });
 const wrongTokenMcp = spawnService(mcpEntry, {
+  ...widgetProductionEnv,
   AGENT_PORT: String(agentPort),
   AGENT_SERVICE_TOKEN: `${token}-wrong`,
   FALLBACK_WIDGET: '0',

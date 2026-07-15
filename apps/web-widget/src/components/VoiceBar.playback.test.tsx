@@ -2,6 +2,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { VoiceBar } from './VoiceBar.js';
 
+const hostResult = (structuredContent: Record<string, unknown>) => ({ structuredContent });
+
 class MockSpeechSynthesisUtterance {
   rate = 1;
 
@@ -46,11 +48,11 @@ describe('VoiceBar speech playback', () => {
   });
 
   it('speaks successful replies and replays them on request', async () => {
-    callTool.mockResolvedValueOnce({
+    callTool.mockResolvedValueOnce(hostResult({
       blocked: false,
       persona: 'robot',
       text: 'A happy moon fact.',
-    });
+    }));
 
     render(<VoiceBar />);
 
@@ -74,10 +76,10 @@ describe('VoiceBar speech playback', () => {
   });
 
   it('does not speak blocked replies', async () => {
-    callTool.mockResolvedValueOnce({
+    callTool.mockResolvedValueOnce(hostResult({
       blocked: true,
       message: 'Kidbot paused this request.',
-    });
+    }));
 
     render(<VoiceBar />);
 
@@ -91,12 +93,12 @@ describe('VoiceBar speech playback', () => {
   });
 
   it('does not speak degraded replies', async () => {
-    callTool.mockResolvedValueOnce({
+    callTool.mockResolvedValueOnce(hostResult({
       blocked: false,
       degraded: true,
       message:
         'Kidbot is having trouble reaching its idea engine right now. Please try again in a moment.',
-    });
+    }));
 
     render(<VoiceBar />);
 
@@ -116,11 +118,11 @@ describe('VoiceBar speech playback', () => {
   it('renders successful replies when browser speech playback is unavailable', async () => {
     delete (window as { speechSynthesis?: unknown }).speechSynthesis;
     delete (window as { SpeechSynthesisUtterance?: unknown }).SpeechSynthesisUtterance;
-    callTool.mockResolvedValueOnce({
+    callTool.mockResolvedValueOnce(hostResult({
       blocked: false,
       persona: 'robot',
       text: 'Space fact ready!',
-    });
+    }));
 
     render(<VoiceBar />);
 

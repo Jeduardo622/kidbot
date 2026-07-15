@@ -153,9 +153,11 @@ describe('VoiceBar voice capture', () => {
   it('keeps typed input and Speak working after a capture error', async () => {
     installVoiceCapture();
     callTool.mockResolvedValue({
-      blocked: false,
-      persona: 'robot',
-      text: 'Beep! Jupiter is the biggest planet.',
+      structuredContent: {
+        blocked: false,
+        persona: 'robot',
+        text: 'Beep! Jupiter is the biggest planet.',
+      },
     });
 
     render(<VoiceBar />);

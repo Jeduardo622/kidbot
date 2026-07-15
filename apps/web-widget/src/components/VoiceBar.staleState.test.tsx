@@ -2,6 +2,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { VoiceBar } from './VoiceBar.js';
 
+const hostResult = (structuredContent: Record<string, unknown>) => ({ structuredContent });
+
 describe('VoiceBar stale-state handling', () => {
   const callTool = vi.fn();
 
@@ -19,11 +21,11 @@ describe('VoiceBar stale-state handling', () => {
   });
 
   it('clears a previous successful response when a later request fails', async () => {
-    callTool.mockResolvedValueOnce({
+    callTool.mockResolvedValueOnce(hostResult({
       blocked: false,
       persona: 'robot',
       text: 'Space fact ready!',
-    });
+    }));
     callTool.mockRejectedValueOnce(new Error('Unauthorized'));
 
     render(<VoiceBar />);
@@ -44,15 +46,15 @@ describe('VoiceBar stale-state handling', () => {
   });
 
   it('shows blocked feedback as an alert and hides previous success UI', async () => {
-    callTool.mockResolvedValueOnce({
+    callTool.mockResolvedValueOnce(hostResult({
       blocked: false,
       persona: 'robot',
       text: 'A happy moon fact.',
-    });
-    callTool.mockResolvedValueOnce({
+    }));
+    callTool.mockResolvedValueOnce(hostResult({
       blocked: true,
       message: 'KidBot paused this request.',
-    });
+    }));
 
     render(<VoiceBar />);
 
@@ -71,12 +73,12 @@ describe('VoiceBar stale-state handling', () => {
   });
 
   it('shows provider degradation as unavailable instead of a safety block', async () => {
-    callTool.mockResolvedValueOnce({
+    callTool.mockResolvedValueOnce(hostResult({
       blocked: false,
       degraded: true,
       message:
         'Kidbot is having trouble reaching its idea engine right now. Please try again in a moment.',
-    });
+    }));
 
     render(<VoiceBar />);
 

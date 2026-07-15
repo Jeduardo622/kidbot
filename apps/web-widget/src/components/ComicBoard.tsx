@@ -7,21 +7,11 @@ import {
   unavailableMessageFromError,
 } from '../utils/degradation.js';
 import { defaultSessionContext, type SessionContext } from '../utils/sessionContext.js';
-
-interface StoryPanel {
-  title: string;
-  caption: string;
-  imagePrompt: string;
-  imageUrl: string | null;
-}
-
-interface StoryResponse {
-  blocked: boolean;
-  degraded?: boolean;
-  message?: string;
-  theme?: string;
-  panels?: StoryPanel[];
-}
+import {
+  isStoryResult,
+  readStructuredContent,
+  type StoryPanel,
+} from '../utils/toolResult.js';
 
 interface ComicBoardProps {
   sessionContext?: SessionContext;
@@ -75,14 +65,11 @@ export const ComicBoard = ({ sessionContext = defaultSessionContext }: ComicBoar
     setUnavailable(undefined);
     setPanels([]);
     try {
-      const result = (await window.openai?.callTool?.('story_panels', {
+      const result = readStructuredContent(await window.openai?.callTool?.('story_panels', {
         ...sessionContext,
         theme,
         panels: panelCount,
-      })) as StoryResponse | undefined;
-      if (!result) {
-        throw new Error('Widget bridge unavailable.');
-      }
+      }), isStoryResult);
       const unavailableMessage = degradedMessage(result);
       if (unavailableMessage) {
         setUnavailable(unavailableMessage);

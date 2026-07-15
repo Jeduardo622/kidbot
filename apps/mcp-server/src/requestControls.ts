@@ -37,6 +37,7 @@ export interface RequestControlStore {
     networkKey: string;
     cost: number;
     limits: RequestControlLimits;
+    scope?: 'admission' | 'tool';
   }): Promise<RequestControlLease>;
   readiness(): Promise<{ mode: 'memory' | 'redis'; ready: boolean; details?: string }>;
   close?(): Promise<void>;
@@ -120,11 +121,11 @@ export const createMemoryRequestControlStore = (
 
   return {
     mode: 'memory',
-    async acquire({ callerKey, networkKey, cost, limits }) {
+    async acquire({ callerKey, networkKey, cost, limits, scope = 'tool' }) {
       const now = clock.now();
-      const callerConcurrencyKey = `concurrency:caller:${callerKey}`;
-      const networkConcurrencyKey = `concurrency:network:${networkKey}`;
-      const globalConcurrencyKey = 'concurrency:global';
+      const callerConcurrencyKey = `${scope}:concurrency:caller:${callerKey}`;
+      const networkConcurrencyKey = `${scope}:concurrency:network:${networkKey}`;
+      const globalConcurrencyKey = `${scope}:concurrency:global`;
       const callerActive = readConcurrency(callerConcurrencyKey, now);
       const networkActive = readConcurrency(networkConcurrencyKey, now);
       const globalActive = readConcurrency(globalConcurrencyKey, now);
@@ -153,12 +154,12 @@ export const createMemoryRequestControlStore = (
       }
 
       const checks: Array<[string, number, number, RequestControlRejectionReason]> = [
-        [`requests:caller:${callerKey}`, 1, limits.callerRequestsPerMinute, 'caller_requests'],
-        [`requests:network:${networkKey}`, 1, limits.networkRequestsPerMinute, 'network_requests'],
-        ['requests:global', 1, limits.globalRequestsPerMinute, 'global_requests'],
-        [`cost:caller:${callerKey}`, cost, limits.callerCostPerMinute, 'caller_cost'],
-        [`cost:network:${networkKey}`, cost, limits.networkCostPerMinute, 'network_cost'],
-        ['cost:global', cost, limits.globalCostPerMinute, 'global_cost'],
+        [`${scope}:requests:caller:${callerKey}`, 1, limits.callerRequestsPerMinute, 'caller_requests'],
+        [`${scope}:requests:network:${networkKey}`, 1, limits.networkRequestsPerMinute, 'network_requests'],
+        [`${scope}:requests:global`, 1, limits.globalRequestsPerMinute, 'global_requests'],
+        [`${scope}:cost:caller:${callerKey}`, cost, limits.callerCostPerMinute, 'caller_cost'],
+        [`${scope}:cost:network:${networkKey}`, cost, limits.networkCostPerMinute, 'network_cost'],
+        [`${scope}:cost:global`, cost, limits.globalCostPerMinute, 'global_cost'],
       ];
       const resolved = checks.map(([key, amount, limit, reason]) => ({
         key,
@@ -231,7 +232,7 @@ export const createRedisRequestControlStore = (
 
   return {
     mode: 'redis',
-    async acquire({ callerKey, networkKey, cost, limits }) {
+    async acquire({ callerKey, networkKey, cost, limits, scope = 'tool' }) {
       const leaseId = randomUUID();
       const now = Date.now();
       const result = await client.eval(
@@ -292,15 +293,15 @@ export const createRedisRequestControlStore = (
          end
          return {1, 0}`,
         9,
-        key(`requests:caller:${callerKey}`),
-        key(`requests:network:${networkKey}`),
-        key('requests:global'),
-        key(`cost:caller:${callerKey}`),
-        key(`cost:network:${networkKey}`),
-        key('cost:global'),
-        key(`concurrency:caller:${callerKey}`),
-        key(`concurrency:network:${networkKey}`),
-        key('concurrency:global'),
+        key(`${scope}:requests:caller:${callerKey}`),
+        key(`${scope}:requests:network:${networkKey}`),
+        key(`${scope}:requests:global`),
+        key(`${scope}:cost:caller:${callerKey}`),
+        key(`${scope}:cost:network:${networkKey}`),
+        key(`${scope}:cost:global`),
+        key(`${scope}:concurrency:caller:${callerKey}`),
+        key(`${scope}:concurrency:network:${networkKey}`),
+        key(`${scope}:concurrency:global`),
         cost,
         limits.callerRequestsPerMinute,
         limits.networkRequestsPerMinute,
@@ -346,9 +347,9 @@ export const createRedisRequestControlStore = (
             `for _, concurrencyKey in ipairs(KEYS) do redis.call('ZREM', concurrencyKey, ARGV[1]) end
              return 1`,
             3,
-            key(`concurrency:caller:${callerKey}`),
-            key(`concurrency:network:${networkKey}`),
-            key('concurrency:global'),
+            key(`${scope}:concurrency:caller:${callerKey}`),
+            key(`${scope}:concurrency:network:${networkKey}`),
+            key(`${scope}:concurrency:global`),
             leaseId,
           );
         },

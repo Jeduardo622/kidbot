@@ -2,15 +2,19 @@ import assert from 'node:assert/strict';
 import { randomInt } from 'node:crypto';
 import { createServer } from 'node:http';
 import { createConnection } from 'node:net';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { spawn } from 'node:child_process';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import Redis from 'ioredis';
+import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
 
-const mcpEntry = join(process.cwd(), 'dist', 'server.js');
-const agentEntry = join(process.cwd(), '../agent-service/dist/index.js');
+const packageDir = dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
+const repositoryRoot = join(packageDir, '../..');
+const mcpEntry = join(packageDir, 'dist', 'server.js');
+const agentEntry = join(packageDir, '../agent-service/dist/index.js');
 
 if (!existsSync(mcpEntry)) {
   throw new Error(
@@ -31,16 +35,19 @@ const toolIds = [
   'science_sim',
   'parent_profile_create',
   'parent_profile_update',
+  'parent_profile_delete',
   'parent_history_list',
 ];
 const strongToken = () => `matrix-token-${randomInt(1000, 9999)}-abcdefghijklmnopqrstuvwxyz0123456789`;
-const localEnvBypassPath = join(process.cwd(), '.env.auth-matrix-not-used');
-const isolatedEnvKeys = [
+const localEnvBypassPath = join(packageDir, '.env.auth-matrix-not-used');
+const mcpServerEnvKeys = [
   'AGENT_BASE_URL',
   'AGENT_PORT',
   'AGENT_SERVICE_TOKEN',
   'FALLBACK_WIDGET',
   'KIDBOT_LOCAL_DEV',
+  'KIDBOT_WIDGET_DOMAIN',
+  'KIDBOT_WIDGET_RESOURCE_DOMAINS',
   'MCP_PORT',
   'MCP_AGENT_REQUEST_TIMEOUT_MS',
   'MCP_CALLER_CONCURRENCY',
@@ -53,10 +60,16 @@ const isolatedEnvKeys = [
   'MCP_NETWORK_COST_PER_MINUTE',
   'MCP_NETWORK_REQUESTS_PER_MINUTE',
   'MCP_REQUEST_CONTROL_STORE',
-  'OPENAI_API_KEY',
+  'NODE_ENV',
+  'PARENT_AUTH_SECRET',
   'PARENT_HISTORY_MAX_EVENTS',
   'PARENT_HISTORY_RETENTION_DAYS',
   'PARENT_PROFILE_STORE',
+];
+const schemaValidator = new AjvJsonSchemaValidator();
+const isolatedEnvKeys = [
+  ...mcpServerEnvKeys,
+  'OPENAI_API_KEY',
   'PORT',
 ];
 
@@ -240,6 +253,113 @@ const redisAvailable = (redisUrl) =>
     }
   });
 
+const configImportEnv = Object.fromEntries(
+  mcpServerEnvKeys.map((key) => [key, process.env[key]]),
+);
+for (const key of mcpServerEnvKeys) {
+  delete process.env[key];
+}
+process.env.FALLBACK_WIDGET = '1';
+process.env.KIDBOT_LOCAL_DEV = '1';
+process.env.NODE_ENV = 'test';
+const { parseMcpServerConfig } = await import('../dist/config.js');
+for (const [key, value] of Object.entries(configImportEnv)) {
+  if (value === undefined) {
+    delete process.env[key];
+  } else {
+    process.env[key] = value;
+  }
+}
+
+const productionWidgetEnv = {
+  NODE_ENV: 'production',
+  AGENT_SERVICE_TOKEN: 'a'.repeat(32),
+  MCP_REQUEST_CONTROL_STORE: 'redis',
+  KIDBOT_WIDGET_DOMAIN: 'https://kidbot-production.up.railway.app',
+  KIDBOT_WIDGET_RESOURCE_DOMAINS: 'https://rxnwualzddplucjhclij.supabase.co',
+};
+
+const getToolDescriptor = async (baseUrl, name) => {
+  const response = await callMcp(baseUrl, {
+    jsonrpc: '2.0',
+    id: `list-${name}`,
+    method: 'tools/list',
+    params: {},
+  });
+  const descriptor = parseMcpResponse(response.body).result.tools.find((tool) => tool.name === name);
+  assert.ok(descriptor, `missing ${name} descriptor`);
+  return descriptor;
+};
+
+const assertMatchesAdvertisedOutput = (descriptor, structuredContent) => {
+  const result = schemaValidator.getValidator(descriptor.outputSchema)(structuredContent);
+  assert.equal(result.valid, true, result.errorMessage);
+};
+
+test('widget CSP parses exact production origins', () => {
+  const config = parseMcpServerConfig(productionWidgetEnv);
+
+  assert.equal(config.widgetDomain, 'https://kidbot-production.up.railway.app');
+  assert.deepEqual(config.widgetResourceDomains, [
+    'https://rxnwualzddplucjhclij.supabase.co',
+  ]);
+});
+
+test('widget CSP rejects non-exact production origins', () => {
+  const invalidValues = [
+    'http://rxnwualzddplucjhclij.supabase.co',
+    'https://*.supabase.co',
+    'https://rxnwualzddplucjhclij.supabase.co/storage',
+    'https://rxnwualzddplucjhclij.supabase.co?query=1',
+    'https://rxnwualzddplucjhclij.supabase.co#fragment',
+    'https://user:password@rxnwualzddplucjhclij.supabase.co',
+  ];
+
+  for (const value of invalidValues) {
+    assert.throws(
+      () => parseMcpServerConfig({
+        ...productionWidgetEnv,
+        KIDBOT_WIDGET_RESOURCE_DOMAINS: value,
+      }),
+      /KIDBOT_WIDGET_RESOURCE_DOMAINS/,
+      value,
+    );
+  }
+});
+
+test('widget CSP requires both production values', () => {
+  for (const missingKey of ['KIDBOT_WIDGET_DOMAIN', 'KIDBOT_WIDGET_RESOURCE_DOMAINS']) {
+    const env = { ...productionWidgetEnv };
+    delete env[missingKey];
+    assert.throws(() => parseMcpServerConfig(env), new RegExp(missingKey));
+  }
+});
+
+test('widget CSP uses sandbox defaults outside production', () => {
+  const config = parseMcpServerConfig({
+    FALLBACK_WIDGET: '1',
+    KIDBOT_LOCAL_DEV: '1',
+  });
+
+  assert.equal(config.widgetDomain, 'https://web-sandbox.oaiusercontent.com');
+  assert.deepEqual(config.widgetResourceDomains, []);
+});
+
+test('production parent retention fails closed unless it is exactly 30 days', () => {
+  assert.throws(
+    () => parseMcpServerConfig({
+      ...productionWidgetEnv,
+      PARENT_HISTORY_RETENTION_DAYS: '7',
+    }),
+    /PARENT_HISTORY_RETENTION_DAYS must be 30 in production/i,
+  );
+
+  assert.equal(parseMcpServerConfig({
+    ...productionWidgetEnv,
+    PARENT_HISTORY_RETENTION_DAYS: '30',
+  }).parentHistoryRetentionDays, 30);
+});
+
 test('non-fallback mode without AGENT_SERVICE_TOKEN fails closed at mcp startup', async () => {
   const mcpPort = await getFreePort();
   const mcp = spawnProcess(mcpEntry, {
@@ -264,10 +384,10 @@ test('non-fallback mode without AGENT_SERVICE_TOKEN fails closed at mcp startup'
 test('non-fallback production mode with short AGENT_SERVICE_TOKEN fails closed at mcp startup', async () => {
   const mcpPort = await getFreePort();
   const mcp = spawnProcess(mcpEntry, {
+    ...productionWidgetEnv,
     AGENT_SERVICE_TOKEN: 'short-token-secret',
     FALLBACK_WIDGET: '0',
     MCP_PORT: String(mcpPort),
-    NODE_ENV: 'production',
   });
 
   let stderr = '';
@@ -376,6 +496,170 @@ test('fallback mode remains explicit bypass path without AGENT_SERVICE_TOKEN', a
   }
 });
 
+test('network admission limits list and malformed requests before dispatch', async () => {
+  const mcpPort = await getFreePort();
+  const mcpBaseUrl = `http://localhost:${mcpPort}`;
+  const mcp = spawnProcess(mcpEntry, {
+    FALLBACK_WIDGET: '1',
+    KIDBOT_LOCAL_DEV: '1',
+    MCP_GLOBAL_REQUESTS_PER_MINUTE: '1',
+    MCP_PORT: String(mcpPort),
+    MCP_REQUEST_CONTROL_STORE: 'memory',
+  });
+  try {
+    await waitForMcpHealth(mcpBaseUrl);
+    const first = await callMcp(mcpBaseUrl, {
+      jsonrpc: '2.0',
+      id: 700,
+      method: 'tools/list',
+      params: {},
+    });
+    assert.equal(first.status, 200);
+    const blocked = await callMcp(mcpBaseUrl, {
+      jsonrpc: '2.0',
+      id: 701,
+      method: 'resources/list',
+      params: {},
+    });
+    assert.equal(blocked.status, 429);
+    assert.match(blocked.body, /rate_limited/);
+  } finally {
+    stopProcess(mcp);
+  }
+});
+
+test('network admission accounts oversized bodies before JSON parsing', async () => {
+  const mcpPort = await getFreePort();
+  const mcpBaseUrl = `http://localhost:${mcpPort}`;
+  const mcp = spawnProcess(mcpEntry, {
+    FALLBACK_WIDGET: '1',
+    KIDBOT_LOCAL_DEV: '1',
+    MCP_GLOBAL_REQUESTS_PER_MINUTE: '1',
+    MCP_PORT: String(mcpPort),
+    MCP_REQUEST_CONTROL_STORE: 'memory',
+  });
+  try {
+    await waitForMcpHealth(mcpBaseUrl);
+    const oversized = await fetch(`${mcpBaseUrl}/mcp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({ padding: 'x'.repeat(1024 * 1024) }),
+    });
+    assert.equal(oversized.status, 413);
+    const blocked = await callMcp(mcpBaseUrl, {
+      jsonrpc: '2.0', id: 702, method: 'tools/list', params: {},
+    });
+    assert.equal(blocked.status, 429);
+  } finally {
+    stopProcess(mcp);
+  }
+});
+
+test('mcp rejects local fallback intent in production', async () => {
+  const mcpPort = await getFreePort();
+  const mcp = spawnProcess(mcpEntry, {
+    NODE_ENV: 'production',
+    FALLBACK_WIDGET: '1',
+    KIDBOT_LOCAL_DEV: '1',
+    MCP_PORT: String(mcpPort),
+  });
+  let stderr = '';
+  mcp.stderr.on('data', (chunk) => {
+    stderr += chunk.toString();
+  });
+  try {
+    const exit = await readExit(mcp, 3500);
+    assert.notEqual(exit.code, 0);
+    assert.match(stderr, /production.*fallback|fallback.*production/i);
+  } finally {
+    stopProcess(mcp);
+  }
+});
+
+test('privacy route publishes the source-backed data and retention contract', async () => {
+  const mcpPort = await getFreePort();
+  const mcpBaseUrl = `http://localhost:${mcpPort}`;
+  const mcp = spawnProcess(mcpEntry, {
+    FALLBACK_WIDGET: '1',
+    KIDBOT_LOCAL_DEV: '1',
+    MCP_PORT: String(mcpPort),
+  });
+
+  try {
+    await waitForMcpHealth(mcpBaseUrl);
+
+    const response = await fetch(`${mcpBaseUrl}/privacy`);
+    const html = await response.text();
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
+    for (const disclosure of [
+      /OpenAI processes prompts and generated outputs/i,
+      /Railway hosts the Kidbot services and Redis deployment/i,
+      /Supabase Storage stores generated story-panel images/i,
+      /Browser speech recognition may send microphone audio/i,
+      /In production, Kidbot retains[^.]*exactly 30 days/i,
+      /In production, generated story images[^.]*exactly 24 hours/i,
+      /deletion cannot recall data[^.]*OpenAI, Railway, Supabase/i,
+      /github\.com\/Jeduardo622\/kidbot\/issues/i,
+    ]) {
+      assert.match(html, disclosure);
+    }
+
+    const diag = await (await fetch(`${mcpBaseUrl}/diag`)).text();
+    assert.match(diag, /href="\/privacy"/i);
+
+    const privacyMarkdown = readFileSync(join(repositoryRoot, 'PRIVACY.md'), 'utf8');
+    const decodeHtml = (value) => value
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&rsquo;/g, '’');
+    const normalizeDisclosure = (value) => decodeHtml(value)
+      .replace(/<head>[\s\S]*?<\/head>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/^#{1,6}\s+/gm, '')
+      .replace(/^[-*]\s+/gm, '')
+      .replace(/\*\*/g, '')
+      .replace(/<([^>]+)>/g, '$1')
+      .replace(/\s+/g, ' ')
+      .replace(/\s+([.,;:!?])/g, '$1')
+      .trim();
+    assert.equal(normalizeDisclosure(html), normalizeDisclosure(privacyMarkdown));
+
+    const readme = readFileSync(join(repositoryRoot, 'README.md'), 'utf8');
+    const spec = readFileSync(join(repositoryRoot, 'EXECUTSPEC.md'), 'utf8');
+    assert.doesNotMatch(readme, /do not store profile or session data/i);
+    assert.doesNotMatch(spec, /COPPA\s*\/\s*GDPR-K aligned/i);
+    assert.doesNotMatch(spec, /Session only, no external storage/i);
+    assert.match(`${readme}\n${spec}`, /privacy and legal review[^\n]*required[^\n]*public launch/i);
+  } finally {
+    stopProcess(mcp);
+  }
+});
+
+test('parent profile deletion is destructive, closed-world, and requires parent credentials', async () => {
+  const mcpPort = await getFreePort();
+  const mcpBaseUrl = `http://localhost:${mcpPort}`;
+  const mcp = spawnProcess(mcpEntry, {
+    FALLBACK_WIDGET: '1',
+    KIDBOT_LOCAL_DEV: '1',
+    MCP_PORT: String(mcpPort),
+  });
+
+  try {
+    await waitForMcpHealth(mcpBaseUrl);
+    const descriptor = await getToolDescriptor(mcpBaseUrl, 'parent_profile_delete');
+    assert.equal(descriptor.annotations?.destructiveHint, true);
+    assert.equal(descriptor.annotations?.openWorldHint, false);
+    assert.deepEqual(descriptor.inputSchema.required?.sort(), ['parentAccessToken', 'profileId']);
+    assert.equal(descriptor.inputSchema.additionalProperties, false);
+  } finally {
+    stopProcess(mcp);
+  }
+});
+
 test('mcp returns a stable tool error when a caller exceeds its request budget', async () => {
   const mcpPort = await getFreePort();
   const mcpBaseUrl = `http://localhost:${mcpPort}`;
@@ -403,8 +687,10 @@ test('mcp returns a stable tool error when a caller exceeds its request budget',
 
   try {
     await waitForMcpHealth(mcpBaseUrl);
+    const descriptor = await getToolDescriptor(mcpBaseUrl, 'voice_chat');
     const first = await callMcp(mcpBaseUrl, payload);
     const second = await callMcp(mcpBaseUrl, { ...payload, id: 121 });
+    const rejection = parseMcpResponse(second.body).result.structuredContent;
 
     assert.equal(first.status, 200);
     assert.match(first.body, /reply ready/i);
@@ -412,6 +698,7 @@ test('mcp returns a stable tool error when a caller exceeds its request budget',
     assert.match(second.body, /"isError":true/);
     assert.match(second.body, /"code":"rate_limited"/);
     assert.match(second.body, /"retryAfter"/);
+    assertMatchesAdvertisedOutput(descriptor, rejection);
   } finally {
     stopProcess(mcp);
   }
@@ -532,7 +819,8 @@ test('rotated subject and forwarded headers cannot evade the network budget', as
     );
     assert.equal(first.status, 200);
     assert.match(first.body, /reply ready/i);
-    assert.match(second.body, /"code":"rate_limited"/);
+    assert.equal(second.status, 429);
+    assert.match(second.body, /"message":"rate_limited"/);
   } finally {
     stopProcess(mcp);
   }
@@ -640,6 +928,7 @@ test('mcp surfaces provider 503 as degraded content instead of a safety block', 
 
   try {
     await waitForMcpHealth(mcpBaseUrl);
+    const descriptor = await getToolDescriptor(mcpBaseUrl, 'voice_chat');
 
     const response = await callMcp(mcpBaseUrl, {
       jsonrpc: '2.0',
@@ -660,6 +949,10 @@ test('mcp surfaces provider 503 as degraded content instead of a safety block', 
     assert.match(response.body, /"degraded":true/);
     assert.match(response.body, /"fallbackReason":"generation_timeout"/);
     assert.match(response.body, /idea engine right now/i);
+    assertMatchesAdvertisedOutput(
+      descriptor,
+      parseMcpResponse(response.body).result.structuredContent,
+    );
   } finally {
     stopProcess(mcp);
     await closeServer(fakeAgent);
@@ -698,6 +991,7 @@ test('mcp deadline aborts the downstream agent request', async () => {
 
   try {
     await waitForMcpHealth(mcpBaseUrl);
+    const descriptor = await getToolDescriptor(mcpBaseUrl, 'voice_chat');
     const response = await callMcp(mcpBaseUrl, {
       jsonrpc: '2.0',
       id: 122,
@@ -715,8 +1009,71 @@ test('mcp deadline aborts the downstream agent request', async () => {
     assert.equal(response.status, 200);
     assert.match(response.body, /"isError":true/);
     assert.match(response.body, /"code":"request_timeout"/);
+    assertMatchesAdvertisedOutput(
+      descriptor,
+      parseMcpResponse(response.body).result.structuredContent,
+    );
     assert.equal(await Promise.race([aborted, delay(1_000).then(() => false)]), true);
   } finally {
+    stopProcess(mcp);
+    await closeServer(fakeAgent);
+  }
+});
+
+test('mcp concurrency rejection matches the advertised output contract', async () => {
+  const token = strongToken();
+  const agentPort = await getFreePort();
+  const mcpPort = await getFreePort();
+  const mcpBaseUrl = `http://localhost:${mcpPort}`;
+  let markRequestReceived;
+  const requestReceived = new Promise((resolve) => {
+    markRequestReceived = resolve;
+  });
+  let releaseFirstResponse;
+  const firstResponseReleased = new Promise((resolve) => {
+    releaseFirstResponse = resolve;
+  });
+  const fakeAgent = createServer((req, res) => {
+    if (req.method === 'POST' && req.url === '/voice') {
+      markRequestReceived();
+      void firstResponseReleased.then(() => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ blocked: false, persona: 'robot', text: 'Ready.' }));
+      });
+      return;
+    }
+    res.writeHead(404).end();
+  });
+  await listen(fakeAgent, agentPort);
+  const mcp = spawnProcess(mcpEntry, {
+    AGENT_PORT: String(agentPort),
+    AGENT_SERVICE_TOKEN: token,
+    FALLBACK_WIDGET: '0',
+    MCP_CALLER_CONCURRENCY: '1',
+    MCP_GLOBAL_CONCURRENCY: '10',
+    MCP_NETWORK_CONCURRENCY: '10',
+    MCP_PORT: String(mcpPort),
+    MCP_REQUEST_CONTROL_STORE: 'memory',
+  });
+  const payload = (id) => ({
+    jsonrpc: '2.0', id, method: 'tools/call', params: {
+      name: 'voice_chat',
+      arguments: { text: 'Tell me a moon fact', persona: 'robot', ageBand: '7-9' },
+    },
+  });
+  try {
+    await waitForMcpHealth(mcpBaseUrl);
+    const descriptor = await getToolDescriptor(mcpBaseUrl, 'voice_chat');
+    const first = callMcp(mcpBaseUrl, payload(710));
+    await requestReceived;
+    const second = await callMcp(mcpBaseUrl, payload(711));
+    const result = parseMcpResponse(second.body).result;
+    assert.equal(result.structuredContent.code, 'concurrency_limited');
+    assertMatchesAdvertisedOutput(descriptor, result.structuredContent);
+    releaseFirstResponse();
+    await first;
+  } finally {
+    releaseFirstResponse();
     stopProcess(mcp);
     await closeServer(fakeAgent);
   }
@@ -863,6 +1220,7 @@ test('mcp strips parent token and saves metadata history with valid parent auth'
         name: 'parent_profile_create',
         arguments: {
           ageBand: '4-6',
+          historyEnabled: true,
           sessionId,
         },
       },
@@ -871,7 +1229,27 @@ test('mcp strips parent token and saves metadata history with valid parent auth'
     const createJson = parseMcpResponse(createResponse.body);
     const profile = createJson.result.structuredContent;
     assert.match(profile.profileId, /^kb_profile_/);
-    assert.match(profile.parentAccessToken, /^kb_parent_/);
+    assert.equal(profile.parentAccessToken, undefined);
+    assert.equal(JSON.stringify(createJson.result.content).includes('kb_parent_'), false);
+    assert.match(createJson.result._meta.parentAccessToken, /^kb_parent_/);
+    profile.parentAccessToken = createJson.result._meta.parentAccessToken;
+
+    const otherCreateResponse = await callMcp(mcpBaseUrl, {
+      jsonrpc: '2.0',
+      id: 1061,
+      method: 'tools/call',
+      params: {
+        name: 'parent_profile_create',
+        arguments: {
+          ageBand: '7-9',
+          historyEnabled: true,
+          sessionId: `${sessionId}other`,
+        },
+      },
+    });
+    const otherCreateJson = parseMcpResponse(otherCreateResponse.body);
+    const otherProfile = otherCreateJson.result.structuredContent;
+    otherProfile.parentAccessToken = otherCreateJson.result._meta.parentAccessToken;
 
     const wrongTokenSessionId = `${sessionId}wrong`;
     const wrongTokenResponse = await callMcp(mcpBaseUrl, {
@@ -912,6 +1290,7 @@ test('mcp strips parent token and saves metadata history with valid parent auth'
     assert.equal(voiceResponse.status, 200);
     assert.equal(forwardedBody.parentAccessToken, undefined);
     assert.equal(forwardedBody.profileId, profile.profileId);
+    assert.equal(voiceResponse.body.includes(profile.parentAccessToken), false);
 
     const historyResponse = await callMcp(mcpBaseUrl, {
       jsonrpc: '2.0',
@@ -952,6 +1331,96 @@ test('mcp strips parent token and saves metadata history with valid parent auth'
     assert.equal(wrongTokenHistoryResponse.status, 200);
     const wrongTokenHistoryJson = parseMcpResponse(wrongTokenHistoryResponse.body);
     assert.equal(wrongTokenHistoryJson.result.structuredContent.events.length, 0);
+
+    const foreignUpdateResponse = await callMcp(mcpBaseUrl, {
+      jsonrpc: '2.0',
+      id: 1101,
+      method: 'tools/call',
+      params: {
+        name: 'parent_profile_update',
+        arguments: {
+          profileId: profile.profileId,
+          parentAccessToken: otherProfile.parentAccessToken,
+          historyEnabled: false,
+        },
+      },
+    });
+    const foreignUpdateJson = parseMcpResponse(foreignUpdateResponse.body);
+    assert.equal(foreignUpdateJson.result.isError, true);
+    assert.deepEqual(foreignUpdateJson.result.structuredContent, {
+      error: true,
+      code: 'invalid_parent_access',
+    });
+    assert.equal(foreignUpdateResponse.body.includes(otherProfile.parentAccessToken), false);
+    assertMatchesAdvertisedOutput(
+      await getToolDescriptor(mcpBaseUrl, 'parent_profile_update'),
+      foreignUpdateJson.result.structuredContent,
+    );
+
+    const foreignDeleteResponse = await callMcp(mcpBaseUrl, {
+      jsonrpc: '2.0',
+      id: 111,
+      method: 'tools/call',
+      params: {
+        name: 'parent_profile_delete',
+        arguments: {
+          profileId: profile.profileId,
+          parentAccessToken: otherProfile.parentAccessToken,
+        },
+      },
+    });
+    const foreignDeleteJson = parseMcpResponse(foreignDeleteResponse.body);
+    assert.equal(foreignDeleteJson.result.isError, true);
+    assert.deepEqual(foreignDeleteJson.result.structuredContent, {
+      error: true,
+      code: 'invalid_parent_access',
+    });
+    assert.equal(foreignDeleteResponse.body.includes(otherProfile.parentAccessToken), false);
+    assertMatchesAdvertisedOutput(
+      await getToolDescriptor(mcpBaseUrl, 'parent_profile_delete'),
+      foreignDeleteJson.result.structuredContent,
+    );
+
+    const deleteResponse = await callMcp(mcpBaseUrl, {
+      jsonrpc: '2.0',
+      id: 112,
+      method: 'tools/call',
+      params: {
+        name: 'parent_profile_delete',
+        arguments: {
+          profileId: profile.profileId,
+          parentAccessToken: profile.parentAccessToken,
+        },
+      },
+    });
+    assert.deepEqual(parseMcpResponse(deleteResponse.body).result.structuredContent, {
+      deleted: true,
+      profileId: profile.profileId,
+    });
+
+    const deletedTokenHistoryResponse = await callMcp(mcpBaseUrl, {
+      jsonrpc: '2.0',
+      id: 113,
+      method: 'tools/call',
+      params: {
+        name: 'parent_history_list',
+        arguments: {
+          profileId: profile.profileId,
+          parentAccessToken: profile.parentAccessToken,
+        },
+      },
+    });
+    const deletedTokenHistoryJson = parseMcpResponse(deletedTokenHistoryResponse.body);
+    assert.equal(deletedTokenHistoryJson.result.isError, true);
+    assert.deepEqual(deletedTokenHistoryJson.result.structuredContent, {
+      error: true,
+      code: 'invalid_parent_access',
+    });
+    assert.equal(deletedTokenHistoryResponse.body.includes(profile.parentAccessToken), false);
+    assertMatchesAdvertisedOutput(
+      await getToolDescriptor(mcpBaseUrl, 'parent_history_list'),
+      deletedTokenHistoryJson.result.structuredContent,
+    );
   } finally {
     stopProcess(mcp);
     await closeServer(fakeAgent);

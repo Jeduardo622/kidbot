@@ -274,9 +274,15 @@ const runParentFlow = async (baseUrl) => {
   const wrongTokenSessionId = `kb_session_wrong${suffix}`;
   const create = await callMcp(baseUrl, 301, 'parent_profile_create', {
     ageBand: '7-9',
+    historyEnabled: true,
     sessionId,
   });
-  const profile = assertMcpOk(create, 'parent_profile_create');
+  const publicProfile = assertMcpOk(create, 'parent_profile_create');
+  assert.equal(publicProfile.parentAccessToken, undefined, 'parent token must not be model-visible');
+  const profile = {
+    ...publicProfile,
+    parentAccessToken: create.parsed.result?._meta?.parentAccessToken,
+  };
   assert.match(profile.profileId, /^kb_profile_/);
   assert.match(profile.parentAccessToken, /^kb_parent_/);
   assert.equal(profile.historyEnabled, true);
@@ -339,7 +345,21 @@ const runParentFlow = async (baseUrl) => {
     sessionId,
     limit: 20,
   });
-  assertMcpError(unauthorizedHistory, 'parent_history_list with wrong token', /invalid parent access token/i);
+  assertMcpError(unauthorizedHistory, 'parent_history_list with wrong token', /invalid_parent_access/);
+
+  const deleted = await callMcp(baseUrl, 308, 'parent_profile_delete', {
+    profileId: profile.profileId,
+    parentAccessToken: profile.parentAccessToken,
+  });
+  const deletedContent = assertMcpOk(deleted, 'parent_profile_delete');
+  assert.deepEqual(deletedContent, { deleted: true, profileId: profile.profileId });
+
+  const historyAfterDelete = await callMcp(baseUrl, 309, 'parent_history_list', {
+    profileId: profile.profileId,
+    parentAccessToken: profile.parentAccessToken,
+    limit: 20,
+  });
+  assertMcpError(historyAfterDelete, 'parent_history_list after delete', /invalid_parent_access/);
 
   return {
     events: initialEvents.length,
@@ -423,6 +443,8 @@ const runLocal = async () => {
     AGENT_SERVICE_TOKEN: serviceToken,
     FALLBACK_WIDGET: '0',
     KIDBOT_LOCAL_DEV: '0',
+    KIDBOT_WIDGET_DOMAIN: 'https://kidbot-production.up.railway.app',
+    KIDBOT_WIDGET_RESOURCE_DOMAINS: 'https://rxnwualzddplucjhclij.supabase.co',
     MCP_PORT: String(mcpPort),
     NODE_ENV: 'production',
     PARENT_AUTH_SECRET: parentSecret,

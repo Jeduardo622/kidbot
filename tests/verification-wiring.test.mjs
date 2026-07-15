@@ -82,6 +82,20 @@ test('secured posture verification builds its required agent-service artifact fi
   );
 });
 
+test('secured posture MCP children receive exact production widget origins', async () => {
+  const smoke = await readFile('scripts/smoke-secured-posture.mjs', 'utf8');
+
+  assert.match(
+    smoke,
+    /KIDBOT_WIDGET_DOMAIN:\s*'https:\/\/kidbot-production\.up\.railway\.app'/,
+  );
+  assert.match(
+    smoke,
+    /KIDBOT_WIDGET_RESOURCE_DOMAINS:\s*'https:\/\/rxnwualzddplucjhclij\.supabase\.co'/,
+  );
+  assert.equal((smoke.match(/\.\.\.widgetProductionEnv/g) ?? []).length, 2);
+});
+
 test('parent store Redis smoke builds both required service artifacts first', async () => {
   const packageJson = JSON.parse(await readFile('package.json', 'utf8'));
 

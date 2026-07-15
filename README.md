@@ -149,7 +149,7 @@ docker compose -f docker-compose.redis.yml up -d
 
 `RATE_LIMIT_STORE=redis` requires `REDIS_URL` and shares route buckets across service replicas. The agent service `/healthz` endpoint reports limiter readiness. `PROVIDER_FAILURE_POLICY=503` makes model-backed failures visible as degraded service responses; set it to `fallback` only when deterministic stub substitution is acceptable.
 
-Provider-backed story panel images default to `KIDBOT_IMAGE_STORAGE_MODE=local`, which writes generated PNGs under `.kidbot/generated-images`, returns `/generated-images/<id>.png` in the existing nullable `imageUrl` field, rejects images larger than `KIDBOT_IMAGE_MAX_BYTES`, and cleans expired assets after `KIDBOT_IMAGE_TTL_SECONDS`. Set `KIDBOT_IMAGE_PUBLIC_BASE_URL` to the public origin/path that serves the agent-service `/generated-images` route when deployed behind a proxy. `KIDBOT_IMAGE_STORAGE_MODE=supabase` uploads generated PNGs to `KIDBOT_SUPABASE_IMAGE_BUCKET` under `KIDBOT_SUPABASE_IMAGE_PREFIX`, returns public Supabase Storage object URLs, and performs best-effort cleanup for expired `exp-...png` objects. In Supabase mode, leave `KIDBOT_IMAGE_PUBLIC_BASE_URL` empty so the service derives `https://<project-ref>.supabase.co/storage/v1/object/public/<bucket>`, or set it to that Supabase public object base explicitly; do not leave it at `/generated-images`. Keep `KIDBOT_SUPABASE_SERVICE_ROLE_KEY` server-only; never expose it to the widget or MCP iframe. `KIDBOT_IMAGE_STORAGE_MODE=data-url` keeps inline `data:image/png;base64,...` URLs for local compatibility but is not preferred for production MCP payload size. Image generation can take longer than short text calls, so `PROVIDER_TIMEOUT_MS=120000` is the documented provider-backed story-panel baseline.
+Provider-backed story panel images default to `KIDBOT_IMAGE_STORAGE_MODE=local`, which writes generated PNGs under `.kidbot/generated-images`, returns `/generated-images/<id>.png` in the existing nullable `imageUrl` field, rejects images larger than `KIDBOT_IMAGE_MAX_BYTES`, and cleans expired assets after `KIDBOT_IMAGE_TTL_SECONDS`. Production requires `KIDBOT_IMAGE_TTL_SECONDS=86400` (24 hours) and fails startup on a conflicting value; development and test may use explicit shorter values. Set `KIDBOT_IMAGE_PUBLIC_BASE_URL` to the public origin/path that serves the agent-service `/generated-images` route when deployed behind a proxy. `KIDBOT_IMAGE_STORAGE_MODE=supabase` uploads generated PNGs to `KIDBOT_SUPABASE_IMAGE_BUCKET` under `KIDBOT_SUPABASE_IMAGE_PREFIX`, returns public Supabase Storage object URLs, and performs best-effort cleanup for expired `exp-...png` objects. In Supabase mode, leave `KIDBOT_IMAGE_PUBLIC_BASE_URL` empty so the service derives `https://<project-ref>.supabase.co/storage/v1/object/public/<bucket>`, or set it to that Supabase public object base explicitly; do not leave it at `/generated-images`. Keep `KIDBOT_SUPABASE_SERVICE_ROLE_KEY` server-only; never expose it to the widget or MCP iframe. `KIDBOT_IMAGE_STORAGE_MODE=data-url` keeps inline `data:image/png;base64,...` URLs for local compatibility but is not preferred for production MCP payload size. Image generation can take longer than short text calls, so `PROVIDER_TIMEOUT_MS=120000` is the documented provider-backed story-panel baseline.
 
 Before deploying, build both services and run the secured posture smoke check:
 
@@ -183,11 +183,13 @@ For production MCP connector coverage, run the manual `Production MCP Story Pane
 
 ### Parent/Session Safety MVP
 
+The source-backed privacy disclosure is published at [`PRIVACY.md`](PRIVACY.md) and served by the MCP server at `/privacy`. It identifies the OpenAI, Railway, Supabase, and browser speech data paths; the 30-day consented history and 24-hour image retention settings; deletion limitations; and the support contact. Privacy and legal review is required before public launch; this repository does not claim legal certification.
+
 The widget creates a local `sessionId`, uses the non-PII `profileId` value `local-default`, and stores the locked age band in ChatGPT widget state. Parent controls are gated by a 4-digit session PIN; the PIN is session-scoped widget state only and is not an account, authentication factor, persistent parent identity, or server-side access control.
 
-All child-facing tools use the locked widget age band. MCP and agent-service accept optional `sessionId`, `profileId`, and `ageBand` metadata for safe audit logs, default omitted `ageBand` to `7-9` behaviorally, and do not store profile or session data.
+All child-facing tools use the locked widget age band. MCP and agent-service accept optional `sessionId`, `profileId`, and `ageBand` metadata, and default omitted `ageBand` to `7-9` behaviorally. Secured request summaries use keyed pseudonymous session/profile references and never log raw IDs, prompts, tokens, PINs, generated content, or full image URLs; local fallback summaries omit those references. With explicit parent consent and Redis enabled, Kidbot stores parent profiles and metadata-only session history for the configured 30-day retention period.
 
-To enable persistent parent profiles and metadata-only session history, set `PARENT_PROFILE_STORE=redis`, provide the same `REDIS_URL`, and set a high-entropy `PARENT_AUTH_SECRET`. MCP issues a server-side parent access token after the widget parent PIN flow and stores only an HMAC hash of that token. This token gates saved profile settings and history reads/writes, but it is still not account identity. Saved history excludes prompts, responses, PINs, service tokens, and generated artifacts. MCP `/healthz` reports parent profile store readiness without exposing secrets or history.
+To enable persistent parent profiles and metadata-only session history, set `PARENT_PROFILE_STORE=redis`, provide the same `REDIS_URL`, and set a high-entropy `PARENT_AUTH_SECRET`. Production requires `PARENT_HISTORY_RETENTION_DAYS=30` and fails startup on a conflicting value; development and test may use explicit shorter values. MCP issues a server-side parent access token after the widget parent PIN flow and stores only an HMAC hash of that token. This token gates saved profile settings and history reads/writes, but it is still not account identity. Saved history excludes prompts, responses, PINs, service tokens, and generated artifacts. MCP `/healthz` reports parent profile store readiness without exposing secrets or history.
 
 Generate the parent auth secret with:
 
@@ -291,6 +293,8 @@ Set MCP env:
 MCP_PORT=<Railway assigned port>
 AGENT_BASE_URL=<agent-service Railway private URL, or public HTTPS URL if private DNS is unavailable>
 AGENT_SERVICE_TOKEN=<same high-entropy service token as agent-service>
+KIDBOT_WIDGET_DOMAIN=https://<public MCP service domain>
+KIDBOT_WIDGET_RESOURCE_DOMAINS=https://<project-ref>.supabase.co
 REDIS_URL=<Railway Redis private URL>
 MCP_REQUEST_CONTROL_STORE=redis
 MCP_CALLER_REQUESTS_PER_MINUTE=60
@@ -308,6 +312,8 @@ PARENT_AUTH_SECRET=<high-entropy parent secret>
 PARENT_HISTORY_RETENTION_DAYS=30
 PARENT_HISTORY_MAX_EVENTS=200
 ```
+
+Widget CSP values must be exact HTTPS origins without paths or wildcards. Use the public MCP service origin for `KIDBOT_WIDGET_DOMAIN`; list any additional widget asset origins in `KIDBOT_WIDGET_RESOURCE_DOMAINS`, separated by commas.
 
 The MCP server reserves caller, server-derived network, and deployment-global request, provider-cost, and concurrency capacity atomically in Redis before each tool call. Story cost includes text/moderation work plus the requested image count, and story image generation is limited to two provider calls at a time. Production fails closed if the Redis control store is unavailable. MCP deadlines cancel the downstream agent request, and agent-service forwards cancellation into OpenAI SDK calls.
 
@@ -339,6 +345,7 @@ If installs are blocked, you can still preview the widget and flows:
 - Health & Diag:
   - `/healthz`  -> shows fallback or dist mode
   - `/diag`     -> links to the fallback widget and fixtures
+  - `/privacy`  -> serves the current privacy disclosure
 
 - CLI shims:
   - `export PATH="$PWD/bin:$PATH"` to use the zero-install `eslint` and `tsc` wrappers
