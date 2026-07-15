@@ -12,7 +12,8 @@ describe('bridge error messages', () => {
     document.body.append(iframe);
     const foreignWindow = iframe.contentWindow;
     if (!foreignWindow) throw new Error('Expected an iframe window.');
-    const foreignError = new foreignWindow.Error('Tool request timed out after 60000ms.');
+    const ForeignError = (foreignWindow as unknown as { Error: ErrorConstructor }).Error;
+    const foreignError = new ForeignError('Tool request timed out after 60000ms.');
 
     expect(foreignError instanceof Error).toBe(false);
     expect(errorMessage(foreignError)).toBe('This request timed out. Please try again.');
