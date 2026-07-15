@@ -19,7 +19,7 @@ The server will adopt `@modelcontextprotocol/ext-apps/server` helpers for widget
 
 A focused metadata module will expose one canonical widget resource URI and one canonical resource metadata object. It will emit:
 
-- Standard `_meta.ui.resourceUri`, `_meta.ui.csp`, `_meta.ui.domain`, and `_meta.ui.visibility` fields.
+- Standard resource `_meta.ui.csp` and `_meta.ui.domain` fields, plus tool `_meta.ui.resourceUri` and `_meta.ui.visibility` fields.
 - Legacy `openai/outputTemplate`, `openai/widgetCSP`, `openai/widgetDomain`, `openai/widgetDescription`, and `openai/widgetAccessible` compatibility fields where relevant.
 - `text/html;profile=mcp-app` through `RESOURCE_MIME_TYPE`.
 
@@ -34,7 +34,7 @@ Every registered tool will declare:
 - `securitySchemes: [{ type: "noauth" }]` and the compatibility `_meta.securitySchemes` mirror. The existing parent token is tool input data for parent-scoped authorization, not ChatGPT OAuth.
 - Truthful `readOnlyHint`, `destructiveHint`, `openWorldHint`, and `idempotentHint` annotations.
 
-Generation tools are not read-only because authorized calls can append history. Profile creation/update are state-changing. History list is read-only. Profile deletion is destructive. Provider-backed child tools set `openWorldHint: true` because they send inputs to OpenAI and story generation can publish an ephemeral public image; parent-store-only tools set it to false.
+Generation tools are not read-only because authorized calls can append history. Profile creation/update are state-changing. History list is not read-only or idempotent because each authorized view renews retention. Profile deletion is destructive. Provider-backed child tools set `openWorldHint: true` because they send inputs to OpenAI and story generation can publish an ephemeral public image; parent-store-only tools set it to false.
 
 ## Consent and widget state
 
@@ -60,7 +60,7 @@ Reloading or remounting discards the PIN and bearer token. Persistent history fr
 - Cross-profile or invalid-token deletion fails closed.
 - Memory mode applies equivalent time-based expiry using injected/current time during operations.
 
-Generated image objects are not associated with profiles. The privacy policy will state that profile deletion does not immediately remove generated images and that public generated images are scheduled for cleanup within 24 hours. The implementation will not claim a hard deletion guarantee that the current best-effort object cleanup cannot prove.
+Generated image objects are not associated with profiles. The privacy policy will state that profile deletion does not immediately remove generated images and that public generated images use a 24-hour expiry target with periodic best-effort cleanup. The implementation will not claim a hard deletion guarantee that the current best-effort object cleanup cannot prove.
 
 ## Logging and policy
 
@@ -71,7 +71,7 @@ Agent-service request logs will replace raw `profileId` and `sessionId` values w
 - Child prompts and generated outputs used to provide the requested feature.
 - Optional metadata-only history and explicit parent opt-in.
 - OpenAI processing, Railway hosting/logs, Supabase public image storage, and browser speech-recognition processing.
-- Exact 30-day optional profile/history retention and scheduled 24-hour generated-image cleanup.
+- Exact 30-day optional profile/history retention and a 24-hour generated-image expiry target with periodic best-effort cleanup.
 - Immediate profile/history deletion semantics and the separate image cleanup window.
 - User controls and a deletion/contact process through `https://github.com/Jeduardo622/kidbot/issues` until a dedicated support channel is published.
 - No claim of COPPA, GDPR-K, or legal certification.

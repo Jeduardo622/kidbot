@@ -598,7 +598,10 @@ test('privacy route publishes the source-backed data and retention contract', as
       /Supabase Storage stores generated story-panel images/i,
       /Browser speech recognition may send microphone audio/i,
       /In production, Kidbot retains[^.]*exactly 30 days/i,
-      /In production, generated story images[^.]*exactly 24 hours/i,
+      /Successful parent credential validation[^.]*renew the 30-day window/i,
+      /In production, generated story images[^.]*24-hour expiry target/i,
+      /Cleanup of local or Supabase image objects is periodic and best effort/i,
+      /source objects can remain after the target when cleanup is delayed or fails/i,
       /deletion cannot recall data[^.]*OpenAI, Railway, Supabase/i,
       /github\.com\/Jeduardo622\/kidbot\/issues/i,
     ]) {
@@ -627,6 +630,7 @@ test('privacy route publishes the source-backed data and retention contract', as
       .replace(/\s+([.,;:!?])/g, '$1')
       .trim();
     assert.equal(normalizeDisclosure(html), normalizeDisclosure(privacyMarkdown));
+    assert.doesNotMatch(html, /generated story images[^.]*exactly 24 hours/i);
 
     const readme = readFileSync(join(repositoryRoot, 'README.md'), 'utf8');
     const spec = readFileSync(join(repositoryRoot, 'EXECUTSPEC.md'), 'utf8');

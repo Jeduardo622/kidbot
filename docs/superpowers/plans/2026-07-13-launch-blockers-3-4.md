@@ -122,7 +122,7 @@ git commit -m "feat: declare submission-ready widget metadata"
 
 - [ ] **Step 1: Write failing descriptor tests for all current tools**
 
-For every current tool, assert a title, JSON `outputSchema`, `securitySchemes: [{type:'noauth'}]`, mirrored `_meta.securitySchemes`, standard `_meta.ui.resourceUri`, compatibility template URI, and all three required impact annotations. Assert history list is read-only, generation tools are not read-only/open-world, and create/update are state-changing/closed-world.
+For every current tool, assert a title, JSON `outputSchema`, `securitySchemes: [{type:'noauth'}]`, mirrored `_meta.securitySchemes`, standard `_meta.ui.resourceUri`, compatibility template URI, and all four required impact annotations. Assert history list is state-changing and non-idempotent because authorized views renew retention, generation tools are not read-only/open-world, and create/update are state-changing/closed-world.
 
 - [ ] **Step 2: Run tool descriptor tests and verify RED**
 

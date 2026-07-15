@@ -36,7 +36,7 @@ Empower kids to *learn through play* by interacting with a trusted digital frien
 ## Safety & Compliance
 - **Launch review:** Privacy and legal review is required before public launch; the current implementation does not claim legal certification.
 - **Guardrails:** AI moderation layer filters harmful, scary, or adult content.  
-- **Privacy:** No open-ended chat logs. With explicit parent consent, pseudonymous parent profiles and metadata-only activity history may be retained for 30 days; generated story images use a 24-hour best-effort retention setting. See `PRIVACY.md`.
+- **Privacy:** No open-ended chat logs. With explicit parent consent, pseudonymous parent profiles and metadata-only activity history may be retained for 30 days; generated story images use a 24-hour expiry target with periodic best-effort cleanup. See `PRIVACY.md`.
 - **Transparency:** Clear disclosure “Kidbot is an AI friend that helps you learn and play.”  
 - **Parent Supervision:** Configurable via parental PIN (v0.4+).
 

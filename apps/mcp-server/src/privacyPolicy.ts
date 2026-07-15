@@ -35,8 +35,8 @@ const sections = [
   {
     title: 'Retention',
     paragraphs: [
-      'In production, Kidbot retains an explicitly enabled parent profile and its metadata-only session history for exactly 30 days from activity, subject to the configured history event limit. Authorized profile updates, history recording, and viewing saved history count as activity and renew the 30-day window. Production startup fails if a conflicting retention override is supplied. Development and test environments may use explicit shorter values. History does not include prompts, responses, PINs, tokens, or generated artifacts.',
-      'In production, generated story images are configured for exactly 24 hours of retention. Production startup fails if a conflicting image-retention override is supplied. Development and test environments may use explicit shorter values. Cleanup of local or Supabase image objects is best effort, and cached copies may remain outside Kidbot after the source object expires.',
+      'In production, Kidbot retains an explicitly enabled parent profile and its metadata-only session history for exactly 30 days from activity, subject to the configured history event limit. Successful parent credential validation, authorized profile updates, history recording, and viewing saved history count as activity and renew the 30-day window. Production startup fails if a conflicting retention override is supplied. Development and test environments may use explicit shorter values. History does not include prompts, responses, PINs, tokens, or generated artifacts.',
+      'In production, generated story images use a 24-hour expiry target. Production startup fails if a conflicting image-retention override is supplied. Development and test environments may use explicit shorter values. Cleanup of local or Supabase image objects is periodic and best effort, so source objects can remain after the target when cleanup is delayed or fails, and cached copies may remain outside Kidbot after the source object is removed.',
       'Kidbot does not set or guarantee each provider’s independent security, backup, abuse-monitoring, or legal retention. Provider terms and the operator’s account settings also apply.',
     ],
   },
@@ -44,7 +44,7 @@ const sections = [
     title: 'Deletion and limitations',
     paragraphs: [
       'An authorized parent can use the parent profile deletion control to delete the Kidbot parent profile and its associated session and history records from the active Kidbot store.',
-      'That deletion cannot recall data already processed or independently retained by OpenAI, Railway, Supabase, browser or operating-system speech services, backups, or caches. Kidbot does not currently offer an individual generated-image deletion control; image cleanup follows the production 24-hour best-effort retention process.',
+      'That deletion cannot recall data already processed or independently retained by OpenAI, Railway, Supabase, browser or operating-system speech services, backups, or caches. Kidbot does not currently offer an individual generated-image deletion control; image cleanup follows the production 24-hour expiry target and periodic best-effort cleanup process.',
     ],
   },
   {
