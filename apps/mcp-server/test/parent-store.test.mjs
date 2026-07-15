@@ -350,6 +350,59 @@ test('memory parent store expires profiles and releases their sessions', async (
   assert.notEqual(replacement.profileId, profile.profileId);
 });
 
+test('memory parent store renews retention after every authorized activity', async () => {
+  const originalNow = Date.now;
+  let now = 1_700_000_000_000;
+  Date.now = () => now;
+
+  try {
+    const store = createMemoryParentProfileStore({
+      maxEvents: 10,
+      retentionDays: 1 / (24 * 60 * 60),
+      secret: strongSecret,
+    });
+    const sessionId = 'kb_session_memory_renewal';
+    const profile = await store.createProfile({
+      ageBand: '7-9',
+      historyEnabled: true,
+      sessionId,
+    });
+
+    now += 900;
+    assert.equal(await store.validateAccess(profile.profileId, profile.parentAccessToken), true);
+
+    now += 200;
+    const updated = await store.updateProfile({
+      profileId: profile.profileId,
+      parentAccessToken: profile.parentAccessToken,
+      ageBand: '10-12',
+    });
+    assert.equal(updated.ageBand, '10-12');
+
+    now += 900;
+    assert.equal(
+      await store.recordEvent(
+        eventForProfile({ ...profile, ageBand: '10-12' }, sessionId, 'kb_event_memory_renewal'),
+        profile.parentAccessToken,
+      ),
+      true,
+    );
+
+    now += 900;
+    const history = await store.listHistory({
+      profileId: profile.profileId,
+      parentAccessToken: profile.parentAccessToken,
+      sessionId,
+    });
+    assert.deepEqual(history.map((event) => event.id), ['kb_event_memory_renewal']);
+
+    now += 200;
+    assert.equal(await store.validateAccess(profile.profileId, profile.parentAccessToken), true);
+  } finally {
+    Date.now = originalNow;
+  }
+});
+
 test('memory create prunes expired ownership before checking session reuse', async () => {
   const store = createMemoryParentProfileStore({
     maxEvents: 10,
