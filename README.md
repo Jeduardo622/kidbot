@@ -183,9 +183,11 @@ For production MCP connector coverage, run the manual `Production MCP Story Pane
 
 ### Parent/Session Safety MVP
 
+The source-backed privacy disclosure is published at [`PRIVACY.md`](PRIVACY.md) and served by the MCP server at `/privacy`. It identifies the OpenAI, Railway, Supabase, and browser speech data paths; the 30-day consented history and 24-hour image retention settings; deletion limitations; and the support contact. Privacy and legal review is required before public launch; this repository does not claim legal certification.
+
 The widget creates a local `sessionId`, uses the non-PII `profileId` value `local-default`, and stores the locked age band in ChatGPT widget state. Parent controls are gated by a 4-digit session PIN; the PIN is session-scoped widget state only and is not an account, authentication factor, persistent parent identity, or server-side access control.
 
-All child-facing tools use the locked widget age band. MCP and agent-service accept optional `sessionId`, `profileId`, and `ageBand` metadata for safe audit logs, default omitted `ageBand` to `7-9` behaviorally, and do not store profile or session data.
+All child-facing tools use the locked widget age band. MCP and agent-service accept optional `sessionId`, `profileId`, and `ageBand` metadata, and default omitted `ageBand` to `7-9` behaviorally. Secured request summaries use keyed pseudonymous session/profile references and never log raw IDs, prompts, tokens, PINs, generated content, or full image URLs; local fallback summaries omit those references. With explicit parent consent and Redis enabled, Kidbot stores parent profiles and metadata-only session history for the configured 30-day retention period.
 
 To enable persistent parent profiles and metadata-only session history, set `PARENT_PROFILE_STORE=redis`, provide the same `REDIS_URL`, and set a high-entropy `PARENT_AUTH_SECRET`. MCP issues a server-side parent access token after the widget parent PIN flow and stores only an HMAC hash of that token. This token gates saved profile settings and history reads/writes, but it is still not account identity. Saved history excludes prompts, responses, PINs, service tokens, and generated artifacts. MCP `/healthz` reports parent profile store readiness without exposing secrets or history.
 
@@ -339,6 +341,7 @@ If installs are blocked, you can still preview the widget and flows:
 - Health & Diag:
   - `/healthz`  -> shows fallback or dist mode
   - `/diag`     -> links to the fallback widget and fixtures
+  - `/privacy`  -> serves the current privacy disclosure
 
 - CLI shims:
   - `export PATH="$PWD/bin:$PATH"` to use the zero-install `eslint` and `tsc` wrappers

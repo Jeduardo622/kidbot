@@ -34,9 +34,9 @@ Empower kids to *learn through play* by interacting with a trusted digital frien
 ---
 
 ## Safety & Compliance
-- **COPPA** / **GDPR-K** aligned: no data collection beyond necessary app function.  
+- **Launch review:** Privacy and legal review is required before public launch; the current implementation does not claim legal certification.
 - **Guardrails:** AI moderation layer filters harmful, scary, or adult content.  
-- **Privacy:** No persistent identity or open-ended chat logs.  
+- **Privacy:** No open-ended chat logs. With explicit parent consent, pseudonymous parent profiles and metadata-only activity history may be retained for 30 days; generated story images use a 24-hour best-effort retention setting. See `PRIVACY.md`.
 - **Transparency:** Clear disclosure “Kidbot is an AI friend that helps you learn and play.”  
 - **Parent Supervision:** Configurable via parental PIN (v0.4+).
 
@@ -50,7 +50,7 @@ Empower kids to *learn through play* by interacting with a trusted digital frien
 | **AI Engineer** | Agents SDK orchestration, Realtime API voice control, moderation pipelines | OpenAI Agents SDK, Realtime API, Node.js |
 | **Frontend Engineer** | ChatGPT App UI (Apps SDK), component logic, event bridges | React, Apps SDK, Vite |
 | **UX / Interaction Designer** | Child-friendly interface, color/stroke interaction design | Figma, Tailwind CSS |
-| **Safety Engineer** | Moderation, age filtering, COPPA compliance | OpenAI Moderation API, local guardrails |
+| **Safety Engineer** | Moderation, age filtering, privacy and safety review | OpenAI Moderation API, local guardrails |
 | **QA Engineer** | Automated and manual scenario testing | Vitest, Playwright, MCP Inspector |
 
 ---
@@ -63,7 +63,7 @@ Empower kids to *learn through play* by interacting with a trusted digital frien
 | **MCP Server** | Node.js, Express, @modelcontextprotocol/sdk |
 | **Agent Service** | Node.js + TypeScript, Express, OpenAI Agents SDK |
 | **Voice** | OpenAI Realtime API (TTS/STT), Browser fallback (speechSynthesis) |
-| **Data** | Local session state only (no external DB for MVP) |
+| **Data** | Local widget state; optional Redis parent profiles/history; optional Supabase generated-image storage |
 | **Auth** | OpenAI App OAuth flow (future parental login) |
 
 ---
@@ -85,9 +85,9 @@ Empower kids to *learn through play* by interacting with a trusted digital frien
 |------|-------------|
 | Unsafe content generation | Layered moderation (`moderate()` + model filters) |
 | Voice latency / mispronunciation | Local fallback, pre-cached responses |
-| Child data retention | Session only, no external storage |
+| Child data retention | Explicit-consent metadata history expires after 30 days; generated images use 24-hour best-effort cleanup; deletion cannot recall provider, backup, or cache copies |
 | Hardware variability (touch input) | Canvas auto-scale + sensitivity tuning |
-| Compliance drift | Annual third-party audit before release |
+| Privacy or legal requirements drift | Privacy and legal review required before public launch; keep `PRIVACY.md` synchronized with runtime and provider configuration |
 
 ---
 
@@ -101,4 +101,4 @@ Empower kids to *learn through play* by interacting with a trusted digital frien
 
 ## Summary
 Kidbot blends learning, storytelling, and play inside ChatGPT safely and responsibly.  
-Its modular SDK architecture ensures **extensibility**, **compliance**, and **trustworthiness** for families.
+Its modular SDK architecture is designed for **extensibility**, with privacy, safety, and legal review remaining explicit launch gates.

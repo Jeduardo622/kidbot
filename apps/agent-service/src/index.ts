@@ -21,6 +21,7 @@ import {
   safeProviderErrorSummary,
 } from './provider.js';
 import { createRateLimiter, createRateLimitStoreFromEnv } from './rateLimit.js';
+import { createLogSubject } from './privacyLog.js';
 import { safeFallbackSvg, validateColoringSvg } from './svgSafety.js';
 import {
   cleanupExpiredImageAssets,
@@ -47,6 +48,7 @@ const config = parseAgentServiceConfig();
 const {
   providerApiKey,
   serviceAuthToken,
+  logSubjectSecret,
   fallbackMode,
   requireServiceAuth,
   startupPosture,
@@ -385,8 +387,16 @@ app.use((req, res, next) => {
       route: req.path,
       status: res.statusCode,
       latencyMs: Date.now() - startedAt,
-      sessionId: res.locals.sessionId as string | undefined,
-      profileId: res.locals.profileId as string | undefined,
+      sessionRef: createLogSubject(
+        logSubjectSecret,
+        'session',
+        res.locals.sessionId as string | undefined,
+      ),
+      profileRef: createLogSubject(
+        logSubjectSecret,
+        'profile',
+        res.locals.profileId as string | undefined,
+      ),
       ageBand: res.locals.ageBand as string | undefined,
       source: res.locals.source as string | undefined,
       blocked: res.locals.blocked as boolean | undefined,

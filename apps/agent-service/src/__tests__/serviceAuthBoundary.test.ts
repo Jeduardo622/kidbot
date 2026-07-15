@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -408,15 +409,20 @@ describe('service auth boundary', () => {
     );
   });
 
-  it('logs safe session audit metadata without PIN values', async () => {
+  it('logs keyed session audit references without raw request data', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const serviceToken = 'test-service-token';
+    const sessionId = 'kb_session_audit123';
+    const profileId = 'local-default';
+    const prompt = 'Tell me a cheerful moon fact.';
+    const imageUrl = 'https://images.example.test/private/generated-image.png?token=raw-image-token';
     try {
       await withEnv(
         {
           NODE_ENV: 'test',
           FALLBACK_WIDGET: '0',
           KIDBOT_LOCAL_DEV: undefined,
-          AGENT_SERVICE_TOKEN: 'test-service-token',
+          AGENT_SERVICE_TOKEN: serviceToken,
           OPENAI_API_KEY: undefined,
         },
         async () => {
@@ -425,17 +431,18 @@ describe('service auth boundary', () => {
             const response = await fetch(`${baseUrl}/voice`, {
               method: 'POST',
               headers: {
-                Authorization: 'Bearer test-service-token',
+                Authorization: `Bearer ${serviceToken}`,
                 'x-kidbot-startup-posture': 'secured',
                 'Content-Type': 'application/json',
               },
               body: JSON.stringify({
-                text: 'Tell me a cheerful moon fact.',
+                text: prompt,
                 persona: 'robot',
                 ageBand: '4-6',
-                profileId: 'local-default',
-                sessionId: 'kb_session_audit123',
+                profileId,
+                sessionId,
                 parentPin: '1234',
+                imageUrl,
               }),
             });
 
@@ -445,10 +452,67 @@ describe('service auth boundary', () => {
       );
 
       const logs = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
-      expect(logs).toContain('"sessionId":"kb_session_audit123"');
-      expect(logs).toContain('"profileId":"local-default"');
+      const sessionRef = createHmac('sha256', serviceToken)
+        .update(`session:${sessionId}`)
+        .digest('base64url')
+        .slice(0, 24);
+      const profileRef = createHmac('sha256', serviceToken)
+        .update(`profile:${profileId}`)
+        .digest('base64url')
+        .slice(0, 24);
+      expect(logs).toContain(`"sessionRef":"${sessionRef}"`);
+      expect(logs).toContain(`"profileRef":"${profileRef}"`);
+      expect(sessionRef).toMatch(/^[A-Za-z0-9_-]{16,64}$/);
+      expect(profileRef).toMatch(/^[A-Za-z0-9_-]{16,64}$/);
       expect(logs).toContain('"ageBand":"4-6"');
+      expect(logs).not.toContain(sessionId);
+      expect(logs).not.toContain(profileId);
+      expect(logs).not.toContain(prompt);
+      expect(logs).not.toContain(serviceToken);
+      expect(logs).not.toContain(imageUrl);
+      expect(logs).not.toContain('raw-image-token');
       expect(logs).not.toContain('1234');
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it('omits session audit references in local fallback posture', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const sessionId = 'kb_session_local123';
+    const profileId = 'local-default';
+    try {
+      await withEnv(
+        {
+          NODE_ENV: 'test',
+          FALLBACK_WIDGET: '1',
+          KIDBOT_LOCAL_DEV: '1',
+          AGENT_SERVICE_TOKEN: undefined,
+          OPENAI_API_KEY: undefined,
+        },
+        async () => {
+          const mod = await import('../index.js');
+          await withServer(mod.app, async (baseUrl) => {
+            const response = await fetch(`${baseUrl}/voice`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                text: 'Tell me a moon fact.',
+                persona: 'robot',
+                profileId,
+                sessionId,
+              }),
+            });
+            expect(response.status).toBe(200);
+          });
+        },
+      );
+
+      const logs = logSpy.mock.calls.map((call) => String(call[0])).join('\n');
+      expect(logs).not.toContain('sessionRef');
+      expect(logs).not.toContain('profileRef');
+      expect(logs).not.toContain(sessionId);
+      expect(logs).not.toContain(profileId);
     } finally {
       logSpy.mockRestore();
     }

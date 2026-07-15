@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomInt } from 'node:crypto';
 import { createServer } from 'node:http';
 import { createConnection } from 'node:net';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { spawn } from 'node:child_process';
@@ -12,6 +12,7 @@ import Redis from 'ioredis';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
 
 const packageDir = dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
+const repositoryRoot = join(packageDir, '../..');
 const mcpEntry = join(packageDir, 'dist', 'server.js');
 const agentEntry = join(packageDir, '../agent-service/dist/index.js');
 
@@ -475,6 +476,56 @@ test('fallback mode remains explicit bypass path without AGENT_SERVICE_TOKEN', a
     for (const toolId of toolIds) {
       assert.match(response.body, new RegExp(`"${toolId}"`));
     }
+  } finally {
+    stopProcess(mcp);
+  }
+});
+
+test('privacy route publishes the source-backed data and retention contract', async () => {
+  const mcpPort = await getFreePort();
+  const mcpBaseUrl = `http://localhost:${mcpPort}`;
+  const mcp = spawnProcess(mcpEntry, {
+    FALLBACK_WIDGET: '1',
+    KIDBOT_LOCAL_DEV: '1',
+    MCP_PORT: String(mcpPort),
+  });
+
+  try {
+    await waitForMcpHealth(mcpBaseUrl);
+
+    const response = await fetch(`${mcpBaseUrl}/privacy`);
+    const html = await response.text();
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type') ?? '', /text\/html/i);
+    for (const disclosure of [
+      /OpenAI/i,
+      /Railway/i,
+      /Supabase/i,
+      /browser speech/i,
+      /30 days/i,
+      /24 hours/i,
+      /delet/i,
+      /github\.com\/Jeduardo622\/kidbot\/issues/i,
+    ]) {
+      assert.match(html, disclosure);
+    }
+
+    const diag = await (await fetch(`${mcpBaseUrl}/diag`)).text();
+    assert.match(diag, /href="\/privacy"/i);
+
+    const privacyMarkdown = readFileSync(join(repositoryRoot, 'PRIVACY.md'), 'utf8');
+    assert.match(privacyMarkdown, /OpenAI/i);
+    assert.match(privacyMarkdown, /Railway/i);
+    assert.match(privacyMarkdown, /Supabase/i);
+    assert.match(privacyMarkdown, /30 days/i);
+    assert.match(privacyMarkdown, /24 hours/i);
+
+    const readme = readFileSync(join(repositoryRoot, 'README.md'), 'utf8');
+    const spec = readFileSync(join(repositoryRoot, 'EXECUTSPEC.md'), 'utf8');
+    assert.doesNotMatch(readme, /do not store profile or session data/i);
+    assert.doesNotMatch(spec, /COPPA\s*\/\s*GDPR-K aligned/i);
+    assert.doesNotMatch(spec, /Session only, no external storage/i);
+    assert.match(`${readme}\n${spec}`, /privacy and legal review[^\n]*required[^\n]*public launch/i);
   } finally {
     stopProcess(mcp);
   }

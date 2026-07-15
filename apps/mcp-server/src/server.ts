@@ -12,6 +12,7 @@ import { mcpConfig } from './config.js';
 import { parentProfileStore, registerTools, requestControlStore } from './tools.js';
 import type { Mode } from './types.js';
 import { createWidgetResourceMeta, widgetResourceUri } from './widgetMetadata.js';
+import { privacyPolicyHtml } from './privacyPolicy.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -121,6 +122,10 @@ app.get('/healthz', asyncRoute(async (_req, res) => {
   });
 }));
 
+app.get('/privacy', (_req, res) => {
+  res.type('html').send(privacyPolicyHtml);
+});
+
 app.get('/diag', (_req, res) => {
   const links: string[] = [];
   if (existsSync(fallbackHtmlPath)) {
@@ -130,6 +135,7 @@ app.get('/diag', (_req, res) => {
     links.push('<li><a href="/public/diagnostic.html">Open diagnostic harness</a></li>');
   }
   links.push('<li><a href="/healthz">Health JSON</a></li>');
+  links.push('<li><a href="/privacy">Privacy policy</a></li>');
 
   res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"/><title>Kidbot Diagnostics</title><style>body{font-family:system-ui;margin:32px;color:#111;} a{color:#0066cc;} .tag{display:inline-block;padding:4px 8px;border-radius:999px;background:#eef;border:1px solid #ccd;margin-left:8px;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;}</style></head><body><h1>Kidbot Diagnostics <span class="tag">${widgetMode}</span></h1><p>Server port: ${mcpConfig.mcpPort}</p><ul>${links.join('')}</ul><p>Fixtures served from: ${existsSync(fixturesDir) ? '/fixtures' : 'not available'}</p></body></html>`);
 });

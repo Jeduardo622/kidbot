@@ -1,6 +1,7 @@
 export interface AgentServiceConfig {
   providerApiKey: string | undefined;
   serviceAuthToken: string | undefined;
+  logSubjectSecret: string | undefined;
   fallbackMode: boolean;
   localDevIntent: boolean;
   requireServiceAuth: boolean;
@@ -85,6 +86,7 @@ export const parseAgentServiceConfig = (
   return {
     providerApiKey: trimOptional(env.OPENAI_API_KEY),
     serviceAuthToken,
+    logSubjectSecret: requireServiceAuth ? serviceAuthToken : undefined,
     fallbackMode,
     localDevIntent,
     requireServiceAuth,
