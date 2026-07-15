@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 
-import { installDomGlobals } from '../scripts/smoke-production-widget-story-panels.tsx';
+import {
+  installDomGlobals,
+  readWidgetToolResult,
+} from '../scripts/smoke-production-widget-story-panels.tsx';
 
 test('production widget story panels smoke is wired as a package script', async () => {
   const packageJson = JSON.parse(await readFile('package.json', 'utf8'));
@@ -55,4 +58,17 @@ test('production widget story panels smoke supports getter-only global navigator
       delete globalThis.navigator;
     }
   }
+});
+
+test('production widget story panels smoke preserves the ChatGPT callTool envelope', () => {
+  const result = {
+    content: [{ type: 'text', text: 'Planned 2 panels.' }],
+    structuredContent: {
+      blocked: false,
+      panels: [],
+      theme: 'A robot paints a rainbow garden',
+    },
+  };
+
+  assert.deepEqual(readWidgetToolResult({ jsonrpc: '2.0', id: 401, result }), result);
 });
