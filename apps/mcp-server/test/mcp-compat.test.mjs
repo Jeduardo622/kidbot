@@ -16,6 +16,54 @@ import {
   parentHistoryListToolOutputUnion,
   registerKidbotTool,
 } from '../dist/toolContracts.js';
+import { createWidgetResourceMeta } from '../dist/widgetMetadata.js';
+
+const configEnvNames = [
+  'AGENT_PORT',
+  'AGENT_BASE_URL',
+  'AGENT_SERVICE_TOKEN',
+  'FALLBACK_WIDGET',
+  'KIDBOT_LOCAL_DEV',
+  'KIDBOT_WIDGET_DOMAIN',
+  'KIDBOT_WIDGET_RESOURCE_DOMAINS',
+  'MCP_PORT',
+  'MCP_AGENT_REQUEST_TIMEOUT_MS',
+  'MCP_CALLER_CONCURRENCY',
+  'MCP_CALLER_COST_PER_MINUTE',
+  'MCP_CALLER_REQUESTS_PER_MINUTE',
+  'MCP_GLOBAL_CONCURRENCY',
+  'MCP_GLOBAL_COST_PER_MINUTE',
+  'MCP_GLOBAL_REQUESTS_PER_MINUTE',
+  'MCP_NETWORK_CONCURRENCY',
+  'MCP_NETWORK_COST_PER_MINUTE',
+  'MCP_NETWORK_REQUESTS_PER_MINUTE',
+  'MCP_REQUEST_CONTROL_STORE',
+  'NODE_ENV',
+  'PARENT_AUTH_SECRET',
+  'PARENT_HISTORY_MAX_EVENTS',
+  'PARENT_HISTORY_RETENTION_DAYS',
+  'PARENT_PROFILE_STORE',
+];
+const originalConfigEnv = new Map(configEnvNames.map((name) => [name, process.env[name]]));
+for (const name of configEnvNames) delete process.env[name];
+Object.assign(process.env, {
+  AGENT_SERVICE_TOKEN: 'service-token-abcdefghijklmnopqrstuvwxyz0123456789',
+  FALLBACK_WIDGET: '0',
+  MCP_REQUEST_CONTROL_STORE: 'memory',
+  NODE_ENV: 'test',
+  PARENT_PROFILE_STORE: 'disabled',
+});
+let parseMcpServerConfig;
+try {
+  ({ parseMcpServerConfig } = await import('../dist/config.js'));
+} finally {
+  for (const [name, value] of originalConfigEnv) {
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+  }
+}
+const isolatedChildEnv = { ...process.env };
+for (const name of configEnvNames) delete isolatedChildEnv[name];
 
 const serverEntry = join(process.cwd(), 'dist', 'server.js');
 
@@ -135,11 +183,16 @@ const connectInMemoryClient = async (server, name) => {
   return client;
 };
 
-const assertWidgetResourceContract = (resource) => {
-  const resourceOrigin = 'https://rxnwualzddplucjhclij.supabase.co';
+const assertWidgetResourceContract = (
+  resource,
+  {
+    domain = 'https://web-sandbox.oaiusercontent.com',
+    resourceDomains = [],
+  } = {},
+) => {
   assert.equal(resource.uri, 'ui://widget/kidbot-v2.html');
   assert.equal(resource.mimeType, 'text/html;profile=mcp-app');
-  assert.equal(resource._meta.ui.domain, 'https://kidbot-production.up.railway.app');
+  assert.equal(resource._meta.ui.domain, domain);
   assert.equal(resource._meta['openai/widgetDomain'], resource._meta.ui.domain);
   assert.deepEqual(resource._meta.ui.csp.connectDomains, []);
   assert.deepEqual(resource._meta['openai/widgetCSP'].connect_domains, []);
@@ -147,15 +200,14 @@ const assertWidgetResourceContract = (resource) => {
     resource._meta.ui.csp.resourceDomains,
     resource._meta['openai/widgetCSP'].resource_domains,
   );
-  assert.deepEqual(resource._meta.ui.csp.resourceDomains, [resourceOrigin]);
-  assert.equal(resource._meta.ui.csp.resourceDomains.filter((origin) => origin === resourceOrigin).length, 1);
+  assert.deepEqual(resource._meta.ui.csp.resourceDomains, resourceDomains);
 };
 
 before(async () => {
   serverProcess = spawn(process.execPath, [serverEntry], {
     cwd: process.cwd(),
     env: {
-      ...process.env,
+      ...isolatedChildEnv,
       MCP_PORT: String(port),
       FALLBACK_WIDGET: '1',
       KIDBOT_LOCAL_DEV: '1',
@@ -168,17 +220,16 @@ before(async () => {
   productionServerProcess = spawn(process.execPath, [serverEntry], {
     cwd: process.cwd(),
     env: {
-      ...process.env,
+      ...isolatedChildEnv,
       AGENT_SERVICE_TOKEN: 'a'.repeat(32),
       FALLBACK_WIDGET: '0',
       KIDBOT_LOCAL_DEV: '0',
       KIDBOT_WIDGET_DOMAIN: 'https://kidbot-production.up.railway.app',
       KIDBOT_WIDGET_RESOURCE_DOMAINS: 'https://rxnwualzddplucjhclij.supabase.co',
       MCP_PORT: String(productionPort),
-      MCP_REQUEST_CONTROL_STORE: 'redis',
-      NODE_ENV: 'production',
+      MCP_REQUEST_CONTROL_STORE: 'memory',
+      NODE_ENV: 'test',
       PARENT_PROFILE_STORE: 'disabled',
-      REDIS_URL: process.env.REDIS_URL ?? 'redis://127.0.0.1:1'
     },
     stdio: 'ignore'
   });
@@ -221,6 +272,26 @@ test('/mcp resources/read returns the current widget resource metadata', async (
   const [resource] = response.result.contents;
 
   assertWidgetResourceContract(resource);
+});
+
+test('production config maps the widget domain and resource origins into metadata', () => {
+  const domain = 'https://kidbot-production.up.railway.app';
+  const resourceDomains = ['https://rxnwualzddplucjhclij.supabase.co'];
+  const config = parseMcpServerConfig({
+    AGENT_SERVICE_TOKEN: 'service-token-abcdefghijklmnopqrstuvwxyz0123456789',
+    FALLBACK_WIDGET: '0',
+    KIDBOT_WIDGET_DOMAIN: domain,
+    KIDBOT_WIDGET_RESOURCE_DOMAINS: resourceDomains.join(','),
+    MCP_REQUEST_CONTROL_STORE: 'redis',
+    NODE_ENV: 'production',
+    PARENT_PROFILE_STORE: 'disabled',
+  });
+  const meta = createWidgetResourceMeta(config, 'dist');
+
+  assert.equal(meta.ui.domain, domain);
+  assert.equal(meta['openai/widgetDomain'], domain);
+  assert.deepEqual(meta.ui.csp.resourceDomains, resourceDomains);
+  assert.deepEqual(meta['openai/widgetCSP'].resource_domains, resourceDomains);
 });
 
 test('/mcp rejects non-compliant Accept header', async () => {

@@ -131,6 +131,33 @@ const parseMcpResponse = (text: string) => {
   return JSON.parse(dataLines.map((line) => line.slice(5).trimStart()).join('\n'));
 };
 
+export const readWidgetToolResult = (message: unknown) => {
+  const record = message && typeof message === 'object' ? message as Record<string, unknown> : undefined;
+  const error = record?.error && typeof record.error === 'object'
+    ? record.error as Record<string, unknown>
+    : undefined;
+  if (error) {
+    throw new Error(`story_panels returned MCP error: ${String(error.message ?? 'missing message')}`);
+  }
+  const result = record?.result && typeof record.result === 'object'
+    ? record.result as Record<string, unknown>
+    : undefined;
+  const structured = result?.structuredContent && typeof result.structuredContent === 'object'
+    ? result.structuredContent as Record<string, unknown>
+    : {};
+  if (!result) {
+    throw new Error('story_panels returned a missing MCP tool result.');
+  }
+  if (result.isError === true) {
+    throw new Error(
+      `story_panels returned MCP tool error; error=${String(structured.error ?? 'missing')}; fallbackReason=${
+        String(structured.fallbackReason ?? 'missing')
+      }; correlationId=${String(structured.correlationId ?? 'missing')}`,
+    );
+  }
+  return result;
+};
+
 const callProductionTool = async ({
   mcpBaseUrl,
   name,
@@ -168,20 +195,7 @@ const callProductionTool = async ({
     throw new Error(`MCP ${name} HTTP request failed; status=${response.status}; body=${text.slice(0, 200)}`);
   }
 
-  const message = parseMcpResponse(text);
-  if (message?.error) {
-    throw new Error(`${name} returned MCP error: ${message.error.message ?? 'missing message'}`);
-  }
-  const result = message?.result ?? {};
-  const structured = result.structuredContent ?? {};
-  if (result.isError === true) {
-    throw new Error(
-      `${name} returned MCP tool error; error=${structured.error ?? 'missing'}; fallbackReason=${
-        structured.fallbackReason ?? 'missing'
-      }; correlationId=${structured.correlationId ?? 'missing'}`,
-    );
-  }
-  return structured;
+  return readWidgetToolResult(parseMcpResponse(text));
 };
 
 const assertImageFetches = async (imageUrls: string[], timeoutMs: number) => {
@@ -223,12 +237,13 @@ export const runProductionWidgetStoryPanelsSmoke = async ({
 
   dom.window.openai = {
     callTool: async (name: string, input: unknown) => {
-      const structured = await callProductionTool({
+      const result = await callProductionTool({
         input: input as Record<string, unknown>,
         mcpBaseUrl: normalizedMcpBaseUrl,
         name,
         timeoutMs,
       });
+      const structured = result.structuredContent as Record<string, unknown>;
       if (name === 'story_panels') {
         const panelList = Array.isArray(structured.panels) ? (structured.panels as StoryPanel[]) : [];
         toolEvidence.correlationId =
@@ -236,7 +251,7 @@ export const runProductionWidgetStoryPanelsSmoke = async ({
         toolEvidence.panelCount = panelList.length;
         toolEvidence.imageUrls = panelList.map((panel) => panel.imageUrl).filter((url): url is string => Boolean(url));
       }
-      return structured;
+      return result;
     },
     setWidgetState: () => undefined,
   };
