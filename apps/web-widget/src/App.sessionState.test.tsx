@@ -270,6 +270,58 @@ describe('App parent/session safety controls', () => {
     expect(screen.getByText('Profile: kb_profile_widget123')).toBeTruthy();
   });
 
+  it('clears only an expired retained credential after re-enable fails and creates on the next retry', async () => {
+    render(<App />);
+    await setPin();
+    await enableHistory();
+    callTool.mockResolvedValueOnce({
+      structuredContent: {
+        ageBand: '7-9',
+        historyEnabled: false,
+        profileId: 'kb_profile_widget123',
+      },
+    });
+    fireEvent.click(screen.getByRole('checkbox', { name: /save activity history/i }));
+    await screen.findByText('Saved history was purged.');
+
+    callTool.mockResolvedValueOnce({
+      isError: true,
+      structuredContent: { blocked: true, message: 'Parent profile was not found.' },
+    });
+    fireEvent.click(screen.getByRole('checkbox', { name: /save activity history/i }));
+
+    expect((await parentControls().findByRole('alert')).textContent).toContain(
+      'History could not be enabled',
+    );
+    expect(screen.getByText('Profile: local-default')).toBeTruthy();
+    expect(
+      (screen.getByRole('checkbox', { name: /save activity history/i }) as HTMLInputElement).checked,
+    ).toBe(false);
+    expect(callTool.mock.calls.map(([name]) => name)).toEqual([
+      'parent_profile_create',
+      'parent_profile_update',
+      'parent_profile_update',
+    ]);
+
+    callTool.mockResolvedValueOnce({
+      structuredContent: {
+        ageBand: '7-9',
+        historyEnabled: true,
+        profileId: 'kb_profile_recreated456',
+      },
+      _meta: { parentAccessToken: 'kb_parent_recreatedtoken1234567890' },
+    });
+    fireEvent.click(screen.getByRole('checkbox', { name: /save activity history/i }));
+    await screen.findByText('History is enabled.');
+
+    expect(callTool).toHaveBeenLastCalledWith('parent_profile_create', {
+      ageBand: '7-9',
+      historyEnabled: true,
+      sessionId: expect.stringMatching(/^kb_session_/),
+    });
+    expect(screen.getByText('Profile: kb_profile_recreated456')).toBeTruthy();
+  });
+
   it('keeps the visible and persisted age unchanged when profile update fails', async () => {
     render(<App />);
     await setPin();

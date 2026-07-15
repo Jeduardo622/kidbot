@@ -7,22 +7,11 @@ import {
   unavailableMessageFromError,
 } from '../utils/degradation.js';
 import { defaultSessionContext, type SessionContext } from '../utils/sessionContext.js';
-import { readStructuredContent, type ToolResultRecord } from '../utils/toolResult.js';
-
-interface StoryPanel {
-  title: string;
-  caption: string;
-  imagePrompt: string;
-  imageUrl: string | null;
-}
-
-interface StoryResponse extends ToolResultRecord {
-  blocked: boolean;
-  degraded?: boolean;
-  message?: string;
-  theme?: string;
-  panels?: StoryPanel[];
-}
+import {
+  isStoryResult,
+  readStructuredContent,
+  type StoryPanel,
+} from '../utils/toolResult.js';
 
 interface ComicBoardProps {
   sessionContext?: SessionContext;
@@ -76,11 +65,11 @@ export const ComicBoard = ({ sessionContext = defaultSessionContext }: ComicBoar
     setUnavailable(undefined);
     setPanels([]);
     try {
-      const result = readStructuredContent<StoryResponse>(await window.openai?.callTool?.('story_panels', {
+      const result = readStructuredContent(await window.openai?.callTool?.('story_panels', {
         ...sessionContext,
         theme,
         panels: panelCount,
-      }));
+      }), isStoryResult);
       const unavailableMessage = degradedMessage(result);
       if (unavailableMessage) {
         setUnavailable(unavailableMessage);

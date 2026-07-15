@@ -11,7 +11,7 @@ import {
   type AgeBand,
   type SessionContext,
 } from './utils/sessionContext.js';
-import { readToolEnvelope } from './utils/toolResult.js';
+import { isStaleParentCredentialFailure, readToolEnvelope } from './utils/toolResult.js';
 import './styles.css';
 
 type TabKey = 'voice' | 'comics' | 'coloring' | 'science';
@@ -222,13 +222,21 @@ export const App = () => {
           parentCredentials.parentAccessToken &&
           parentCredentials.profileId !== defaultProfileId
         ) {
-          const { structuredContent: result } = readToolEnvelope(
-            await window.openai?.callTool?.('parent_profile_update', {
+          const rawResult = await window.openai?.callTool?.('parent_profile_update', {
               historyEnabled: true,
               parentAccessToken: parentCredentials.parentAccessToken,
               profileId: parentCredentials.profileId,
-            }),
-          );
+            });
+          if (isStaleParentCredentialFailure(rawResult)) {
+            setParentCredentials((prev) => ({
+              historyEnabled: false,
+              parentModeUnlocked: prev.parentModeUnlocked,
+              parentPin: prev.parentPin,
+              profileId: defaultProfileId,
+            }));
+            throw new Error('Retained parent credential is no longer valid.');
+          }
+          const { structuredContent: result } = readToolEnvelope(rawResult);
           const updateResult = result as ParentProfileUpdateResponse;
           if (
             updateResult.profileId !== parentCredentials.profileId ||

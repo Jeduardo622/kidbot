@@ -168,3 +168,36 @@ Base HEAD: `ae0f5aa101b2a2a08ea250c0c9eccd9a47a6cad6`. Scope remained inside the
 - Re-enabling a retained profile performs authenticated `parent_profile_update { historyEnabled: true }`; failed persisted age changes leave both visible and host-persisted age unchanged.
 - Locking parent controls focuses the PIN input. PIN failures use assertive alerts; unlock success uses a polite status. Active nav uses `aria-pressed`; global border-box and narrow-width containment rules cover mobile overflow.
 - The protected verifier emitted the known non-fatal concurrent Vitest `WebSocket server error: Port is already in use`; every suite completed with zero failures and the verifier exited `0`. Protected non-author human review remains required.
+
+## Current-head UI result-validation fix wave
+
+Base HEAD before this wave: `28715ec783fed07459a5b11e87e76d34ceddf50a`. Route command `pnpm run route-task -- --base origin/main --json` exited `0`, classified the branch `protected`, selected `pnpm run verify:local`, and required human review. Scope remained in the web widget result parser, the four consuming components, retained parent credential state, widget tests, and this report.
+
+### RED evidence
+
+- `pnpm --filter @kidbot/web-widget exec vitest --run --environment jsdom src/components/ToolResultEnvelope.test.tsx src/App.sessionState.test.tsx`: exit `1`.
+- `App.sessionState.test.tsx`: 19 tests, 1 expected failure because a confirmed `isError` / profile-not-found result left the retained profile and token in memory.
+- `ToolResultEnvelope.test.tsx`: 16 tests, 9 expected failures plus the intended uncaught `panels.map is not a function` and `plan.steps.map is not a function` reproductions. The failures covered malformed per-tool payloads for VoiceBar, ComicBoard, ColoringBook, and ScienceLab; host-realistic `rate_limited`, `concurrency_limited`, and `request_timeout` envelopes; and an unrecognized `isError` envelope being rendered as success.
+
+### Implementation and GREEN evidence
+
+- Replaced the unchecked generic structured-content cast with shared tool-specific runtime type guards aligned to the advertised widget-consumed shapes. All four components now validate before accessing or rendering result fields.
+- Advertised request-control results are detected before success parsing. Rate limits preserve a valid positive `retryAfter`; concurrency and timeout outcomes show distinct retry guidance. Any other `isError` envelope fails closed with visible retry guidance.
+- A retained credential is cleared only after an `isError` result explicitly reports an expired, missing, unauthorized, invalid-token, or access-denied profile. The failed action leaves consent off and visible error state intact, and does not create a replacement; the next explicit opt-in creates a new profile.
+- Focused GREEN rerun: 2 files, 35 passed, 0 failed.
+- Full widget suite: 9 files, 69 passed, 0 failed.
+- `pnpm run lint`: exit `0`.
+- `pnpm run typecheck`: exit `0`.
+- `git diff --check`: exit `0`; Git emitted only line-ending conversion warnings.
+
+### Protected verifier and containment
+
+- Disposable Redis 7 container `kidbot-ui-result-validation` mapped to `redis://127.0.0.1:33197`; readiness returned `PONG`. The container was stopped and removed after verification.
+- `REDIS_URL=redis://127.0.0.1:33197 pnpm run verify-change -- --base origin/main`: exit `0`; classification `protected`; selected verifier `pnpm run verify:local`; status `passed`; human review `required`.
+- The verifier included web-widget 69 passed; agent-service 81 passed; MCP workspace 49 passed; root harness 221 passed plus 1 Windows capability skip out of 222; MCP compatibility 12 passed; deterministic AI evaluation 17 cases at 100 with 22 unchanged metrics and overall mean 100.00; provider configuration preflight; and secured-posture smoke.
+- The known non-fatal concurrent Vitest `WebSocket server error: Port is already in use` warning appeared; all suites completed with zero failures and the verifier exited `0`.
+- No agent, PR, deployment, hosted system, production data, or secret-backed action was used. Protected non-author human review remains required.
+
+### Authoritative final-current-state evidence
+
+The verified implementation/evidence commit created after the checks above was `d72df37377bbcf737cee49d90c9c1e02db73d0ab`. At that committed state, `git rev-list --left-right --count HEAD...origin/main` returned `21 0`: 21 commits ahead and 0 behind. This paragraph is the single evidence-only amend requested after observing that commit; it does not claim the pre-amend object ID remains the amended commit's identity. No product or test content changed in the amend.

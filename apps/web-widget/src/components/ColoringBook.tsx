@@ -9,16 +9,9 @@ import {
   unavailableMessageFromError,
 } from '../utils/degradation.js';
 import { defaultSessionContext, type SessionContext } from '../utils/sessionContext.js';
-import { readStructuredContent, type ToolResultRecord } from '../utils/toolResult.js';
+import { isColoringResult, readStructuredContent } from '../utils/toolResult.js';
 
 type OutlineStyle = 'animals' | 'space' | 'underwater' | undefined;
-
-interface ColoringResponse extends ToolResultRecord {
-  blocked: boolean;
-  degraded?: boolean;
-  message?: string;
-  svg?: string;
-}
 
 type Point = { x: number; y: number };
 
@@ -155,11 +148,11 @@ export const ColoringBook = ({ sessionContext = defaultSessionContext }: Colorin
     setUnavailable(undefined);
     setOutline(undefined);
     try {
-      const result = readStructuredContent<ColoringResponse>(await window.openai?.callTool?.('coloring_outline', {
+      const result = readStructuredContent(await window.openai?.callTool?.('coloring_outline', {
         ...sessionContext,
         scene,
         style,
-      }));
+      }), isColoringResult);
       const unavailableMessage = degradedMessage(result);
       if (unavailableMessage) {
         setOutline(undefined);

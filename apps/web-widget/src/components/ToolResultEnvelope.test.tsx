@@ -97,4 +97,74 @@ describe('ChatGPT tool-result envelopes', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Generate Experiment' }));
     expect((await screen.findAllByText('Widget bridge returned an invalid result.')).length).toBeGreaterThan(0);
   });
+
+  it.each([
+    ['VoiceBar', <VoiceBar key="voice-malformed" />, 'Speak', { blocked: false, persona: 'pirate', text: 42 }],
+    ['ComicBoard', <ComicBoard key="comic-malformed" />, 'Plan Panels', { blocked: false, panels: 'not-panels' }],
+    ['ColoringBook', <ColoringBook key="coloring-malformed" />, 'Get Outline', { blocked: false, svg: 42 }],
+    [
+      'ScienceLab',
+      <ScienceLab key="science-malformed" />,
+      'Generate Experiment',
+      {
+        blocked: false,
+        title: 'Broken experiment',
+        objective: 'Do not render this.',
+        materials: [],
+        steps: 'not-steps',
+      },
+    ],
+  ])('%s rejects malformed structured content with a visible retry error', async (_name, view, action, structuredContent) => {
+    callTool.mockResolvedValueOnce({ structuredContent });
+    render(view);
+    fireEvent.click(screen.getByRole('button', { name: action }));
+    expect((await screen.findAllByText('Kidbot returned an invalid result. Please try again.')).length).toBeGreaterThan(0);
+  });
+
+  it.each([
+    [
+      'VoiceBar',
+      <VoiceBar key="voice-rate" />,
+      'Speak',
+      { error: true, code: 'rate_limited', retryAfter: 12 },
+      'Too many requests. Try again in 12 seconds.',
+    ],
+    [
+      'ComicBoard',
+      <ComicBoard key="comic-concurrency" />,
+      'Plan Panels',
+      { error: true, code: 'concurrency_limited' },
+      'Kidbot is busy with another request. Please try again shortly.',
+    ],
+    [
+      'ColoringBook',
+      <ColoringBook key="coloring-timeout" />,
+      'Get Outline',
+      { error: true, code: 'request_timeout' },
+      'This request timed out. Please try again.',
+    ],
+    [
+      'ScienceLab',
+      <ScienceLab key="science-rate" />,
+      'Generate Experiment',
+      { error: true, code: 'rate_limited' },
+      'Too many requests. Please try again shortly.',
+    ],
+  ])('%s renders advertised request-control guidance', async (_name, view, action, structuredContent, message) => {
+    callTool.mockResolvedValueOnce({ isError: true, structuredContent });
+    render(view);
+    fireEvent.click(screen.getByRole('button', { name: action }));
+    expect((await screen.findAllByText(message)).length).toBeGreaterThan(0);
+  });
+
+  it('fails closed on an isError envelope that lacks an advertised request-control result', async () => {
+    callTool.mockResolvedValueOnce({
+      isError: true,
+      structuredContent: { blocked: false, persona: 'robot', text: 'Unsafe success.' },
+    });
+    render(<VoiceBar />);
+    fireEvent.click(screen.getByRole('button', { name: 'Speak' }));
+    expect((await screen.findAllByText('Kidbot could not complete this request. Please try again.')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Unsafe success.')).toBeNull();
+  });
 });
