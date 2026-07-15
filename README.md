@@ -293,6 +293,8 @@ Set MCP env:
 MCP_PORT=<Railway assigned port>
 AGENT_BASE_URL=<agent-service Railway private URL, or public HTTPS URL if private DNS is unavailable>
 AGENT_SERVICE_TOKEN=<same high-entropy service token as agent-service>
+KIDBOT_WIDGET_DOMAIN=https://<public MCP service domain>
+KIDBOT_WIDGET_RESOURCE_DOMAINS=https://<project-ref>.supabase.co
 REDIS_URL=<Railway Redis private URL>
 MCP_REQUEST_CONTROL_STORE=redis
 MCP_CALLER_REQUESTS_PER_MINUTE=60
@@ -310,6 +312,8 @@ PARENT_AUTH_SECRET=<high-entropy parent secret>
 PARENT_HISTORY_RETENTION_DAYS=30
 PARENT_HISTORY_MAX_EVENTS=200
 ```
+
+Widget CSP values must be exact HTTPS origins without paths or wildcards. Use the public MCP service origin for `KIDBOT_WIDGET_DOMAIN`; list any additional widget asset origins in `KIDBOT_WIDGET_RESOURCE_DOMAINS`, separated by commas.
 
 The MCP server reserves caller, server-derived network, and deployment-global request, provider-cost, and concurrency capacity atomically in Redis before each tool call. Story cost includes text/moderation work plus the requested image count, and story image generation is limited to two provider calls at a time. Production fails closed if the Redis control store is unavailable. MCP deadlines cancel the downstream agent request, and agent-service forwards cancellation into OpenAI SDK calls.
 

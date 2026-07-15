@@ -193,11 +193,21 @@ export const App = () => {
     setPinStatus(undefined);
     setPersistenceStatus({ kind: 'pending', message: 'Updating parent profile…' });
     try {
-      const envelope = readToolEnvelope(await window.openai?.callTool?.('parent_profile_update', {
+      const rawResult = await window.openai?.callTool?.('parent_profile_update', {
         ageBand,
         parentAccessToken: parentCredentials.parentAccessToken,
         profileId: parentCredentials.profileId,
-      }));
+      });
+      if (isStaleParentCredentialFailure(rawResult)) {
+        setParentCredentials((prev) => ({
+          historyEnabled: false,
+          parentModeUnlocked: prev.parentModeUnlocked,
+          parentPin: prev.parentPin,
+          profileId: defaultProfileId,
+        }));
+        throw new Error('Retained parent credential is no longer valid.');
+      }
+      const envelope = readToolEnvelope(rawResult);
       if (envelope.isError) throw new Error('Parent profile update failed.');
       const { structuredContent: result } = envelope;
       const updateResult = result as ParentProfileUpdateResponse | undefined;

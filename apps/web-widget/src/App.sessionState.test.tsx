@@ -439,6 +439,27 @@ describe('App parent/session safety controls', () => {
     expect((screen.getByLabelText('Locked age') as HTMLSelectElement).value).toBe('7-9');
   });
 
+  it('clears an expired retained credential when an age update returns invalid parent access', async () => {
+    render(<App />);
+    await setPin();
+    await enableHistory();
+    callTool.mockResolvedValueOnce({
+      isError: true,
+      structuredContent: { error: true, code: 'invalid_parent_access' },
+    });
+
+    fireEvent.change(screen.getByLabelText('Locked age'), { target: { value: '10-12' } });
+
+    expect((await parentControls().findByRole('alert')).textContent).toContain(
+      'Profile age could not be updated.',
+    );
+    expect((screen.getByLabelText('Locked age') as HTMLSelectElement).value).toBe('7-9');
+    expect(screen.getByText('Profile: local-default')).toBeTruthy();
+    expect(
+      (screen.getByRole('checkbox', { name: /save activity history/i }) as HTMLInputElement).checked,
+    ).toBe(false);
+  });
+
   it('keeps consent enabled and announces an error when history purge fails', async () => {
     render(<App />);
     await setPin();
