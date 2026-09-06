@@ -14,6 +14,7 @@ const ENV_KEYS = [
   'NODE_ENV',
   'FALLBACK_WIDGET',
   'KIDBOT_LOCAL_DEV',
+  'KIDBOT_STUB_PROVIDER',
   'AGENT_SERVICE_TOKEN',
   'OPENAI_API_KEY',
   'PROVIDER_FAILURE_POLICY',
@@ -37,10 +38,15 @@ const withEnv = async <T>(
   const previous = new Map<string, string | undefined>();
   for (const key of ENV_KEYS) {
     previous.set(key, process.env[key]);
+    const hasOverride = Object.prototype.hasOwnProperty.call(overrides, key);
+    // Boundary tests exercise auth posture, not the provider, so they opt into
+    // stub content explicitly unless a test overrides the flag.
     const value =
-      key === 'DOTENV_CONFIG_PATH' && !Object.prototype.hasOwnProperty.call(overrides, key)
+      key === 'DOTENV_CONFIG_PATH' && !hasOverride
         ? '__kidbot_test_env_not_found__'
-        : overrides[key];
+        : key === 'KIDBOT_STUB_PROVIDER' && !hasOverride
+          ? '1'
+          : overrides[key];
     if (value === undefined) {
       delete process.env[key];
     } else {
@@ -150,6 +156,22 @@ describe('service auth boundary', () => {
           expect(response.status).toBe(401);
           expect(body.error).toBe('Unauthorized');
         });
+      },
+    );
+  });
+
+  it('fails secured startup without a provider key unless stub content is explicitly allowed', async () => {
+    await withEnv(
+      {
+        NODE_ENV: 'production',
+        FALLBACK_WIDGET: '0',
+        KIDBOT_LOCAL_DEV: undefined,
+        KIDBOT_STUB_PROVIDER: undefined,
+        AGENT_SERVICE_TOKEN: 'a'.repeat(40),
+        OPENAI_API_KEY: undefined,
+      },
+      async () => {
+        await expect(import('../index.js')).rejects.toThrow(/OPENAI_API_KEY is required/);
       },
     );
   });

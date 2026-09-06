@@ -360,6 +360,14 @@ test('production parent retention fails closed unless it is exactly 30 days', ()
   }).parentHistoryRetentionDays, 30);
 });
 
+test('trust proxy defaults on only in production and accepts an explicit override', () => {
+  assert.equal(parseMcpServerConfig({ ...productionWidgetEnv }).trustProxy, true);
+  assert.equal(parseMcpServerConfig({ ...productionWidgetEnv, KIDBOT_TRUST_PROXY: '0' }).trustProxy, false);
+  assert.equal(parseMcpServerConfig({ FALLBACK_WIDGET: '1', KIDBOT_LOCAL_DEV: '1' }).trustProxy, false);
+  assert.equal(parseMcpServerConfig({ FALLBACK_WIDGET: '1', KIDBOT_LOCAL_DEV: '1', KIDBOT_TRUST_PROXY: '1' }).trustProxy, true);
+  assert.throws(() => parseMcpServerConfig({ FALLBACK_WIDGET: '1', KIDBOT_LOCAL_DEV: '1', KIDBOT_TRUST_PROXY: 'maybe' }), /KIDBOT_TRUST_PROXY/);
+});
+
 test('non-fallback mode without AGENT_SERVICE_TOKEN fails closed at mcp startup', async () => {
   const mcpPort = await getFreePort();
   const mcp = spawnProcess(mcpEntry, {
@@ -416,6 +424,7 @@ test('non-fallback mode with AGENT_SERVICE_TOKEN allows mcp to call agent-servic
     AGENT_SERVICE_TOKEN: token,
     FALLBACK_WIDGET: '0',
     OPENAI_API_KEY: '',
+    KIDBOT_STUB_PROVIDER: '1',
     PORT: String(agentPort),
   });
 
@@ -862,6 +871,7 @@ test('mcp secured posture fails loudly when agent runs local fallback posture', 
     FALLBACK_WIDGET: '1',
     KIDBOT_LOCAL_DEV: '1',
     OPENAI_API_KEY: '',
+    KIDBOT_STUB_PROVIDER: '1',
     PORT: String(agentPort),
   });
 

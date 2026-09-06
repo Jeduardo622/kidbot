@@ -1,5 +1,9 @@
+export type ProviderMode = 'openai' | 'stub';
+
 export interface AgentServiceConfig {
   providerApiKey: string | undefined;
+  /** 'openai' when a provider key is configured; 'stub' serves fixed local content. */
+  providerMode: ProviderMode;
   serviceAuthToken: string | undefined;
   logSubjectSecret: string | undefined;
   fallbackMode: boolean;
@@ -7,6 +11,13 @@ export interface AgentServiceConfig {
   requireServiceAuth: boolean;
   startupPosture: 'secured' | 'local-fallback';
   port: number;
+  /**
+   * Trust one reverse-proxy hop (X-Forwarded-For) when deriving client IPs
+   * for rate limiting. On by default in production (Railway edge proxy);
+   * off elsewhere so a directly exposed service cannot be fooled by a
+   * client-supplied header.
+   */
+  trustProxy: boolean;
 }
 
 type AgentServiceEnv = Partial<
@@ -14,6 +25,8 @@ type AgentServiceEnv = Partial<
     | 'AGENT_SERVICE_TOKEN'
     | 'FALLBACK_WIDGET'
     | 'KIDBOT_LOCAL_DEV'
+    | 'KIDBOT_STUB_PROVIDER'
+    | 'KIDBOT_TRUST_PROXY'
     | 'NODE_ENV'
     | 'OPENAI_API_KEY'
     | 'PORT'
@@ -23,6 +36,14 @@ type AgentServiceEnv = Partial<
 >;
 
 const minProductionTokenLength = 32;
+
+export const parseTrustProxy = (value: string | undefined, nodeEnv: string | undefined): boolean => {
+  const trimmed = value?.trim();
+  if (trimmed === '1' || trimmed === 'true') return true;
+  if (trimmed === '0' || trimmed === 'false') return false;
+  if (trimmed) throw new Error('KIDBOT_TRUST_PROXY must be 0 or 1.');
+  return nodeEnv === 'production';
+};
 
 const trimOptional = (value: string | undefined): string | undefined => {
   const trimmed = value?.trim();
@@ -62,6 +83,35 @@ const validateServiceToken = ({
   }
 };
 
+/**
+ * Stub content (fixed fixtures that ignore the request) must never be served
+ * by accident. Without a provider key the service only starts when:
+ * - FALLBACK_WIDGET=1 (explicit local fallback posture), or
+ * - NODE_ENV=test, or
+ * - KIDBOT_STUB_PROVIDER=1 is set explicitly (used by posture smokes).
+ */
+const validateProviderMode = ({
+  providerApiKey,
+  fallbackMode,
+  nodeEnv,
+  stubProviderAllowed,
+}: {
+  providerApiKey: string | undefined;
+  fallbackMode: boolean;
+  nodeEnv: string | undefined;
+  stubProviderAllowed: boolean;
+}): ProviderMode => {
+  if (providerApiKey) {
+    return 'openai';
+  }
+  if (fallbackMode || nodeEnv === 'test' || stubProviderAllowed) {
+    return 'stub';
+  }
+  throw new Error(
+    'OPENAI_API_KEY is required. Set FALLBACK_WIDGET=1 for local fallback posture, or KIDBOT_STUB_PROVIDER=1 to knowingly serve stub content.',
+  );
+};
+
 export const parseAgentServiceConfig = (
   env: AgentServiceEnv = process.env,
 ): AgentServiceConfig => {
@@ -87,8 +137,17 @@ export const parseAgentServiceConfig = (
     nodeEnv: env.NODE_ENV,
   });
 
+  const providerApiKey = trimOptional(env.OPENAI_API_KEY);
+  const providerMode = validateProviderMode({
+    providerApiKey,
+    fallbackMode,
+    nodeEnv: env.NODE_ENV,
+    stubProviderAllowed: env.KIDBOT_STUB_PROVIDER === '1',
+  });
+
   return {
-    providerApiKey: trimOptional(env.OPENAI_API_KEY),
+    providerApiKey,
+    providerMode,
     serviceAuthToken,
     logSubjectSecret: requireServiceAuth ? serviceAuthToken : undefined,
     fallbackMode,
@@ -96,5 +155,6 @@ export const parseAgentServiceConfig = (
     requireServiceAuth,
     startupPosture,
     port: parsePort(env.PORT ?? env.AGENT_PORT, 4505),
+    trustProxy: parseTrustProxy(env.KIDBOT_TRUST_PROXY, env.NODE_ENV),
   };
 };

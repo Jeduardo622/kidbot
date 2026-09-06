@@ -16,6 +16,8 @@ export interface ImageGenerationRequest {
 export interface ProviderModerationResult {
   blocked: boolean;
   reason?: string;
+  /** Provider category scores in the 0..1 range, when the provider returns them. */
+  categoryScores?: Record<string, number>;
 }
 
 export interface ModelProvider {
@@ -267,9 +269,16 @@ export const createOpenAIProvider = (apiKey: string | undefined): ModelProvider 
       }
 
       const result = response.results[0];
+      const rawScores = (result as { category_scores?: Record<string, unknown> } | undefined)?.category_scores;
+      const categoryScores = rawScores
+        ? Object.fromEntries(
+            Object.entries(rawScores).filter((entry): entry is [string, number] => typeof entry[1] === 'number'),
+          )
+        : undefined;
       return {
         blocked: Boolean(result?.flagged),
         reason: result?.flagged ? 'Provider moderation flagged the content.' : undefined,
+        ...(categoryScores ? { categoryScores } : {}),
       };
     },
   };

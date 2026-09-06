@@ -19,10 +19,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+app.set('trust proxy', mcpConfig.trustProxy ? 1 : false);
 app.use(cors());
 
 app.use('/mcp', (req, res, next) => {
-  const networkIdentity = req.socket.remoteAddress ?? 'unknown';
+  const networkIdentity = req.ip ?? req.socket.remoteAddress ?? 'unknown';
   const secret = mcpConfig.serviceAuthToken ?? mcpConfig.parentAuthSecret ?? 'kidbot-local-control';
   const networkKey = createNetworkKey({ secret, networkIdentity });
   void requestControlStore.acquire({
@@ -150,13 +151,41 @@ if (existsSync(publicDir)) {
   app.use('/public', express.static(publicDir));
 }
 
+/**
+ * Best-effort read of the agent-service provider mode so operators can see
+ * from the public MCP health endpoint whether children are getting model
+ * output or stub fixtures. Never affects `ok`, never blocks for long.
+ */
+const readAgentProviderMode = async (): Promise<{ reachable: boolean; provider?: string }> => {
+  if (mcpConfig.fallbackMode) {
+    return { reachable: false, provider: 'fixture' };
+  }
+  try {
+    const response = await fetch(`${mcpConfig.agentBaseUrl}/healthz`, {
+      signal: AbortSignal.timeout(2_000),
+    });
+    if (!response.ok) {
+      return { reachable: false };
+    }
+    const body = (await response.json()) as { provider?: { mode?: unknown } };
+    const mode = body.provider?.mode;
+    return { reachable: true, ...(typeof mode === 'string' ? { provider: mode } : {}) };
+  } catch {
+    return { reachable: false };
+  }
+};
+
 app.get('/healthz', asyncRoute(async (_req, res) => {
-  const parentStore = await parentProfileStore.readiness();
-  const requestControls = await requestControlStore.readiness();
+  const [parentStore, requestControls, agentService] = await Promise.all([
+    parentProfileStore.readiness(),
+    requestControlStore.readiness(),
+    readAgentProviderMode(),
+  ]);
   const ok = parentStore.ready && requestControls.ready;
   res.status(ok ? 200 : 503).json({
     ok,
     mode: widgetMode,
+    agentService,
     parentProfileStore: parentStore,
     requestControlStore: requestControls,
     time: new Date().toISOString()
@@ -182,7 +211,7 @@ app.get('/diag', (_req, res) => {
 });
 
 app.post('/mcp', asyncRoute(async (req, res) => {
-  const mcpServer = createMcpServer(req.socket.remoteAddress ?? 'unknown');
+  const mcpServer = createMcpServer(req.ip ?? req.socket.remoteAddress ?? 'unknown');
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined
   });

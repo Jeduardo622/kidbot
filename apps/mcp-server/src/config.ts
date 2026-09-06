@@ -17,6 +17,8 @@ export interface McpServerConfig {
   agentRequestTimeoutMs: number;
   widgetDomain: string;
   widgetResourceDomains: string[];
+  /** Trust one reverse-proxy hop for client IPs; defaults to on only in production. */
+  trustProxy: boolean;
 }
 
 type McpServerEnv = Partial<
@@ -26,6 +28,7 @@ type McpServerEnv = Partial<
     | 'AGENT_SERVICE_TOKEN'
     | 'FALLBACK_WIDGET'
     | 'KIDBOT_LOCAL_DEV'
+    | 'KIDBOT_TRUST_PROXY'
     | 'KIDBOT_WIDGET_DOMAIN'
     | 'KIDBOT_WIDGET_RESOURCE_DOMAINS'
     | 'MCP_PORT'
@@ -50,6 +53,14 @@ type McpServerEnv = Partial<
 >;
 
 const minProductionTokenLength = 32;
+
+export const parseTrustProxy = (value: string | undefined, nodeEnv: string | undefined): boolean => {
+  const trimmed = value?.trim();
+  if (trimmed === '1' || trimmed === 'true') return true;
+  if (trimmed === '0' || trimmed === 'false') return false;
+  if (trimmed) throw new Error('KIDBOT_TRUST_PROXY must be 0 or 1.');
+  return nodeEnv === 'production';
+};
 
 const trimOptional = (value: string | undefined): string | undefined => {
   const trimmed = value?.trim();
@@ -258,6 +269,7 @@ export const parseMcpServerConfig = (env: McpServerEnv = process.env): McpServer
     agentRequestTimeoutMs,
     widgetDomain,
     widgetResourceDomains,
+    trustProxy: parseTrustProxy(env.KIDBOT_TRUST_PROXY, env.NODE_ENV),
   };
 };
 

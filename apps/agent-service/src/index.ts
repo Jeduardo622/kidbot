@@ -10,6 +10,7 @@ import { generateColoringOutline } from './agents/imageAgent.js';
 import { planStory } from './agents/storyAgent.js';
 import { planExperiment } from './agents/experimentAgent.js';
 import { parseAgentServiceConfig } from './config.js';
+import { resolveFixturesDir } from './fixtures.js';
 import { correlationId, moderate } from './guardrails.js';
 import {
   ProviderError,
@@ -41,12 +42,14 @@ import {
 } from './types.js';
 
 const app = express();
+const config = parseAgentServiceConfig();
+app.set('trust proxy', config.trustProxy ? 1 : false);
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 
-const config = parseAgentServiceConfig();
 const {
   providerApiKey,
+  providerMode,
   serviceAuthToken,
   logSubjectSecret,
   fallbackMode,
@@ -109,6 +112,7 @@ app.get('/healthz', (_req, res, next) => {
       ok: limiter.ready,
       service: 'agent-service',
       startupPosture,
+      provider: { mode: providerMode },
       rateLimitStore: limiter,
       correlationId: id,
     };
@@ -218,7 +222,7 @@ const withValidation = <T>(
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const fixturesDir = path.resolve(__dirname, '../../fixtures');
+const fixturesDir = resolveFixturesDir(__dirname);
 
 const readFixtureJson = <T>(relativePath: string, fallback: T): T => {
   try {
@@ -346,8 +350,12 @@ const stubScience = (payload: ScienceRequest) => {
   };
 };
 
-const useStub = !providerApiKey || fallbackMode;
-const provider = useStub ? undefined : createOpenAIProvider(providerApiKey);
+const useStub = providerMode === 'stub' || fallbackMode;
+const provider = useStub || !providerApiKey ? undefined : createOpenAIProvider(providerApiKey);
+if (useStub) {
+  // eslint-disable-next-line no-console
+  console.warn(JSON.stringify({ event: 'provider_mode', mode: 'stub', startupPosture }));
+}
 
 const providerFailureFallback = <T extends Record<string, unknown>>(
   route: string,

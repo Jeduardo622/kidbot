@@ -158,6 +158,7 @@ const agent = spawnService(agentEntry, {
   KIDBOT_LOCAL_DEV: '0',
   NODE_ENV: 'production',
   OPENAI_API_KEY: '',
+  KIDBOT_STUB_PROVIDER: '1',
   PORT: String(agentPort),
   RATE_LIMIT_STORE: 'memory',
 });

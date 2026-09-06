@@ -26,7 +26,7 @@ const generateColoringOutlineWithProvider = async (
   request: ColoringRequest,
   provider: ModelProvider,
 ): Promise<ColoringResponse> => {
-  const sceneModeration = await moderateAsync(request.scene, provider);
+  const sceneModeration = await moderateAsync(request.scene, provider, request.ageBand);
   if (sceneModeration.blocked) {
     return { blocked: true, message: sceneModeration.message };
   }
@@ -49,7 +49,7 @@ const generateColoringOutlineWithProvider = async (
     throw new MalformedOutputError('Provider coloring output did not contain a safe SVG');
   }
 
-  const outputModeration = await moderateAsync(validated.svg, provider);
+  const outputModeration = await moderateAsync(validated.svg, provider, request.ageBand);
   if (outputModeration.blocked) {
     throw new UnsafeOutputError(outputModeration.message);
   }

@@ -434,6 +434,7 @@ const runLocal = async () => {
     KIDBOT_LOCAL_DEV: '0',
     NODE_ENV: 'production',
     OPENAI_API_KEY: '',
+    KIDBOT_STUB_PROVIDER: '1',
     PORT: String(agentPort),
     PROVIDER_FAILURE_POLICY: '503',
     RATE_LIMIT_STORE: 'memory',

@@ -10,12 +10,15 @@ Kidbot is a safety-first creative playground for kids. This monorepo hosts the M
 ## Quickstart
 
 ```bash
-pnpm install
+pnpm install --frozen-lockfile
+cp .env.example .env            # then set OPENAI_API_KEY and AGENT_SERVICE_TOKEN
 pnpm run build:widget
 pnpm run dev
 ```
 
-The `dev` script runs the widget (Vite), MCP server, and agent service together. Once the services are running you can connect them to ChatGPT or other MCP clients.
+The `dev` script runs the widget (Vite), MCP server, and agent service together. Open the Vite URL it prints (usually `http://localhost:5173`): in development the widget installs a small bridge that forwards `window.openai.callTool` to the local MCP server (`VITE_MCP_URL`, default `http://localhost:3000/mcp`), so every tab works in a plain browser without ChatGPT. Once the services are running you can also connect them to ChatGPT or other MCP clients.
+
+The agent service refuses to start without `OPENAI_API_KEY` unless `FALLBACK_WIDGET=1` or `KIDBOT_STUB_PROVIDER=1` is set explicitly; stub content is fixed fixtures that ignore the request, so it must never be served by accident. Both `/healthz` endpoints report the live provider mode (`provider.mode` on agent-service, `agentService.provider` on MCP).
 
 ### Verification
 
@@ -109,6 +112,8 @@ AGENT_PORT=4505
 AGENT_BASE_URL=
 FALLBACK_WIDGET=0
 KIDBOT_LOCAL_DEV=0
+KIDBOT_STUB_PROVIDER=0
+KIDBOT_TRUST_PROXY=
 RATE_LIMIT_STORE=redis
 REDIS_URL=redis://localhost:6379
 PROVIDER_FAILURE_POLICY=503
@@ -130,6 +135,8 @@ PARENT_HISTORY_RETENTION_DAYS=30
 PARENT_HISTORY_MAX_EVENTS=200
 KIDBOT_REMOTE_MCP_URL=
 ```
+
+`KIDBOT_STUB_PROVIDER=1` is the only way to run the agent service without `OPENAI_API_KEY` outside fallback posture; it exists for posture smokes and must not be set in production. `KIDBOT_TRUST_PROXY` controls whether one reverse-proxy hop is trusted for client IPs in rate limiting; it defaults to on in production (Railway edge) and off elsewhere.
 
 Production secured posture requires a dedicated `AGENT_SERVICE_TOKEN`; do not reuse `OPENAI_API_KEY` as service auth. Generate a high-entropy token with:
 
@@ -253,8 +260,8 @@ Railway is the first recommended production host for Kidbot because the repo cur
 
 Create one Railway project with:
 
-- `kidbot-agent-service`: build `pnpm install --no-frozen-lockfile && pnpm --filter @kidbot/agent-service run build`; start `pnpm --filter @kidbot/agent-service run start`.
-- `kidbot-mcp-server`: build `pnpm install --no-frozen-lockfile && pnpm --filter @kidbot/mcp-server run build`; start `pnpm --filter @kidbot/mcp-server run start`.
+- `kidbot-agent-service`: build `pnpm install --frozen-lockfile && pnpm --filter @kidbot/agent-service run build`; start `pnpm --filter @kidbot/agent-service run start`.
+- `kidbot-mcp-server`: build `pnpm install --frozen-lockfile && pnpm --filter @kidbot/mcp-server run build`; start `pnpm --filter @kidbot/mcp-server run start`.
 - `redis`: Railway Redis service/template.
 
 Set shared Railway env:

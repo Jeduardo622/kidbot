@@ -126,7 +126,7 @@ const planStoryWithProvider = async (
   provider: ModelProvider,
   options: StoryGenerationOptions = {},
 ): Promise<StoryResponse> => {
-  const inputModeration = await moderateAsync(request.theme, provider);
+  const inputModeration = await moderateAsync(request.theme, provider, request.ageBand);
   if (inputModeration.blocked) {
     return { blocked: true, message: inputModeration.message };
   }
@@ -154,7 +154,7 @@ const planStoryWithProvider = async (
   const outputText = repaired
     .map((panel) => `${panel.title} ${panel.caption} ${panel.imagePrompt}`)
     .join(' ');
-  const outputModeration = await moderateAsync(outputText, provider);
+  const outputModeration = await moderateAsync(outputText, provider, request.ageBand);
   if (outputModeration.blocked) {
     throw new UnsafeOutputError(outputModeration.message);
   }

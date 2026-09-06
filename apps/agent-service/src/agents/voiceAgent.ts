@@ -29,7 +29,7 @@ const craftVoiceReplyWithProvider = async (
   request: VoiceRequest,
   provider: ModelProvider,
 ): Promise<VoiceResponse> => {
-  const inputModeration = await moderateAsync(request.text, provider);
+  const inputModeration = await moderateAsync(request.text, provider, request.ageBand);
   if (inputModeration.blocked) {
     return { blocked: true, message: inputModeration.message };
   }
@@ -53,7 +53,7 @@ const craftVoiceReplyWithProvider = async (
     throw new MalformedOutputError('Provider returned an empty voice response');
   }
   const finalText = `${persona.emoji} ${text.replace(/^([🤖🧚🧭]\s)?/, '').trim()}`;
-  const outputModeration = await moderateAsync(finalText, provider);
+  const outputModeration = await moderateAsync(finalText, provider, request.ageBand);
   if (outputModeration.blocked) {
     throw new UnsafeOutputError(outputModeration.message);
   }
