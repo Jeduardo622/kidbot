@@ -259,10 +259,12 @@ describe('image asset storage', () => {
     const writes: Array<{ path: string; signal?: AbortSignal }> = [];
     const removals: string[] = [];
     const generatedId = '11111111-1111-4111-8111-111111111111';
+    const directory = path.join(tmpdir(), 'kidbot-test-images');
+    const imagePath = path.join(directory, `${generatedId}.png`);
     const store = createImageAssetStore(
       {
         mode: 'local',
-        directory: 'C:/tmp/kidbot-test-images',
+        directory,
         publicBaseUrl: '/generated-images',
         maxBytes: 128,
         ttlMs: 60_000,
@@ -284,12 +286,12 @@ describe('image asset storage', () => {
       store.storePngBase64(Buffer.from('png bytes').toString('base64'), controller.signal),
     ).rejects.toThrow('marker write failed');
     expect(writes).toEqual([
-      { path: `C:\\tmp\\kidbot-test-images\\${generatedId}.png`, signal: controller.signal },
-      { path: `C:\\tmp\\kidbot-test-images\\${generatedId}.png.expires`, signal: controller.signal },
+      { path: imagePath, signal: controller.signal },
+      { path: `${imagePath}.expires`, signal: controller.signal },
     ]);
     expect(removals.sort()).toEqual([
-      `C:\\tmp\\kidbot-test-images\\${generatedId}.png`,
-      `C:\\tmp\\kidbot-test-images\\${generatedId}.png.expires`,
+      imagePath,
+      `${imagePath}.expires`,
     ].sort());
   });
 

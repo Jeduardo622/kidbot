@@ -64,7 +64,7 @@ Files: web-widget main.tsx, ColoringBook.tsx, ScienceLab.tsx, styles.css, parent
 - [x] Verify graceful drain, bounded health and shared Redis controls locally; hosted metrics/capacity remain open.
 - [x] Run verify-change against 3c8881c; build/test using the pinned package manager; run browser and load checks.
 - [x] Prepare release notes, submission/review checklist and reproducible evidence without fabricating approvals.
-- [ ] Review complete diff, resolve material findings, commit focused slices and open a reviewable PR if available.
+- [x] Review complete diff, resolve material findings, commit the integrated completion change and open draft PR #67. Protected human review and exact-head CI remain separate gates.
 
 ## Progress
 
