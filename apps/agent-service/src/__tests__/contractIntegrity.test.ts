@@ -177,9 +177,7 @@ describe('contract integrity', () => {
       'story_panels',
       'voice_chat',
     ];
-    const expectedWidgetToolIds = expectedMcpToolIds.filter(
-      (toolId) => toolId !== 'parent_history_list',
-    );
+    const expectedWidgetToolIds = expectedMcpToolIds;
 
     expect(widgetToolIds).toEqual(expectedWidgetToolIds);
     expect(mcpToolIds).toEqual(expectedMcpToolIds);

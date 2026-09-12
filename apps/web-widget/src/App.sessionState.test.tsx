@@ -13,6 +13,7 @@ describe('App parent/session safety controls', () => {
   let hostState: Record<string, unknown> | undefined;
 
   beforeEach(() => {
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
     callTool.mockReset();
     setWidgetState.mockReset();
     requestDisplayMode.mockReset();
@@ -29,6 +30,7 @@ describe('App parent/session safety controls', () => {
 
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
     delete (window as { openai?: unknown }).openai;
   });
 
@@ -58,6 +60,11 @@ describe('App parent/session safety controls', () => {
     });
     fireEvent.click(screen.getByRole('checkbox', { name: /save activity history/i }));
     await screen.findByText('History is enabled.');
+  };
+
+  const confirmProfileDeletion = () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Delete parent profile' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm delete parent profile' }));
   };
 
   it('ignores private host state and persists only the public session fields', async () => {
@@ -412,7 +419,7 @@ describe('App parent/session safety controls', () => {
       'Profile age could not be updated.',
     );
     expect((screen.getByLabelText('Locked age') as HTMLSelectElement).value).toBe('7-9');
-    expect(screen.getAllByText('Age: 7-9')).toHaveLength(2);
+    expect(screen.getAllByText('Age: 7-9')).toHaveLength(4);
     for (const [state] of setWidgetState.mock.calls) {
       expect((state as Record<string, unknown>).ageBand).toBe('7-9');
     }
@@ -506,7 +513,7 @@ describe('App parent/session safety controls', () => {
     callTool.mockRejectedValueOnce(new Error('offline'));
 
     expect(screen.getByText(/permanently deletes the parent profile and saved history/i)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Delete parent profile' }));
+    confirmProfileDeletion();
 
     expect((await parentControls().findByRole('alert')).textContent).toContain(
       'Profile could not be deleted',
@@ -526,7 +533,7 @@ describe('App parent/session safety controls', () => {
       structuredContent: { deleted: true, profileId: 'kb_profile_other123' },
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete parent profile' }));
+    confirmProfileDeletion();
 
     expect((await parentControls().findByRole('alert')).textContent).toContain(
       'Profile could not be deleted',
@@ -547,7 +554,7 @@ describe('App parent/session safety controls', () => {
       structuredContent: { deleted: true, profileId: 'kb_profile_widget123' },
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete parent profile' }));
+    confirmProfileDeletion();
 
     expect((await parentControls().findByRole('alert')).textContent).toContain(
       'Profile could not be deleted',
@@ -568,7 +575,7 @@ describe('App parent/session safety controls', () => {
         }),
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Delete parent profile' }));
+    confirmProfileDeletion();
 
     expect(callTool).toHaveBeenCalledWith('parent_profile_delete', {
       parentAccessToken: 'kb_parent_widgettoken1234567890',
@@ -579,7 +586,7 @@ describe('App parent/session safety controls', () => {
       'Deleting parent profile…',
     );
     expect(
-      (screen.getByRole('button', { name: 'Delete parent profile' }) as HTMLButtonElement)
+      (screen.getByRole('button', { name: 'Confirm delete parent profile' }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
 

@@ -85,6 +85,14 @@ export const assertWidgetDistPreflight = ({ health, widgetHtml }) => {
   if (health?.mode !== 'dist') {
     throw new Error(`MCP widget mode is not dist; mode=${health?.mode ?? 'missing'}`);
   }
+  if (health?.agentService?.productionReady !== true) {
+    throw new Error(
+      `MCP agent service is not production-ready; reachable=${health?.agentService?.reachable === true}; provider=${health?.agentService?.provider ?? 'missing'}`,
+    );
+  }
+  if (health?.widgetArtifact?.productionReady !== true || health?.widgetArtifact?.distReady !== true) {
+    throw new Error('MCP widget artifact is not production-ready.');
+  }
   if (!/assets\/index-[A-Za-z0-9_-]+\.js/.test(widgetHtml)) {
     throw new Error('Production widget HTML does not reference a built assets/index-*.js bundle.');
   }
@@ -109,6 +117,10 @@ export const runProductionWidgetDistPreflight = async ({
     health: {
       ok: health.ok,
       mode: health.mode,
+      agentProvider: health.agentService?.provider ?? null,
+      agentReachable: health.agentService?.reachable ?? false,
+      agentProductionReady: health.agentService?.productionReady ?? false,
+      widgetProductionReady: health.widgetArtifact?.productionReady ?? false,
       parentProfileMode: health.parentProfileStore?.mode ?? null,
       parentProfileReady: health.parentProfileStore?.ready ?? null,
     },

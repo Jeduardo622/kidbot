@@ -31,6 +31,24 @@ body {
   color: #2563eb;
 }
 
+.transparency-note {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  align-items: center;
+  text-align: center;
+}
+
+.transparency-note p {
+  margin: 0;
+  font-weight: 700;
+}
+
+.transparency-note a {
+  color: #075985;
+  font-weight: 600;
+}
+
 .kidbot-header nav {
   display: flex;
   gap: 0.5rem;
@@ -78,6 +96,54 @@ body {
   flex-direction: column;
   gap: 0.5rem;
   align-items: center;
+}
+
+.saved-parent-data,
+.saved-activity,
+.delete-confirmation {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-items: center;
+  width: 100%;
+}
+
+.saved-activity {
+  align-items: stretch;
+  padding: 0.75rem;
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.saved-activity h3,
+.saved-activity p {
+  margin: 0;
+}
+
+.saved-activity ul {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.saved-activity li {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.65rem;
+  border: 1px solid #bae6fd;
+  border-radius: 12px;
+}
+
+.saved-activity time,
+.saved-activity span {
+  color: #475569;
+}
+
+.history-status,
+.delete-confirmation p {
+  margin: 0;
 }
 
 .history-consent label {
@@ -174,6 +240,14 @@ main {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.feature-panel {
+  min-width: 0;
+}
+
+.feature-panel[hidden] {
+  display: none;
+}
+
 .panel {
   background: #ffffffdd;
   border-radius: 24px;
@@ -234,6 +308,7 @@ main {
 .control-row input:focus-visible,
 .control-row select:focus-visible,
 .control-row textarea:focus-visible,
+.canvas-wrapper canvas:focus-visible,
 .tools input:focus-visible {
   outline: 3px solid #0ea5e9;
   outline-offset: 3px;
@@ -396,6 +471,22 @@ img.panel-artwork {
   min-width: 160px;
 }
 
+.tools p {
+  margin: 0;
+  max-width: 210px;
+  color: #475569;
+}
+
+.save-status.success {
+  color: #166534;
+  font-weight: 700;
+}
+
+.save-status.error {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
 .experiment-card {
   background: #f8fafc;
   padding: 1.5rem;
@@ -418,6 +509,29 @@ img.panel-artwork {
 
 .choices button.selected {
   background: linear-gradient(135deg, #22d3ee, #818cf8);
+}
+
+.experiment-step,
+.step-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.experiment-step {
+  flex-direction: column;
+}
+
+.experiment-step p {
+  margin: 0;
+}
+
+.step-actions {
+  flex-wrap: wrap;
+}
+
+.step-progress {
+  color: #075985;
+  font-weight: 700;
 }
 
 @media (max-width: 480px) {

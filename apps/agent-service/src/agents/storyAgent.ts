@@ -1,10 +1,31 @@
-import type { StoryPanel, StoryRequest, StoryResponse } from '../types.js';
-import { kidTone, moderate, moderateAsync, safeSystemPrompt } from '../guardrails.js';
-import { MalformedOutputError, UnsafeOutputError, type ModelProvider } from '../provider.js';
+import type { AgeBand, StoryPanel, StoryRequest, StoryResponse } from '../types.js';
+import {
+  exceedsAgeBandThreshold,
+  kidTone,
+  moderate,
+  moderateAsync,
+  safeSystemPrompt,
+} from '../guardrails.js';
+import {
+  MalformedOutputError,
+  ModerationFailureError,
+  UnsafeOutputError,
+  type ModelProvider,
+} from '../provider.js';
+import {
+  decodeBoundedImageBase64,
+  defaultMaxGeneratedImageBytes,
+} from '../imageAssetStore.js';
 import { asRecord, cleanText, extractJson } from '../structuredOutput.js';
 
 export interface StoryGenerationOptions {
-  resolveGeneratedImageUrl?: (panel: StoryPanel, pngBase64: string) => Promise<string> | string;
+  resolveGeneratedImageUrl?: (
+    panel: StoryPanel,
+    pngBase64: string,
+    signal?: AbortSignal,
+  ) => Promise<string> | string;
+  maxGeneratedImageBytes?: number;
+  signal?: AbortSignal;
 }
 
 const buildPanelCaption = (
@@ -80,13 +101,18 @@ const repairPanels = (value: unknown, request: StoryRequest): StoryPanel[] | und
 const attachGeneratedImages = async (
   panels: StoryPanel[],
   provider: ModelProvider,
+  ageBand: AgeBand,
   options: StoryGenerationOptions = {},
 ): Promise<StoryPanel[]> => {
   if (!provider.generateImage) {
     return panels;
   }
+  const moderateImage = provider.moderateImage;
+  if (!moderateImage) {
+    throw new ModerationFailureError('Generated-image moderation is unavailable');
+  }
 
-  const generated = new Array<StoryPanel>(panels.length);
+  const generatedImages = new Array<{ panel: StoryPanel; pngBase64: string }>(panels.length);
   let nextIndex = 0;
   let stopped = false;
   const worker = async () => {
@@ -96,6 +122,7 @@ const attachGeneratedImages = async (
       const panel = panels[index];
       if (!panel) continue;
       try {
+        options.signal?.throwIfAborted();
         const pngBase64 = await provider.generateImage?.({
           prompt: panel.imagePrompt,
           size: '1024x1024',
@@ -104,13 +131,30 @@ const attachGeneratedImages = async (
         if (!pngBase64) {
           throw new MalformedOutputError('Provider image output did not include base64 data');
         }
-
-        generated[index] = {
-          ...panel,
-          imageUrl: options.resolveGeneratedImageUrl
-            ? await options.resolveGeneratedImageUrl(panel, pngBase64)
-            : `data:image/png;base64,${pngBase64}`,
-        };
+        decodeBoundedImageBase64(
+          pngBase64,
+          options.maxGeneratedImageBytes ?? defaultMaxGeneratedImageBytes,
+        );
+        let imageModeration;
+        try {
+          imageModeration = await moderateImage(pngBase64);
+        } catch (error) {
+          if (error instanceof ModerationFailureError) {
+            throw error;
+          }
+          throw new ModerationFailureError('Generated-image moderation failed');
+        }
+        if (imageModeration.blocked) {
+          throw new UnsafeOutputError(imageModeration.reason ?? 'Generated image was unsafe');
+        }
+        const exceededCategory = exceedsAgeBandThreshold(
+          imageModeration.categoryScores,
+          ageBand,
+        );
+        if (exceededCategory) {
+          throw new UnsafeOutputError(`Generated image exceeded ${exceededCategory} threshold`);
+        }
+        generatedImages[index] = { panel, pngBase64 };
       } catch (error) {
         stopped = true;
         throw error;
@@ -118,7 +162,23 @@ const attachGeneratedImages = async (
     }
   };
   await Promise.all(Array.from({ length: Math.min(2, panels.length) }, () => worker()));
-  return generated;
+  options.signal?.throwIfAborted();
+
+  const stored: StoryPanel[] = [];
+  for (const entry of generatedImages) {
+    if (!entry) {
+      throw new MalformedOutputError('Provider did not generate every story image');
+    }
+    options.signal?.throwIfAborted();
+    const { panel, pngBase64 } = entry;
+    stored.push({
+      ...panel,
+      imageUrl: options.resolveGeneratedImageUrl
+        ? await options.resolveGeneratedImageUrl(panel, pngBase64, options.signal)
+        : `data:image/png;base64,${pngBase64}`,
+    });
+  }
+  return stored;
 };
 
 const planStoryWithProvider = async (
@@ -158,7 +218,12 @@ const planStoryWithProvider = async (
   if (outputModeration.blocked) {
     throw new UnsafeOutputError(outputModeration.message);
   }
-  const panels = await attachGeneratedImages(repaired, provider, options);
+  const panels = await attachGeneratedImages(
+    repaired,
+    provider,
+    request.ageBand ?? '7-9',
+    options,
+  );
 
   return {
     blocked: false,

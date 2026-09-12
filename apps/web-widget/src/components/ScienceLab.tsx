@@ -27,6 +27,8 @@ export const ScienceLab = ({ sessionContext = defaultSessionContext }: ScienceLa
   const [loading, setLoading] = useState(false);
   const [selectedChoice, setSelectedChoice] = useState<number | undefined>();
   const [showExplanation, setShowExplanation] = useState(false);
+  const [currentStep, setCurrentStep] = useState(0);
+  const [predictionReady, setPredictionReady] = useState(false);
   const announcement = buildAnnouncementState({
     loading,
     loadingMessage: 'Kidbot is preparing your science experiment.',
@@ -42,6 +44,8 @@ export const ScienceLab = ({ sessionContext = defaultSessionContext }: ScienceLa
     setPlan(undefined);
     setShowExplanation(false);
     setSelectedChoice(undefined);
+    setCurrentStep(0);
+    setPredictionReady(false);
     try {
       const result = readStructuredContent(await window.openai?.callTool?.('science_sim', {
         ...sessionContext,
@@ -55,6 +59,7 @@ export const ScienceLab = ({ sessionContext = defaultSessionContext }: ScienceLa
         setError(result.message ?? 'Kidbot paused this experiment.');
       } else {
         setPlan(result);
+        setPredictionReady((result.steps?.length ?? 0) === 0);
       }
     } catch (err) {
       setPlan(undefined);
@@ -103,34 +108,68 @@ export const ScienceLab = ({ sessionContext = defaultSessionContext }: ScienceLa
               </ul>
             </div>
           )}
-          {plan.steps && (
-            <div>
+          {plan.steps && plan.steps.length > 0 && !predictionReady && (
+            <div className="experiment-step">
               <h4>Steps</h4>
-              <ol>
-                {plan.steps.map((step) => (
-                  <li key={step}>{step}</li>
-                ))}
-              </ol>
+              <p className="step-progress">Step {currentStep + 1} of {plan.steps.length}</p>
+              <p>{plan.steps[currentStep]}</p>
+              <div className="step-actions">
+                <button
+                  type="button"
+                  disabled={currentStep === 0}
+                  onClick={() => setCurrentStep((step) => Math.max(0, step - 1))}
+                >
+                  Previous step
+                </button>
+                {currentStep < plan.steps.length - 1 ? (
+                  <button type="button" onClick={() => setCurrentStep((step) => step + 1)}>
+                    Next step
+                  </button>
+                ) : (
+                  <button type="button" onClick={() => setPredictionReady(true)}>
+                    Continue to prediction
+                  </button>
+                )}
+              </div>
             </div>
           )}
-          {plan.prediction && (
+          {plan.prediction && predictionReady && (
             <div className="prediction">
               <h4>Prediction</h4>
               <p>{plan.prediction.question}</p>
-              <div className="choices">
+              {plan.steps && plan.steps.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPredictionReady(false);
+                    setShowExplanation(false);
+                  }}
+                >
+                  Back to steps
+                </button>
+              )}
+              <div className="choices" role="group" aria-label="Prediction choices">
                 {plan.prediction.choices.map((choice, index) => (
                   <button
+                    aria-pressed={selectedChoice === index}
                     key={choice}
                     type="button"
                     className={selectedChoice === index ? 'selected' : ''}
-                    onClick={() => setSelectedChoice(index)}
+                    onClick={() => {
+                      setSelectedChoice(index);
+                      setShowExplanation(false);
+                    }}
                   >
                     {choice}
                   </button>
                 ))}
               </div>
-              <button type="button" onClick={() => setShowExplanation(true)}>
-                Reveal Explanation
+              <button
+                type="button"
+                disabled={selectedChoice === undefined}
+                onClick={() => setShowExplanation(true)}
+              >
+                Reveal explanation
               </button>
               {showExplanation && plan.explanation && (
                 <p className="explanation">

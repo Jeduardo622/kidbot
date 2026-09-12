@@ -18,7 +18,7 @@ import {
   isVoiceCaptureAvailable,
   type VoiceCaptureSession,
 } from '../utils/voiceCapture.js';
-import { speakText } from '../utils/voicePlayback.js';
+import { isSpeechPlaybackAvailable, speakText, stopSpeaking } from '../utils/voicePlayback.js';
 
 type CaptureState = 'idle' | 'listening' | 'unsupported';
 
@@ -39,9 +39,10 @@ const personas: Array<{ key: Persona; label: string }> = [
 
 interface VoiceBarProps {
   sessionContext?: SessionContext;
+  active?: boolean;
 }
 
-export const VoiceBar = ({ sessionContext = defaultSessionContext }: VoiceBarProps) => {
+export const VoiceBar = ({ sessionContext = defaultSessionContext, active = true }: VoiceBarProps) => {
   const [persona, setPersona] = useState<Persona>('robot');
   const [text, setText] = useState('Tell me a cheerful space fact!');
   const [captureState, setCaptureState] = useState<CaptureState>(() =>
@@ -53,6 +54,8 @@ export const VoiceBar = ({ sessionContext = defaultSessionContext }: VoiceBarPro
   const [captureMessage, setCaptureMessage] = useState<string | undefined>();
   const [unavailable, setUnavailable] = useState<string | undefined>();
   const captureSessionRef = useRef<VoiceCaptureSession | undefined>();
+  const requestVersionRef = useRef(0);
+  const captureVersionRef = useRef(0);
   const blockedMessage = response?.blocked
     ? (response.message ?? 'Kidbot paused this request.')
     : undefined;
@@ -69,39 +72,55 @@ export const VoiceBar = ({ sessionContext = defaultSessionContext }: VoiceBarPro
           : '',
   });
 
-  useEffect(
-    () => () => {
-      captureSessionRef.current?.stop();
-    },
-    [],
-  );
+  useEffect(() => {
+    if (!active) {
+      setLoading(false);
+      setCaptureState(isVoiceCaptureAvailable() ? 'idle' : 'unsupported');
+      setCaptureMessage(undefined);
+    }
+    return () => {
+      requestVersionRef.current += 1;
+      captureVersionRef.current += 1;
+      const capture = captureSessionRef.current;
+      captureSessionRef.current = undefined;
+      capture?.stop();
+      stopSpeaking();
+    };
+  }, [active, sessionContext.ageBand, sessionContext.sessionId]);
 
   const handleVoiceInput = () => {
-    if (captureState === 'unsupported') {
+    if (!active || captureState === 'unsupported') {
       return;
     }
     if (captureState === 'listening') {
+      captureVersionRef.current += 1;
       captureSessionRef.current?.stop();
       captureSessionRef.current = undefined;
       setCaptureState('idle');
+      setCaptureMessage(undefined);
       return;
     }
 
+    const captureVersion = ++captureVersionRef.current;
     const session = createVoiceCapture({
       onEnd: () => {
+        if (captureVersion !== captureVersionRef.current) return;
         captureSessionRef.current = undefined;
         setCaptureState('idle');
       },
       onError: (message) => {
+        if (captureVersion !== captureVersionRef.current) return;
         setError(voiceCaptureErrorMessage(message));
         setCaptureMessage(undefined);
         setCaptureState('idle');
       },
       onStart: () => {
+        if (captureVersion !== captureVersionRef.current) return;
         setCaptureMessage('Listening...');
         setCaptureState('listening');
       },
       onText: (transcript) => {
+        if (captureVersion !== captureVersionRef.current) return;
         setText(transcript);
         setCaptureMessage(undefined);
       },
@@ -133,11 +152,13 @@ export const VoiceBar = ({ sessionContext = defaultSessionContext }: VoiceBarPro
         : 'Start Voice Input';
 
   const handleSpeak = async () => {
+    if (!active) return;
     if (!text.trim()) {
       setError('Please share what you would like to talk about.');
       return;
     }
 
+    const requestVersion = ++requestVersionRef.current;
     setLoading(true);
     setError(undefined);
     setUnavailable(undefined);
@@ -148,6 +169,7 @@ export const VoiceBar = ({ sessionContext = defaultSessionContext }: VoiceBarPro
         text,
         persona,
       }), isVoiceResult);
+      if (requestVersion !== requestVersionRef.current) return;
       const unavailableMessage = degradedMessage(result);
       if (unavailableMessage) {
         setUnavailable(unavailableMessage);
@@ -158,6 +180,7 @@ export const VoiceBar = ({ sessionContext = defaultSessionContext }: VoiceBarPro
         speakText(result.text);
       }
     } catch (err) {
+      if (requestVersion !== requestVersionRef.current) return;
       setResponse(undefined);
       const unavailableMessage = unavailableMessageFromError(err);
       if (unavailableMessage) {
@@ -166,7 +189,7 @@ export const VoiceBar = ({ sessionContext = defaultSessionContext }: VoiceBarPro
         setError(errorMessage(err));
       }
     } finally {
-      setLoading(false);
+      if (requestVersion === requestVersionRef.current) setLoading(false);
     }
   };
 
@@ -189,7 +212,9 @@ export const VoiceBar = ({ sessionContext = defaultSessionContext }: VoiceBarPro
         </select>
         <span className="locked-age">Age: {sessionContext.ageBand}</span>
       </div>
+      <label htmlFor="voice-question">Your question or story idea</label>
       <textarea
+        id="voice-question"
         value={text}
         onChange={(event) => setText(event.target.value)}
         placeholder="Ask a question or share a topic"
@@ -215,9 +240,10 @@ export const VoiceBar = ({ sessionContext = defaultSessionContext }: VoiceBarPro
           ) : (
             <>
               <p>{response.text}</p>
-              <button type="button" onClick={() => response.text && speakText(response.text)}>
+              <button type="button" disabled={!active || !isSpeechPlaybackAvailable()} onClick={() => response.text && speakText(response.text)}>
                 Replay
               </button>
+              {!isSpeechPlaybackAvailable() && <p>Audio playback is unavailable. You can read the reply above.</p>}
             </>
           )}
         </div>

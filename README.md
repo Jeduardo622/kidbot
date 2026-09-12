@@ -1,11 +1,15 @@
 # Kidbot Monorepo
 
+See [the v1 acceptance contract](docs/v1-acceptance.md) for the current product scope, release gates and implementation evidence.
+
 Kidbot is a safety-first creative playground for kids. This monorepo hosts the MCP bridge, the Kidbot web widget, and the kid-safe agent service.
+
+Release status: supervised-beta implementation, not public-launch approval. Voice uses typed text and optional browser speech, not Realtime audio. The current 4–12 audience is incompatible with the ChatGPT directory's under-13 targeting restriction; resolve distribution and privacy review before submission. See [release review](docs/release-review.md).
 
 ## Prerequisites
 
 - Node.js 20+
-- pnpm 8+
+- pnpm 8.15.8 (the lockfile/CI version)
 
 ## Quickstart
 
@@ -260,8 +264,8 @@ Railway is the first recommended production host for Kidbot because the repo cur
 
 Create one Railway project with:
 
-- `kidbot-agent-service`: build `pnpm install --frozen-lockfile && pnpm --filter @kidbot/agent-service run build`; start `pnpm --filter @kidbot/agent-service run start`.
-- `kidbot-mcp-server`: build `pnpm install --frozen-lockfile && pnpm --filter @kidbot/mcp-server run build`; start `pnpm --filter @kidbot/mcp-server run start`.
+- `kidbot-agent-service`: use `apps/agent-service/railway.json` and its Dockerfile from the repository root; equivalent local build: `pnpm run build:production:agent`.
+- `kidbot-mcp-server`: use `apps/mcp-server/railway.json` and its Dockerfile from the repository root; equivalent local build: `pnpm run build:production:mcp` (includes the React widget and artifact gate).
 - `redis`: Railway Redis service/template.
 
 Set shared Railway env:
@@ -313,7 +317,8 @@ MCP_GLOBAL_COST_PER_MINUTE=600
 MCP_CALLER_CONCURRENCY=2
 MCP_NETWORK_CONCURRENCY=4
 MCP_GLOBAL_CONCURRENCY=8
-MCP_AGENT_REQUEST_TIMEOUT_MS=45000
+MCP_AGENT_REQUEST_TIMEOUT_MS=35000
+MCP_AGENT_STORY_REQUEST_TIMEOUT_MS=185000
 PARENT_PROFILE_STORE=redis
 PARENT_AUTH_SECRET=<high-entropy parent secret>
 PARENT_HISTORY_RETENTION_DAYS=30
@@ -323,6 +328,8 @@ PARENT_HISTORY_MAX_EVENTS=200
 Widget CSP values must be exact HTTPS origins without paths or wildcards. Use the public MCP service origin for `KIDBOT_WIDGET_DOMAIN`; list any additional widget asset origins in `KIDBOT_WIDGET_RESOURCE_DOMAINS`, separated by commas.
 
 The MCP server reserves caller, server-derived network, and deployment-global request, provider-cost, and concurrency capacity atomically in Redis before each tool call. Story cost includes text/moderation work plus the requested image count, and story image generation is limited to two provider calls at a time. Production fails closed if the Redis control store is unavailable. MCP deadlines cancel the downstream agent request, and agent-service forwards cancellation into OpenAI SDK calls.
+
+Agent total request budgets default to 30 seconds (`AGENT_REQUEST_TIMEOUT_MS`) and 180 seconds for stories (`AGENT_STORY_REQUEST_TIMEOUT_MS`). MCP outer budgets default to 35/185 seconds, and concurrency leases outlive the longest outer budget. These are deadlines, not latency promises. If overriding budgets, keep the MCP values greater than the corresponding agent totals; provider retries and storage share the total budget. See [deployment and rollback checks](docs/deployment-runbook.md).
 
 Only expose the MCP service publicly for ChatGPT and the remote smoke. Keep agent-service private where Railway supports it; if a public agent URL is temporarily needed, `AGENT_SERVICE_TOKEN` and the secured startup posture still protect direct calls.
 
@@ -372,5 +379,4 @@ When you regain installs, exit fallback:
 
 ## Next Steps
 
-- Integrate realtime voice support.
-- Add image generation for story and coloring assets.
+- Complete the [v1 acceptance contract](docs/v1-acceptance.md), including Realtime voice, visual-output review and production proof. Story images and generated SVG coloring outlines already have provider-backed implementations.

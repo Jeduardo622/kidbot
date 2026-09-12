@@ -4,13 +4,14 @@ import { test } from 'node:test';
 process.env.AGENT_SERVICE_TOKEN ??= 'service-token-abcdefghijklmnopqrstuvwxyz0123456789';
 process.env.FALLBACK_WIDGET ??= '0';
 
+const requestControls = await import('../dist/requestControls.js');
 const {
   computeToolCost,
   createCallerKey,
   createMemoryRequestControlStore,
   createRedisRequestControlStore,
   createRequestControlStoreFromConfig,
-} = await import('../dist/requestControls.js');
+} = requestControls;
 const { parseMcpServerConfig } = await import('../dist/config.js');
 
 const productionWidgetEnv = {
@@ -34,9 +35,16 @@ const limits = {
 test('tool costs reflect provider fan-out', () => {
   assert.equal(computeToolCost('parent_history_list', {}), 1);
   assert.equal(computeToolCost('voice_chat', {}), 3);
-  assert.equal(computeToolCost('story_panels', { panels: 6 }), 9);
-  assert.equal(computeToolCost('coloring_outline', {}), 2);
+  assert.equal(computeToolCost('story_panels', { panels: 6 }), 15);
+  assert.equal(computeToolCost('coloring_outline', {}), 4);
   assert.equal(computeToolCost('science_sim', {}), 3);
+});
+
+test('tool deadlines reserve bounded time for story provider fan-out', () => {
+  assert.equal(typeof requestControls.computeToolTimeoutMs, 'function');
+  assert.equal(requestControls.computeToolTimeoutMs('voice_chat', {}, 35_000, 185_000), 35_000);
+  assert.equal(requestControls.computeToolTimeoutMs('story_panels', { panels: 2 }, 35_000, 185_000), 185_000);
+  assert.equal(requestControls.computeToolTimeoutMs('story_panels', { panels: 8 }, 35_000, 185_000), 185_000);
 });
 
 test('production parent storage defaults MCP controls to shared Redis with bounded limits', () => {
@@ -59,9 +67,45 @@ test('production parent storage defaults MCP controls to shared Redis with bound
     callerConcurrency: 2,
     networkConcurrency: 4,
     globalConcurrency: 8,
-    leaseMs: 50_000,
+    leaseMs: 190_000,
   });
-  assert.equal(config.agentRequestTimeoutMs, 45_000);
+  assert.equal(config.agentRequestTimeoutMs, 35_000);
+  assert.equal(config.storyAgentRequestTimeoutMs, 185_000);
+});
+
+test('production rejects an MCP base timeout below the provider image baseline', () => {
+  assert.throws(
+    () => parseMcpServerConfig({
+      ...productionWidgetEnv,
+      AGENT_SERVICE_TOKEN: 'service-token-abcdefghijklmnopqrstuvwxyz0123456789',
+      MCP_AGENT_REQUEST_TIMEOUT_MS: '30000',
+      NODE_ENV: 'production',
+    }),
+    /MCP_AGENT_REQUEST_TIMEOUT_MS must be at least 35000 in production/i,
+  );
+});
+
+test('production rejects an MCP story timeout that cannot cover the agent story deadline', () => {
+  assert.throws(
+    () => parseMcpServerConfig({
+      ...productionWidgetEnv,
+      AGENT_SERVICE_TOKEN: 'service-token-abcdefghijklmnopqrstuvwxyz0123456789',
+      MCP_AGENT_STORY_REQUEST_TIMEOUT_MS: '180000',
+      NODE_ENV: 'production',
+    }),
+    /MCP_AGENT_STORY_REQUEST_TIMEOUT_MS must be at least 185000 in production/i,
+  );
+});
+
+test('MCP rejects a base timeout above the bounded tool maximum', () => {
+  assert.throws(
+    () => parseMcpServerConfig({
+      AGENT_SERVICE_TOKEN: 'service-token-abcdefghijklmnopqrstuvwxyz0123456789',
+      MCP_AGENT_STORY_REQUEST_TIMEOUT_MS: '600001',
+      NODE_ENV: 'test',
+    }),
+    /MCP_AGENT_STORY_REQUEST_TIMEOUT_MS must not exceed 600000/i,
+  );
 });
 
 test('MCP control configuration rejects unsafe numeric values', () => {

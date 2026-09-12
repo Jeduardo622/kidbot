@@ -23,6 +23,9 @@ import {
 } from './provider.js';
 import { createRateLimiter, createRateLimitStoreFromEnv } from './rateLimit.js';
 import { createLogSubject } from './privacyLog.js';
+import { readImageStorageReadiness } from './readiness.js';
+import { createDrain } from './shutdown.js';
+import { runBoundedRequest } from './requestDeadline.js';
 import { safeFallbackSvg, validateColoringSvg } from './svgSafety.js';
 import {
   cleanupExpiredImageAssets,
@@ -102,22 +105,39 @@ const authorization: RequestHandler = (req, res, next) => {
 
 const perMinute = 60_000;
 const rateLimitStore = createRateLimitStoreFromEnv();
+let draining = false;
+
+app.get('/livez', (_req, res) => res.json({ ok: true, service: 'agent-service' }));
+app.use((req, res, next) => {
+  if (draining && req.path !== '/healthz') {
+    res.status(503).setHeader('Retry-After', '5');
+    res.json({ error: 'Service draining', correlationId: correlationId() });
+    return;
+  }
+  next();
+});
 
 app.get('/healthz', (_req, res, next) => {
   void (async () => {
     const id = correlationId();
     res.locals.correlationId = id;
-    const limiter = await rateLimitStore.readiness();
+    const [limiter, imageStorage] = await Promise.all([
+      rateLimitStore.readiness(), readImageStorageReadiness(imageAssetStorageConfig),
+    ]);
+    const ready = !draining && limiter.ready && imageStorage.ready;
     const body = {
-      ok: limiter.ready,
+      ok: ready,
+      ready,
+      draining,
       service: 'agent-service',
       startupPosture,
       provider: { mode: providerMode },
       rateLimitStore: limiter,
+      imageStorage,
       correlationId: id,
     };
     res.locals.outputLength = JSON.stringify(body).length;
-    res.status(limiter.ready ? 200 : 503).json(body);
+    res.status(ready ? 200 : 503).json(body);
   })().catch(next);
 });
 
@@ -174,7 +194,11 @@ const withValidation = <T>(
           res.locals.ageBand =
             typeof metadata.ageBand === 'string' ? metadata.ageBand : defaultAgeBand;
         }
-        const data = await handler(parsed, requestController.signal);
+        const data = await runBoundedRequest(
+          (signal) => handler(parsed, signal),
+          requestController.signal,
+          req.path === '/story-panels' ? config.storyRequestTimeoutMs : config.requestTimeoutMs,
+        );
         if (!data || typeof data !== 'object' || Array.isArray(data)) {
           throw new Error('Handler must return an object payload.');
         }
@@ -473,8 +497,10 @@ app.post(
       const requestProvider = provider ? bindProviderSignal(provider, signal) : undefined;
       const response = requestProvider
         ? await planStory(payload, requestProvider, {
-            resolveGeneratedImageUrl: (_panel, pngBase64) =>
-              imageAssetStore.storePngBase64(pngBase64),
+            signal,
+            maxGeneratedImageBytes: imageAssetStorageConfig.maxBytes,
+            resolveGeneratedImageUrl: (_panel, pngBase64, storageSignal) =>
+              imageAssetStore.storePngBase64(pngBase64, storageSignal),
           })
         : planStory(payload);
       return response.blocked ? response : { ...response, source: 'agent' as const };
@@ -551,13 +577,11 @@ export const start = () => {
 
 if (process.env.NODE_ENV !== 'test') {
   const server = start();
-  process.on('SIGTERM', () => {
-    server.close();
+  const drain = createDrain(server, () => { draining = true; }, async () => {
+    await rateLimitStore.close?.();
   });
-
-  process.on('SIGINT', () => {
-    server.close();
-  });
+  process.once('SIGTERM', () => { void drain(); });
+  process.once('SIGINT', () => { void drain(); });
 }
 
 export { app };

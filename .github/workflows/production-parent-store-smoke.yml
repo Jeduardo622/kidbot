@@ -37,5 +37,8 @@ jobs:
       - name: Build MCP server
         run: pnpm --filter @kidbot/mcp-server run build
 
+      - name: Verify production readiness and widget artifact
+        run: pnpm run smoke:production-widget-dist-preflight
+
       - name: Run remote parent store smoke
         run: pnpm run smoke:parent-store-remote

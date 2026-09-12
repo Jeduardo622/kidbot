@@ -6,6 +6,7 @@ import {
   ImageAssetTooLargeError,
   cleanupExpiredImageAssets,
   createImageAssetStore,
+  decodeBoundedImageBase64,
   parseImageAssetStorageConfig,
 } from '../imageAssetStore.js';
 
@@ -58,6 +59,7 @@ describe('image asset storage', () => {
     expect(() =>
       parseImageAssetStorageConfig({
         NODE_ENV: 'production',
+        KIDBOT_IMAGE_STORAGE_MODE: 'local',
         KIDBOT_IMAGE_TTL_SECONDS: '60',
       }),
     ).toThrow(/KIDBOT_IMAGE_TTL_SECONDS must be 86400 in production/i);
@@ -65,9 +67,19 @@ describe('image asset storage', () => {
     expect(
       parseImageAssetStorageConfig({
         NODE_ENV: 'production',
+        KIDBOT_IMAGE_STORAGE_MODE: 'local',
         KIDBOT_IMAGE_TTL_SECONDS: '86400',
       }).ttlMs,
     ).toBe(86_400_000);
+  });
+
+  it('requires bounded non-inline storage in production', () => {
+    expect(() =>
+      parseImageAssetStorageConfig({
+        NODE_ENV: 'production',
+        KIDBOT_IMAGE_STORAGE_MODE: 'data-url',
+      }),
+    ).toThrow(/data-url.*not allowed in production/i);
   });
 
   it('parses Supabase storage config and requires server-only credentials', () => {
@@ -137,6 +149,29 @@ describe('image asset storage', () => {
     ).rejects.toBeInstanceOf(ImageAssetTooLargeError);
   });
 
+  it('rejects obviously oversized base64 before allocating decoded bytes', () => {
+    const bufferFrom = vi.spyOn(Buffer, 'from');
+
+    expect(() => decodeBoundedImageBase64('A'.repeat(1_000), 4)).toThrow(
+      ImageAssetTooLargeError,
+    );
+    expect(bufferFrom).not.toHaveBeenCalled();
+  });
+
+  it('applies the configured byte cap before returning inline image data', async () => {
+    const store = createImageAssetStore({
+      mode: 'data-url',
+      directory: '.kidbot/generated-images',
+      publicBaseUrl: '/generated-images',
+      maxBytes: 4,
+      ttlMs: 60_000,
+    });
+
+    await expect(
+      store.storePngBase64(Buffer.from('too large').toString('base64')),
+    ).rejects.toBeInstanceOf(ImageAssetTooLargeError);
+  });
+
   it('uploads PNG bytes to Supabase Storage and returns a public object URL', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ Key: 'ok' }), { status: 200 }));
     const store = createImageAssetStore(
@@ -173,6 +208,89 @@ describe('image asset storage', () => {
       'x-upsert': 'false',
     });
     expect(Buffer.from(init.body as ArrayBuffer).toString('utf-8')).toBe('png bytes');
+  });
+
+  it('passes request cancellation through to Supabase uploads', async () => {
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    const store = createImageAssetStore(
+      {
+        mode: 'supabase',
+        directory: '.kidbot/generated-images',
+        publicBaseUrl: 'https://project-ref.supabase.co/storage/v1/object/public/kidbot-images',
+        maxBytes: 128,
+        ttlMs: 60_000,
+        supabaseUrl: 'https://project-ref.supabase.co',
+        supabaseServiceRoleKey: 'server-secret-key',
+        supabaseBucket: 'kidbot-images',
+        supabasePrefix: 'story-panels',
+      },
+      { fetch: fetchMock },
+    );
+    const controller = new AbortController();
+
+    await store.storePngBase64(Buffer.from('png bytes').toString('base64'), controller.signal);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ signal: controller.signal }),
+    );
+  });
+
+  it('does not write a local image when the request is already aborted', async () => {
+    const directory = await createTempDir();
+    const store = createImageAssetStore({
+      mode: 'local',
+      directory,
+      publicBaseUrl: '/generated-images',
+      maxBytes: 128,
+      ttlMs: 60_000,
+    });
+    const controller = new AbortController();
+    controller.abort(new Error('request cancelled'));
+
+    await expect(
+      store.storePngBase64(Buffer.from('png bytes').toString('base64'), controller.signal),
+    ).rejects.toThrow('request cancelled');
+    await expect(readFile(directory)).rejects.toThrow();
+  });
+
+  it('passes the signal to local writes and removes only its partial asset pair on failure', async () => {
+    const controller = new AbortController();
+    const writes: Array<{ path: string; signal?: AbortSignal }> = [];
+    const removals: string[] = [];
+    const generatedId = '11111111-1111-4111-8111-111111111111';
+    const store = createImageAssetStore(
+      {
+        mode: 'local',
+        directory: 'C:/tmp/kidbot-test-images',
+        publicBaseUrl: '/generated-images',
+        maxBytes: 128,
+        ttlMs: 60_000,
+      },
+      {
+        mkdir: vi.fn(async () => undefined),
+        randomUUID: () => generatedId,
+        rm: vi.fn(async (target) => {
+          removals.push(String(target));
+        }),
+        writeFile: vi.fn(async (target, _contents, options) => {
+          writes.push({ path: String(target), signal: options?.signal });
+          if (String(target).endsWith('.expires')) throw new Error('marker write failed');
+        }),
+      },
+    );
+
+    await expect(
+      store.storePngBase64(Buffer.from('png bytes').toString('base64'), controller.signal),
+    ).rejects.toThrow('marker write failed');
+    expect(writes).toEqual([
+      { path: `C:\\tmp\\kidbot-test-images\\${generatedId}.png`, signal: controller.signal },
+      { path: `C:\\tmp\\kidbot-test-images\\${generatedId}.png.expires`, signal: controller.signal },
+    ]);
+    expect(removals.sort()).toEqual([
+      `C:\\tmp\\kidbot-test-images\\${generatedId}.png`,
+      `C:\\tmp\\kidbot-test-images\\${generatedId}.png.expires`,
+    ].sort());
   });
 
   it('rejects Supabase image uploads that exceed the configured byte cap before network I/O', async () => {

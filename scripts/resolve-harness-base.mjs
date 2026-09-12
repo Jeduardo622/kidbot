@@ -34,6 +34,21 @@ export async function resolveHarnessBase({ repoRoot, eventName, baseRef, before 
   return candidate;
 }
 
+export async function isTreeIdentical({ repoRoot, base }) {
+  try {
+    await execFileAsync('git', ['diff', '--quiet', `${base}^{tree}`, 'HEAD^{tree}'], {
+      cwd: repoRoot,
+      windowsHide: true,
+    });
+    return true;
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && 'code' in error && error.code === 1) {
+      return false;
+    }
+    throw new Error(`Unable to compare harness trees for base: ${base}`, { cause: error });
+  }
+}
+
 async function main() {
   try {
     const candidate = await resolveHarnessBase({
@@ -42,7 +57,9 @@ async function main() {
       baseRef: process.env.BASE_REF,
       before: process.env.BEFORE_SHA,
     });
+    const treeIdentical = await isTreeIdentical({ repoRoot: process.cwd(), base: candidate });
     process.stdout.write(`HARNESS_BASE=${candidate}\n`);
+    process.stdout.write(`HARNESS_TREE_IDENTICAL=${treeIdentical ? '1' : '0'}\n`);
   } catch (error) {
     process.stderr.write(`${error.message}\n`);
     process.exitCode = 1;

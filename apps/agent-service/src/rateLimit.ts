@@ -87,11 +87,28 @@ export const createRedisRateLimitStore = (redisUrl: string): RateLimitStore => {
   return {
     mode: 'redis',
     async increment(key, windowMs) {
-      const count = await client.incr(key);
-      if (count === 1) {
-        await client.pexpire(key, windowMs);
+      const result = await client.eval(
+        [
+          "local count = redis.call('INCR', KEYS[1])",
+          "local ttl = redis.call('PTTL', KEYS[1])",
+          'if count == 1 or ttl < 0 then',
+          "  redis.call('PEXPIRE', KEYS[1], ARGV[1])",
+          '  ttl = tonumber(ARGV[1])',
+          'end',
+          'return { count, ttl }',
+        ].join('\n'),
+        1,
+        key,
+        windowMs,
+      );
+      if (!Array.isArray(result) || result.length !== 2) {
+        throw new Error('Redis rate limit script returned an invalid result.');
       }
-      const ttl = await client.pttl(key);
+      const count = Number(result[0]);
+      const ttl = Number(result[1]);
+      if (!Number.isInteger(count) || count < 1 || !Number.isFinite(ttl) || ttl < 0) {
+        throw new Error('Redis rate limit script returned invalid count or ttl values.');
+      }
       return {
         count,
         resetAt: Date.now() + Math.max(ttl, 0),
@@ -118,12 +135,16 @@ export const createRedisRateLimitStore = (redisUrl: string): RateLimitStore => {
   };
 };
 
-type RateLimitStoreEnv = Partial<Record<'RATE_LIMIT_STORE' | 'REDIS_URL', string>>;
+type RateLimitStoreEnv = Partial<Record<'NODE_ENV' | 'RATE_LIMIT_STORE' | 'REDIS_URL', string>>;
 
 export const createRateLimitStoreFromEnv = (
   env: RateLimitStoreEnv = process.env,
 ): RateLimitStore => {
-  const mode = env.RATE_LIMIT_STORE?.trim().toLowerCase() || 'memory';
+  const mode = env.RATE_LIMIT_STORE?.trim().toLowerCase()
+    || (env.NODE_ENV === 'production' ? 'redis' : 'memory');
+  if (env.NODE_ENV === 'production' && mode !== 'redis') {
+    throw new Error('RATE_LIMIT_STORE must be redis in production.');
+  }
   if (mode === 'memory') {
     return createMemoryRateLimitStore();
   }

@@ -1,5 +1,7 @@
 # Kidbot Engineering Plan (v1.0 Milestone Roadmap)
 
+Current acceptance and implementation status are tracked in [the v1 acceptance contract](docs/v1-acceptance.md). The week estimates below are the original milestone outline, not a completion report.
+
 ## Team
 | Role | Name / Placeholder | Notes |
 |------|--------------------|-------|

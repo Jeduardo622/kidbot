@@ -6,15 +6,20 @@ import { craftVoiceReply } from '../agents/voiceAgent.js';
 import { moderate } from '../guardrails.js';
 import {
   MalformedOutputError,
+  ModerationFailureError,
   UnsafeOutputError,
   type ImageGenerationRequest,
   type ModelProvider,
+  type ProviderModerationResult,
   type TextGenerationRequest,
 } from '../provider.js';
+import { ImageAssetTooLargeError } from '../imageAssetStore.js';
 
 const fakeProvider = (
   generate: (request: TextGenerationRequest) => string,
   generateImage?: (request: ImageGenerationRequest) => string | Promise<string>,
+  moderateImage: (pngBase64: string) => ProviderModerationResult | Promise<ProviderModerationResult> =
+    () => ({ blocked: false }),
 ): ModelProvider => ({
   async generateText(request) {
     return generate(request);
@@ -26,6 +31,9 @@ const fakeProvider = (
         },
       }
     : {}),
+  async moderateImage(pngBase64: string) {
+    return moderateImage(pngBase64);
+  },
   async moderateText(text) {
     const result = moderate(text);
     return { blocked: result.blocked, reason: result.message };
@@ -152,6 +160,282 @@ describe('provider-backed agents', () => {
     expect(imagePrompts).toEqual(['Mia planting a bean', 'A happy sprout']);
   });
 
+  it('moderates each generated PNG before storing or returning it', async () => {
+    const events: string[] = [];
+    const provider = fakeProvider(
+      () => JSON.stringify({
+        panels: [
+          { title: 'One', caption: 'A safe scene.', imagePrompt: 'Scene one', imageUrl: null },
+          { title: 'Two', caption: 'Another safe scene.', imagePrompt: 'Scene two', imageUrl: null },
+        ],
+      }),
+      async (request) => {
+        events.push(`generate:${request.prompt}`);
+        return Buffer.from(request.prompt).toString('base64');
+      },
+      async (value) => {
+        events.push(`moderate:${value}`);
+        return { blocked: false };
+      },
+    );
+
+    await planStory(
+      { theme: 'Two safe scenes', panels: 2, ageBand: '7-9' },
+      provider,
+      {
+        resolveGeneratedImageUrl: async (panel) => {
+          events.push(`store:${panel.imagePrompt}`);
+          return `https://example.test/${encodeURIComponent(panel.imagePrompt)}`;
+        },
+      },
+    );
+
+    for (const prompt of ['Scene one', 'Scene two']) {
+      const png = Buffer.from(prompt).toString('base64');
+      const generatedIndex = events.indexOf(`generate:${prompt}`);
+      const moderatedIndex = events.indexOf(`moderate:${png}`);
+      const storedIndex = events.indexOf(`store:${prompt}`);
+      expect(generatedIndex).toBeGreaterThanOrEqual(0);
+      expect(moderatedIndex).toBeGreaterThan(generatedIndex);
+      expect(storedIndex).toBeGreaterThan(moderatedIndex);
+    }
+  });
+
+  it('passes the request signal to generated-image storage', async () => {
+    const controller = new AbortController();
+    const storageSignals: Array<AbortSignal | undefined> = [];
+    const provider = fakeProvider(
+      () => JSON.stringify({
+        panels: [
+          { title: 'One', caption: 'A safe scene.', imagePrompt: 'Scene one', imageUrl: null },
+          { title: 'Two', caption: 'Another safe scene.', imagePrompt: 'Scene two', imageUrl: null },
+        ],
+      }),
+      (request) => Buffer.from(request.prompt).toString('base64'),
+    );
+
+    await planStory(
+      { theme: 'Two safe scenes', panels: 2, ageBand: '7-9' },
+      provider,
+      {
+        signal: controller.signal,
+        resolveGeneratedImageUrl: (_panel, _pngBase64, signal) => {
+          storageSignals.push(signal);
+          return 'https://example.test/image.png';
+        },
+      },
+    );
+
+    expect(storageSignals).toEqual([controller.signal, controller.signal]);
+  });
+
+  it('fails closed when generated-image moderation is unavailable', async () => {
+    const provider = {
+      ...fakeProvider(
+        () => JSON.stringify({
+          panels: [
+            { title: 'One', caption: 'A safe scene.', imagePrompt: 'Scene one', imageUrl: null },
+            { title: 'Two', caption: 'Another safe scene.', imagePrompt: 'Scene two', imageUrl: null },
+          ],
+        }),
+        () => Buffer.from('image').toString('base64'),
+      ),
+      moderateImage: undefined,
+    } as ModelProvider;
+
+    await expect(
+      planStory({ theme: 'Two safe scenes', panels: 2, ageBand: '7-9' }, provider),
+    ).rejects.toBeInstanceOf(ModerationFailureError);
+  });
+
+  it('fails closed before storage when generated-image moderation blocks', async () => {
+    let storageCalls = 0;
+    const provider = fakeProvider(
+      () => JSON.stringify({
+        panels: [
+          { title: 'One', caption: 'A safe scene.', imagePrompt: 'Scene one', imageUrl: null },
+          { title: 'Two', caption: 'Another safe scene.', imagePrompt: 'Scene two', imageUrl: null },
+        ],
+      }),
+      () => Buffer.from('unsafe image').toString('base64'),
+      () => ({ blocked: true, reason: 'Unsafe generated image.' }),
+    );
+
+    await expect(
+      planStory(
+        { theme: 'Two safe scenes', panels: 2, ageBand: '7-9' },
+        provider,
+        {
+          resolveGeneratedImageUrl: () => {
+            storageCalls += 1;
+            return 'https://example.test/unsafe.png';
+          },
+        },
+      ),
+    ).rejects.toBeInstanceOf(UnsafeOutputError);
+    expect(storageCalls).toBe(0);
+  });
+
+  it('applies age-band category thresholds to generated story images', async () => {
+    let storageCalls = 0;
+    const provider = fakeProvider(
+      () => JSON.stringify({
+        panels: [
+          { title: 'One', caption: 'A safe scene.', imagePrompt: 'Scene one', imageUrl: null },
+          { title: 'Two', caption: 'Another safe scene.', imagePrompt: 'Scene two', imageUrl: null },
+        ],
+      }),
+      (request) => Buffer.from(request.prompt).toString('base64'),
+      () => ({ blocked: false, categoryScores: { violence: 0.4 } }),
+    );
+
+    await expect(
+      planStory(
+        { theme: 'Two safe scenes', panels: 2, ageBand: '7-9' },
+        provider,
+        {
+          resolveGeneratedImageUrl: () => {
+            storageCalls += 1;
+            return 'https://example.test/image.png';
+          },
+        },
+      ),
+    ).rejects.toBeInstanceOf(UnsafeOutputError);
+    expect(storageCalls).toBe(0);
+  });
+
+  it('does not store a sibling image before the whole batch passes moderation', async () => {
+    let storageCalls = 0;
+    const provider = fakeProvider(
+      () => JSON.stringify({
+        panels: [
+          { title: 'One', caption: 'A safe scene.', imagePrompt: 'Scene one', imageUrl: null },
+          { title: 'Two', caption: 'Another safe scene.', imagePrompt: 'Scene two', imageUrl: null },
+        ],
+      }),
+      async (request) => {
+        if (request.prompt === 'Scene one') {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        return Buffer.from(request.prompt).toString('base64');
+      },
+      (pngBase64) => {
+        const prompt = Buffer.from(pngBase64, 'base64').toString('utf-8');
+        return { blocked: prompt === 'Scene one' };
+      },
+    );
+
+    await expect(
+      planStory(
+        { theme: 'Two safe scenes', panels: 2, ageBand: '7-9' },
+        provider,
+        {
+          resolveGeneratedImageUrl: () => {
+            storageCalls += 1;
+            return 'https://example.test/image.png';
+          },
+        },
+      ),
+    ).rejects.toBeInstanceOf(UnsafeOutputError);
+    expect(storageCalls).toBe(0);
+  });
+
+  it('rejects oversized generated PNGs before moderation or storage', async () => {
+    let moderationCalls = 0;
+    let storageCalls = 0;
+    const provider = fakeProvider(
+      () => JSON.stringify({
+        panels: [
+          { title: 'One', caption: 'A safe scene.', imagePrompt: 'Scene one', imageUrl: null },
+          { title: 'Two', caption: 'Another safe scene.', imagePrompt: 'Scene two', imageUrl: null },
+        ],
+      }),
+      () => Buffer.from('larger than four bytes').toString('base64'),
+      () => {
+        moderationCalls += 1;
+        return { blocked: false };
+      },
+    );
+
+    await expect(
+      planStory(
+        { theme: 'Two safe scenes', panels: 2, ageBand: '7-9' },
+        provider,
+        {
+          maxGeneratedImageBytes: 4,
+          resolveGeneratedImageUrl: () => {
+            storageCalls += 1;
+            return 'https://example.test/image.png';
+          },
+        },
+      ),
+    ).rejects.toBeInstanceOf(ImageAssetTooLargeError);
+    expect(moderationCalls).toBe(0);
+    expect(storageCalls).toBe(0);
+  });
+
+  it('moderates the rendered coloring SVG as a bounded PNG', async () => {
+    const moderatedImages: string[] = [];
+    const provider = fakeProvider(
+      () => '<svg viewBox="0 0 1024 1024"><circle cx="512" cy="512" r="320" fill="none" stroke="#222"/></svg>',
+      undefined,
+      (pngBase64) => {
+        moderatedImages.push(pngBase64);
+        return { blocked: false };
+      },
+    );
+
+    await expect(generateColoringOutline({ scene: 'safe planet' }, provider)).resolves.toMatchObject({
+      blocked: false,
+    });
+    expect(moderatedImages).toHaveLength(1);
+    expect(Buffer.from(moderatedImages[0] ?? '', 'base64').subarray(0, 8)).toEqual(
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    );
+  });
+
+  it('fails closed when rendered coloring image moderation blocks', async () => {
+    const provider = fakeProvider(
+      () => '<svg viewBox="0 0 1024 1024"><circle cx="512" cy="512" r="320" fill="none" stroke="#222"/></svg>',
+      undefined,
+      () => ({ blocked: true, reason: 'Unsafe rendered image.' }),
+    );
+
+    await expect(
+      generateColoringOutline({ scene: 'safe planet' }, provider),
+    ).rejects.toBeInstanceOf(UnsafeOutputError);
+  });
+
+  it('applies age-band category thresholds to rendered coloring images', async () => {
+    const provider = fakeProvider(
+      () => '<svg viewBox="0 0 1024 1024"><circle cx="512" cy="512" r="320" fill="none" stroke="#222"/></svg>',
+      undefined,
+      () => ({ blocked: false, categoryScores: { violence: 0.4 } }),
+    );
+
+    await expect(
+      generateColoringOutline({ scene: 'safe planet', ageBand: '7-9' }, provider),
+    ).rejects.toBeInstanceOf(UnsafeOutputError);
+  });
+
+  it('forces rendered coloring PNG dimensions to 1024x1024', async () => {
+    let dimensions: [number, number] | undefined;
+    const provider = fakeProvider(
+      () => '<svg width="999999" height="888888" viewBox="0 0 999999 1"><circle cx="1" cy="1" r="1" fill="none" stroke="#222"/></svg>',
+      undefined,
+      (pngBase64) => {
+        const png = Buffer.from(pngBase64, 'base64');
+        dimensions = [png.readUInt32BE(16), png.readUInt32BE(20)];
+        return { blocked: false };
+      },
+    );
+
+    await expect(
+      generateColoringOutline({ scene: 'safe planet', ageBand: '7-9' }, provider),
+    ).resolves.toMatchObject({ blocked: false });
+    expect(dimensions).toEqual([1024, 1024]);
+  });
+
   it('limits story image generation to two concurrent provider calls', async () => {
     let active = 0;
     let maxActive = 0;
@@ -204,8 +488,9 @@ describe('provider-backed agents', () => {
     expect(calls).toEqual(['Scene 0', 'Scene 1']);
   });
 
-  it('stops assigning story images after generated-image storage fails', async () => {
+  it('stops storing story images after generated-image storage fails', async () => {
     const calls: string[] = [];
+    const storageCalls: string[] = [];
     const panels = Array.from({ length: 6 }, (_, index) => ({
       title: `Panel ${index + 1}`,
       caption: `A friendly scene ${index + 1}.`,
@@ -227,6 +512,7 @@ describe('provider-backed agents', () => {
         provider,
         {
           resolveGeneratedImageUrl: async (panel) => {
+            storageCalls.push(panel.imagePrompt);
             if (panel.imagePrompt === 'Stored scene 0') {
               throw new Error('storage unavailable');
             }
@@ -237,7 +523,8 @@ describe('provider-backed agents', () => {
       ),
     ).rejects.toThrow('storage unavailable');
     await new Promise((resolve) => setTimeout(resolve, 60));
-    expect(calls).toEqual(['Stored scene 0', 'Stored scene 1']);
+    expect(calls).toHaveLength(6);
+    expect(storageCalls).toEqual(['Stored scene 0']);
   });
 
   it('surfaces malformed structured provider output for route-level policy handling', async () => {

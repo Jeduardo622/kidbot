@@ -182,6 +182,7 @@ describe('service auth boundary', () => {
         NODE_ENV: 'production',
         FALLBACK_WIDGET: '0',
         KIDBOT_LOCAL_DEV: undefined,
+        KIDBOT_STUB_PROVIDER: undefined,
         AGENT_SERVICE_TOKEN: 'short-token-secret',
         OPENAI_API_KEY: undefined,
       },
@@ -442,6 +443,23 @@ describe('service auth boundary', () => {
     );
   });
 
+  it('reports unready image storage without disclosing its path', async () => {
+    await withEnv({
+      NODE_ENV: 'test', FALLBACK_WIDGET: '0', AGENT_SERVICE_TOKEN: 'test-service-token',
+      KIDBOT_IMAGE_STORAGE_MODE: 'local', KIDBOT_IMAGE_STORAGE_DIR: import.meta.filename,
+    }, async () => {
+      const mod = await import('../index.js');
+      await withServer(mod.app, async (baseUrl) => {
+        const response = await fetch(`${baseUrl}/healthz`);
+        const body = await response.json() as { ready?: boolean; imageStorage?: unknown };
+        expect(response.status).toBe(503);
+        expect(body.ready).toBe(false);
+        expect(body.imageStorage).toEqual({ mode: 'local', ready: false });
+        expect(JSON.stringify(body)).not.toContain(import.meta.filename);
+      });
+    });
+  });
+
   it('logs keyed session audit references without raw request data', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     const serviceToken = 'test-service-token';
@@ -604,6 +622,9 @@ describe('service auth boundary', () => {
               async generateImage({ prompt }: { prompt: string }) {
                 return Buffer.from(prompt).toString('base64');
               },
+              async moderateImage() {
+                return { blocked: false };
+              },
               async moderateText() {
                 return { blocked: false };
               },
@@ -686,6 +707,9 @@ describe('service auth boundary', () => {
               },
               async generateImage({ prompt }: { prompt: string }) {
                 return Buffer.from(`png:${prompt}`).toString('base64');
+              },
+              async moderateImage() {
+                return { blocked: false };
               },
               async moderateText() {
                 return { blocked: false };
@@ -795,6 +819,9 @@ describe('service auth boundary', () => {
               async generateImage({ prompt }: { prompt: string }) {
                 return Buffer.from(`png:${prompt}`).toString('base64');
               },
+              async moderateImage() {
+                return { blocked: false };
+              },
               async moderateText() {
                 return { blocked: false };
               },
@@ -878,6 +905,9 @@ describe('service auth boundary', () => {
               async generateImage() {
                 return Buffer.from('too large for cap').toString('base64');
               },
+              async moderateImage() {
+                return { blocked: false };
+              },
               async moderateText() {
                 return { blocked: false };
               },
@@ -951,6 +981,9 @@ describe('service auth boundary', () => {
               },
               async generateImage() {
                 throw new actual.ProviderUnavailableError('image provider unavailable');
+              },
+              async moderateImage() {
+                return { blocked: false };
               },
               async moderateText() {
                 return { blocked: false };
@@ -1037,6 +1070,9 @@ describe('service auth boundary', () => {
                     ),
                     { status: 503 },
                   );
+                },
+                async moderateImage() {
+                  return { blocked: false };
                 },
                 async moderateText() {
                   return { blocked: false };

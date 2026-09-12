@@ -23,6 +23,7 @@ export interface ProviderModerationResult {
 export interface ModelProvider {
   generateText(request: TextGenerationRequest, signal?: AbortSignal): Promise<string>;
   generateImage?(request: ImageGenerationRequest, signal?: AbortSignal): Promise<string>;
+  moderateImage?(pngBase64: string, signal?: AbortSignal): Promise<ProviderModerationResult>;
   moderateText(text: string, signal?: AbortSignal): Promise<ProviderModerationResult>;
 }
 
@@ -33,6 +34,9 @@ export const bindProviderSignal = (
   generateText: (request) => provider.generateText(request, signal),
   ...(provider.generateImage
     ? { generateImage: (request: ImageGenerationRequest) => provider.generateImage!(request, signal) }
+    : {}),
+  ...(provider.moderateImage
+    ? { moderateImage: (pngBase64: string) => provider.moderateImage!(pngBase64, signal) }
     : {}),
   moderateText: (text) => provider.moderateText(text, signal),
 });
@@ -99,6 +103,9 @@ export const parseProviderFailurePolicy = (
   if (explicit && explicit !== 'fallback' && explicit !== '503') {
     throw new Error('PROVIDER_FAILURE_POLICY must be fallback or 503.');
   }
+  if (env.NODE_ENV === 'production' && explicit === 'fallback') {
+    throw new Error('PROVIDER_FAILURE_POLICY=fallback is not allowed in production.');
+  }
 
   if (explicit === 'fallback') {
     return { allowFallback: true };
@@ -107,7 +114,7 @@ export const parseProviderFailurePolicy = (
     return { allowFallback: false };
   }
 
-  return { allowFallback: env.NODE_ENV !== 'production' || env.KIDBOT_LOCAL_DEV === '1' };
+  return { allowFallback: env.NODE_ENV !== 'production' };
 };
 
 export const classifyProviderError = (error: unknown): ProviderFallbackReason => {
@@ -121,6 +128,31 @@ export interface ProviderRetryOptions {
   timeoutMs: number;
   retries: number;
 }
+
+type ProviderRetryEnv = Partial<
+  Record<'PROVIDER_TIMEOUT_MS' | 'PROVIDER_RETRIES', string>
+>;
+
+const parseBoundedInteger = (
+  name: string,
+  value: string | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number => {
+  const parsed = Number(value ?? fallback);
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
+    throw new Error(`${name} must be an integer between ${min} and ${max}.`);
+  }
+  return parsed;
+};
+
+export const parseProviderRetryOptions = (
+  env: ProviderRetryEnv = process.env,
+): ProviderRetryOptions => ({
+  timeoutMs: parseBoundedInteger('PROVIDER_TIMEOUT_MS', env.PROVIDER_TIMEOUT_MS, 15_000, 1, 180_000),
+  retries: parseBoundedInteger('PROVIDER_RETRIES', env.PROVIDER_RETRIES, 1, 0, 2),
+});
 
 export const withProviderRetry = async <T>(
   operation: (signal: AbortSignal) => Promise<T>,
@@ -197,12 +229,46 @@ export const createOpenAIProvider = (apiKey: string | undefined): ModelProvider 
     return undefined;
   }
 
+  const { timeoutMs, retries } = parseProviderRetryOptions();
   const client = new OpenAI({ apiKey });
   const generationModel = process.env.KIDBOT_OPENAI_MODEL ?? 'gpt-4o-mini';
   const imageModel = process.env.KIDBOT_OPENAI_IMAGE_MODEL ?? 'gpt-image-2';
   const moderationModel = process.env.KIDBOT_OPENAI_MODERATION_MODEL ?? 'omni-moderation-latest';
-  const timeoutMs = Number(process.env.PROVIDER_TIMEOUT_MS ?? 15_000);
-  const retries = Number(process.env.PROVIDER_RETRIES ?? 1);
+
+  const moderateInput = async (
+    input: OpenAI.ModerationCreateParams['input'],
+    outerSignal?: AbortSignal,
+  ): Promise<ProviderModerationResult> => {
+    let response;
+    try {
+      response = await withProviderRetry(
+        (signal) => client.moderations.create(
+          { model: moderationModel, input },
+          { signal },
+        ),
+        { timeoutMs, retries },
+        outerSignal,
+      );
+    } catch {
+      throw new ModerationFailureError();
+    }
+
+    const result = response.results[0];
+    if (!result) {
+      throw new ModerationFailureError('Provider moderation returned no result');
+    }
+    const rawScores = (result as unknown as { category_scores?: Record<string, unknown> }).category_scores;
+    const categoryScores = rawScores
+      ? Object.fromEntries(
+          Object.entries(rawScores).filter((entry): entry is [string, number] => typeof entry[1] === 'number'),
+        )
+      : undefined;
+    return {
+      blocked: Boolean(result.flagged),
+      reason: result.flagged ? 'Provider moderation flagged the content.' : undefined,
+      ...(categoryScores ? { categoryScores } : {}),
+    };
+  };
 
   return {
     async generateText(request, outerSignal) {
@@ -245,41 +311,22 @@ export const createOpenAIProvider = (apiKey: string | undefined): ModelProvider 
 
       return base64;
     },
+    async moderateImage(pngBase64, outerSignal) {
+      if (!pngBase64.trim()) {
+        throw new ModerationFailureError('Generated image was empty');
+      }
+      return moderateInput([
+        {
+          type: 'image_url',
+          image_url: { url: `data:image/png;base64,${pngBase64}` },
+        },
+      ], outerSignal);
+    },
     async moderateText(text, outerSignal) {
       if (!text.trim()) {
         return { blocked: false };
       }
-
-      let response;
-      try {
-        response = await withProviderRetry(
-          (signal) => client.moderations.create(
-            { model: moderationModel, input: text },
-            { signal },
-          ),
-          {
-            timeoutMs,
-            retries,
-          },
-          outerSignal,
-        );
-      } catch (error) {
-        void error;
-        throw new ModerationFailureError();
-      }
-
-      const result = response.results[0];
-      const rawScores = (result as { category_scores?: Record<string, unknown> } | undefined)?.category_scores;
-      const categoryScores = rawScores
-        ? Object.fromEntries(
-            Object.entries(rawScores).filter((entry): entry is [string, number] => typeof entry[1] === 'number'),
-          )
-        : undefined;
-      return {
-        blocked: Boolean(result?.flagged),
-        reason: result?.flagged ? 'Provider moderation flagged the content.' : undefined,
-        ...(categoryScores ? { categoryScores } : {}),
-      };
+      return moderateInput(text, outerSignal);
     },
   };
 };

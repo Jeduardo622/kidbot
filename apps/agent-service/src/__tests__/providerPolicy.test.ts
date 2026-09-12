@@ -8,11 +8,31 @@ import {
   classifyProviderError,
   bindProviderSignal,
   parseProviderFailurePolicy,
+  parseProviderRetryOptions,
   safeProviderErrorSummary,
   withProviderRetry,
 } from '../provider.js';
 
 describe('provider failure policy', () => {
+  it('parses bounded provider timeouts and retry counts', () => {
+    expect(parseProviderRetryOptions({})).toEqual({ timeoutMs: 15_000, retries: 1 });
+    expect(parseProviderRetryOptions({
+      PROVIDER_TIMEOUT_MS: '180000',
+      PROVIDER_RETRIES: '2',
+    })).toEqual({ timeoutMs: 180_000, retries: 2 });
+
+    for (const value of ['0', '1.5', '180001', 'Infinity', 'NaN']) {
+      expect(() => parseProviderRetryOptions({ PROVIDER_TIMEOUT_MS: value })).toThrow(
+        /PROVIDER_TIMEOUT_MS must be an integer between 1 and 180000/i,
+      );
+    }
+    for (const value of ['-1', '1.5', '3', 'Infinity', 'NaN']) {
+      expect(() => parseProviderRetryOptions({ PROVIDER_RETRIES: value })).toThrow(
+        /PROVIDER_RETRIES must be an integer between 0 and 2/i,
+      );
+    }
+  });
+
   it('binds the request signal to every provider operation', async () => {
     const controller = new AbortController();
     const observed: AbortSignal[] = [];
@@ -25,6 +45,10 @@ describe('provider failure policy', () => {
         if (signal) observed.push(signal);
         return 'png';
       },
+      async moderateImage(_pngBase64, signal) {
+        if (signal) observed.push(signal);
+        return { blocked: false };
+      },
       async moderateText(_text, signal) {
         if (signal) observed.push(signal);
         return { blocked: false };
@@ -33,8 +57,14 @@ describe('provider failure policy', () => {
 
     await provider.generateText({ task: 'voice', system: 'safe', user: 'hello' });
     await provider.generateImage?.({ prompt: 'safe' });
+    await provider.moderateImage?.('cG5n');
     await provider.moderateText('safe');
-    expect(observed).toEqual([controller.signal, controller.signal, controller.signal]);
+    expect(observed).toEqual([
+      controller.signal,
+      controller.signal,
+      controller.signal,
+      controller.signal,
+    ]);
   });
 
   it('allows fallback for local development by default', () => {
@@ -43,15 +73,17 @@ describe('provider failure policy', () => {
     });
   });
 
-  it('returns degraded service in production unless fallback is explicit', () => {
+  it('forces degraded service and rejects fixture fallback in production startup policy', () => {
     expect(parseProviderFailurePolicy({ NODE_ENV: 'production' })).toEqual({
       allowFallback: false,
     });
-    expect(
+    expect(() =>
       parseProviderFailurePolicy({ NODE_ENV: 'production', PROVIDER_FAILURE_POLICY: 'fallback' }),
-    ).toEqual({
-      allowFallback: true,
-    });
+    ).toThrow(/PROVIDER_FAILURE_POLICY=fallback is not allowed in production/i);
+    expect(parseProviderFailurePolicy({
+      NODE_ENV: 'production',
+      KIDBOT_LOCAL_DEV: '1',
+    })).toEqual({ allowFallback: false });
   });
 
   it('classifies each explicit provider failure reason', () => {

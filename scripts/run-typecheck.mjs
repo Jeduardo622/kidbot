@@ -2,29 +2,53 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const tscBin = path.resolve('node_modules/.bin/tsc');
-const hasLocalTsc = existsSync(tscBin);
-const strictMode = process.env.STRICT_VERIFY === '1';
-const isShim = hasLocalTsc
-  ? (() => {
-      try {
-        return readFileSync(tscBin, 'utf-8').includes('run-typecheck.mjs');
-      } catch (error) {
-        return false;
-      }
-    })()
-  : false;
+export const runTypecheck = ({
+  cwd = process.cwd(),
+  platform = process.platform,
+  exists = existsSync,
+  read = readFileSync,
+  spawn = spawnSync,
+  strictMode = process.env.STRICT_VERIFY === '1',
+} = {}) => {
+  const tscBin = path.resolve(
+    cwd,
+    platform === 'win32' ? 'node_modules/.bin/tsc.cmd' : 'node_modules/.bin/tsc',
+  );
+  const hasLocalTsc = exists(tscBin);
+  const isShim = hasLocalTsc
+    ? (() => {
+        try {
+          return read(tscBin, 'utf-8').includes('run-typecheck.mjs');
+        } catch (error) {
+          return false;
+        }
+      })()
+    : false;
 
-if (hasLocalTsc && !isShim) {
-  const result = spawnSync(tscBin, ['-b', '--noEmit'], { stdio: 'inherit' });
-  process.exit(result.status ?? 0);
+  if (hasLocalTsc && !isShim) {
+    const result = spawn(tscBin, ['-b', '--noEmit'], {
+      cwd,
+      shell: platform === 'win32',
+      stdio: 'inherit',
+    });
+    if (result.error) {
+      console.error('TypeScript failed to start.');
+      return 1;
+    }
+    return result.status ?? 1;
+  }
+
+  if (strictMode) {
+    console.error('❌ STRICT_VERIFY=1: TypeScript is unavailable. Run `pnpm install` and retry.');
+    return 1;
+  }
+
+  console.log('⚙️  Skipping TypeScript compile – dependencies unavailable; fallback mode assumed.');
+  return 0;
+};
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  process.exit(runTypecheck());
 }
-
-if (strictMode) {
-  console.error('❌ STRICT_VERIFY=1: TypeScript is unavailable. Run `pnpm install` and retry.');
-  process.exit(1);
-}
-
-console.log('⚙️  Skipping TypeScript compile – dependencies unavailable; fallback mode assumed.');
-process.exit(0);

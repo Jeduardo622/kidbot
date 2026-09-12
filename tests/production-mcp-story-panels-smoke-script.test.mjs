@@ -160,9 +160,21 @@ test('production MCP story panels image URL classifier matches hosted shapes', (
 
 test('production MCP story panels workflow uses protected remote MCP URL secret', async () => {
   const workflow = await readFile('.github/workflows/production-mcp-story-panels-smoke.yml', 'utf8');
+  const preflightIndex = workflow.indexOf('pnpm run smoke:production-widget-dist-preflight');
+  const storyIndex = workflow.indexOf('pnpm run smoke:production-mcp-story-panels');
 
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /environment:\s*production/);
   assert.match(workflow, /secrets\.KIDBOT_REMOTE_MCP_URL/);
-  assert.match(workflow, /pnpm run smoke:production-mcp-story-panels/);
+  assert.ok(preflightIndex > 0, 'missing widget dist preflight');
+  assert.ok(storyIndex > preflightIndex, 'story smoke must run after the readiness and artifact preflight');
+});
+
+test('production parent-store workflow gates mutation behind widget and readiness preflight', async () => {
+  const workflow = await readFile('.github/workflows/production-parent-store-smoke.yml', 'utf8');
+  const preflightIndex = workflow.indexOf('pnpm run smoke:production-widget-dist-preflight');
+  const parentStoreIndex = workflow.indexOf('pnpm run smoke:parent-store-remote');
+
+  assert.ok(preflightIndex > 0, 'missing widget dist preflight');
+  assert.ok(parentStoreIndex > preflightIndex, 'parent-store smoke must run after the readiness and artifact preflight');
 });

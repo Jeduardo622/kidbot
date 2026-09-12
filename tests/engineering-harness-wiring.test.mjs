@@ -99,9 +99,10 @@ test('CI resolves a safe Git base and enforces routing and verification', async 
   assert.doesNotMatch(workflow, /> harness-route\.json/);
   assert.match(workflow, /cat "\$HARNESS_ROUTE_REPORT"/);
   assert.match(workflow, /node scripts\/export-harness-classification\.mjs "\$HARNESS_ROUTE_REPORT" >> "\$GITHUB_ENV"/);
-  assert.match(workflow, /if: env\.HARNESS_CLASSIFICATION == 'review-only'\s+run: pnpm run verify:local/);
-  assert.equal((workflow.match(/run: pnpm run verify:local/g) || []).length, 1);
-  assert.match(workflow, /name: Verify engineering change\s+run: pnpm run verify-change/);
+  assert.match(workflow, /if: env\.HARNESS_TREE_IDENTICAL != '1' && env\.HARNESS_CLASSIFICATION == 'review-only'\s+run: pnpm run verify:local/);
+  assert.equal((workflow.match(/run: pnpm run verify:local/g) || []).length, 2);
+  assert.match(workflow, /if: env\.HARNESS_TREE_IDENTICAL == '1'\s+run: pnpm run verify:local/);
+  assert.match(workflow, /name: Verify engineering change\s+if: env\.HARNESS_TREE_IDENTICAL != '1'\s+run: pnpm run verify-change/);
   assert.doesNotMatch(workflow, /if: env\.HARNESS_CLASSIFICATION != 'review-only'/);
   assert.match(workflow, /pnpm run verify-change -- --base "\$HARNESS_BASE"/);
   assert.doesNotMatch(workflow, /pnpm run smoke:(?:production|railway)/);
