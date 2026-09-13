@@ -2,6 +2,8 @@
 
 This is the authoritative release checklist as of 2026-09-12. PLAN.md and EXECUTSPEC.md describe the vision; older dated plans record individual changes, not current completion. The next release is a supervised beta of the four existing activities, not the full Realtime v1 vision. Implemented source, deterministic tests, real-browser evidence, hosted evidence, and human sign-off are distinct acceptance states.
 
+2026-09-13 direction update: the owner chose a child-facing standalone product and approved parent-identity design. [Child product direction](child-product-direction.md) supersedes the unresolved distribution choice below; it does not mark standalone delivery, identity or consent as implemented. ChatGPT submission/approval is no longer a release goal; applicable standalone distribution and provider approval remain required.
+
 ## Product requirements
 
 | Area | Acceptance |
@@ -26,7 +28,7 @@ This is the authoritative release checklist as of 2026-09-12. PLAN.md and EXECUT
 - [ ] Accessibility audit substantiates the WCAG-AA goal; touch/stylus and microphone permission flows are tested on supported devices.
 - [ ] Content/red-team review covers all three age bands, spoken output, images and science factuality; deterministic scores alone are insufficient.
 - [ ] Parent identity/onboarding design and privacy/legal review approve the intended audience and distribution. ChatGPT host age eligibility must be verified before submission.
-- [ ] Beta parent feedback, release notes, submission metadata and OpenAI review approval exist.
+- [ ] Beta parent feedback, release notes, and approvals required for the selected standalone distribution and provider configuration exist.
 - [ ] Deployment records the reviewed commit and passes post-deploy artifact, MCP, provider and parent-store checks.
 
 ## Deliberate boundaries

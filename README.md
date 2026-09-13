@@ -2,6 +2,8 @@
 
 See [the v1 acceptance contract](docs/v1-acceptance.md) for the current product scope, release gates and implementation evidence.
 
+Product direction (2026-09-13): retain the child-facing 4–12 audience and plan standalone delivery, not an adult-operated ChatGPT app. See [child product direction and parent-identity options](docs/child-product-direction.md). The standalone delivery and recoverable parent identity are design work, not implemented capabilities.
+
 Kidbot is a safety-first creative playground for kids. This monorepo hosts the MCP bridge, the Kidbot web widget, and the kid-safe agent service.
 
 Release status: supervised-beta implementation, not public-launch approval. Voice uses typed text and optional browser speech, not Realtime audio. The current 4–12 audience is incompatible with the ChatGPT directory's under-13 targeting restriction; resolve distribution and privacy review before submission. See [release review](docs/release-review.md).

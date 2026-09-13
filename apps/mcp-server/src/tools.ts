@@ -671,7 +671,7 @@ export const registerTools = (
     outputSchema: voiceToolOutputSchema,
     resultSchema: voiceToolOutputUnion,
     successSchema: voiceSuccessSchema,
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: false },
   };
   registerKidbotTool(server, voiceTool.name, voiceTool, async (input: unknown, extra) =>
     runControlled(voiceTool.name, input, extra as ToolRequestExtra, networkIdentity, async (signal) =>
@@ -733,7 +733,7 @@ export const registerTools = (
     outputSchema: coloringOutlineToolOutputSchema,
     resultSchema: coloringOutlineToolOutputUnion,
     successSchema: coloringOutlineSuccessSchema,
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: false },
   };
   registerKidbotTool(server, coloringTool.name, coloringTool, async (input: unknown, extra) =>
     runControlled(coloringTool.name, input, extra as ToolRequestExtra, networkIdentity, async (signal) =>
@@ -760,7 +760,7 @@ export const registerTools = (
     outputSchema: scienceSimToolOutputSchema,
     resultSchema: scienceSimToolOutputUnion,
     successSchema: scienceSimSuccessSchema,
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: false },
   };
   registerKidbotTool(server, scienceTool.name, scienceTool, async (input: unknown, extra) =>
     runControlled(scienceTool.name, input, extra as ToolRequestExtra, networkIdentity, async (signal) =>
