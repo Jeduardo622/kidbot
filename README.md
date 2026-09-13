@@ -1,21 +1,28 @@
 # Kidbot Monorepo
 
+See [the v1 acceptance contract](docs/v1-acceptance.md) for the current product scope, release gates and implementation evidence.
+
 Kidbot is a safety-first creative playground for kids. This monorepo hosts the MCP bridge, the Kidbot web widget, and the kid-safe agent service.
+
+Release status: supervised-beta implementation, not public-launch approval. Voice uses typed text and optional browser speech, not Realtime audio. The current 4–12 audience is incompatible with the ChatGPT directory's under-13 targeting restriction; resolve distribution and privacy review before submission. See [release review](docs/release-review.md).
 
 ## Prerequisites
 
 - Node.js 20+
-- pnpm 8+
+- pnpm 8.15.8 (the lockfile/CI version)
 
 ## Quickstart
 
 ```bash
-pnpm install
+pnpm install --frozen-lockfile
+cp .env.example .env            # then set OPENAI_API_KEY and AGENT_SERVICE_TOKEN
 pnpm run build:widget
 pnpm run dev
 ```
 
-The `dev` script runs the widget (Vite), MCP server, and agent service together. Once the services are running you can connect them to ChatGPT or other MCP clients.
+The `dev` script runs the widget (Vite), MCP server, and agent service together. Open the Vite URL it prints (usually `http://localhost:5173`): in development the widget installs a small bridge that forwards `window.openai.callTool` to the local MCP server (`VITE_MCP_URL`, default `http://localhost:3000/mcp`), so every tab works in a plain browser without ChatGPT. Once the services are running you can also connect them to ChatGPT or other MCP clients.
+
+The agent service refuses to start without `OPENAI_API_KEY` unless `FALLBACK_WIDGET=1` or `KIDBOT_STUB_PROVIDER=1` is set explicitly; stub content is fixed fixtures that ignore the request, so it must never be served by accident. Both `/healthz` endpoints report the live provider mode (`provider.mode` on agent-service, `agentService.provider` on MCP).
 
 ### Verification
 
@@ -109,6 +116,8 @@ AGENT_PORT=4505
 AGENT_BASE_URL=
 FALLBACK_WIDGET=0
 KIDBOT_LOCAL_DEV=0
+KIDBOT_STUB_PROVIDER=0
+KIDBOT_TRUST_PROXY=
 RATE_LIMIT_STORE=redis
 REDIS_URL=redis://localhost:6379
 PROVIDER_FAILURE_POLICY=503
@@ -130,6 +139,8 @@ PARENT_HISTORY_RETENTION_DAYS=30
 PARENT_HISTORY_MAX_EVENTS=200
 KIDBOT_REMOTE_MCP_URL=
 ```
+
+`KIDBOT_STUB_PROVIDER=1` is the only way to run the agent service without `OPENAI_API_KEY` outside fallback posture; it exists for posture smokes and must not be set in production. `KIDBOT_TRUST_PROXY` controls whether one reverse-proxy hop is trusted for client IPs in rate limiting; it defaults to on in production (Railway edge) and off elsewhere.
 
 Production secured posture requires a dedicated `AGENT_SERVICE_TOKEN`; do not reuse `OPENAI_API_KEY` as service auth. Generate a high-entropy token with:
 
@@ -253,8 +264,8 @@ Railway is the first recommended production host for Kidbot because the repo cur
 
 Create one Railway project with:
 
-- `kidbot-agent-service`: build `pnpm install --no-frozen-lockfile && pnpm --filter @kidbot/agent-service run build`; start `pnpm --filter @kidbot/agent-service run start`.
-- `kidbot-mcp-server`: build `pnpm install --no-frozen-lockfile && pnpm --filter @kidbot/mcp-server run build`; start `pnpm --filter @kidbot/mcp-server run start`.
+- `kidbot-agent-service`: use `apps/agent-service/railway.json` and its Dockerfile from the repository root; equivalent local build: `pnpm run build:production:agent`.
+- `kidbot-mcp-server`: use `apps/mcp-server/railway.json` and its Dockerfile from the repository root; equivalent local build: `pnpm run build:production:mcp` (includes the React widget and artifact gate).
 - `redis`: Railway Redis service/template.
 
 Set shared Railway env:
@@ -306,7 +317,8 @@ MCP_GLOBAL_COST_PER_MINUTE=600
 MCP_CALLER_CONCURRENCY=2
 MCP_NETWORK_CONCURRENCY=4
 MCP_GLOBAL_CONCURRENCY=8
-MCP_AGENT_REQUEST_TIMEOUT_MS=45000
+MCP_AGENT_REQUEST_TIMEOUT_MS=35000
+MCP_AGENT_STORY_REQUEST_TIMEOUT_MS=185000
 PARENT_PROFILE_STORE=redis
 PARENT_AUTH_SECRET=<high-entropy parent secret>
 PARENT_HISTORY_RETENTION_DAYS=30
@@ -316,6 +328,8 @@ PARENT_HISTORY_MAX_EVENTS=200
 Widget CSP values must be exact HTTPS origins without paths or wildcards. Use the public MCP service origin for `KIDBOT_WIDGET_DOMAIN`; list any additional widget asset origins in `KIDBOT_WIDGET_RESOURCE_DOMAINS`, separated by commas.
 
 The MCP server reserves caller, server-derived network, and deployment-global request, provider-cost, and concurrency capacity atomically in Redis before each tool call. Story cost includes text/moderation work plus the requested image count, and story image generation is limited to two provider calls at a time. Production fails closed if the Redis control store is unavailable. MCP deadlines cancel the downstream agent request, and agent-service forwards cancellation into OpenAI SDK calls.
+
+Agent total request budgets default to 30 seconds (`AGENT_REQUEST_TIMEOUT_MS`) and 180 seconds for stories (`AGENT_STORY_REQUEST_TIMEOUT_MS`). MCP outer budgets default to 35/185 seconds, and concurrency leases outlive the longest outer budget. These are deadlines, not latency promises. If overriding budgets, keep the MCP values greater than the corresponding agent totals; provider retries and storage share the total budget. See [deployment and rollback checks](docs/deployment-runbook.md).
 
 Only expose the MCP service publicly for ChatGPT and the remote smoke. Keep agent-service private where Railway supports it; if a public agent URL is temporarily needed, `AGENT_SERVICE_TOKEN` and the secured startup posture still protect direct calls.
 
@@ -365,5 +379,4 @@ When you regain installs, exit fallback:
 
 ## Next Steps
 
-- Integrate realtime voice support.
-- Add image generation for story and coloring assets.
+- Complete the [v1 acceptance contract](docs/v1-acceptance.md), including Realtime voice, visual-output review and production proof. Story images and generated SVG coloring outlines already have provider-backed implementations.

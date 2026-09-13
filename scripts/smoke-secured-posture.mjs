@@ -5,10 +5,12 @@ import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { spawn } from 'node:child_process';
+import { createHermeticServiceContext } from './hermetic-service-env.mjs';
 
 const rootDir = process.cwd();
 const agentEntry = join(rootDir, 'apps', 'agent-service', 'dist', 'index.js');
 const mcpEntry = join(rootDir, 'apps', 'mcp-server', 'dist', 'server.js');
+const explicitStartLauncher = join(rootDir, 'scripts', 'start-service-export.mjs');
 
 if (!existsSync(agentEntry)) {
   throw new Error('Missing apps/agent-service/dist/index.js. Run the agent-service build first.');
@@ -40,11 +42,13 @@ const getFreePort = () =>
     });
   });
 
-const spawnService = (entry, env) => {
-  const child = spawn(process.execPath, [entry], {
-    cwd: rootDir,
+const hermeticContext = await createHermeticServiceContext();
+
+const spawnService = (entry, env, { explicitStart = false } = {}) => {
+  const child = spawn(process.execPath, explicitStart ? [explicitStartLauncher, entry] : [entry], {
+    cwd: hermeticContext.cwd,
     env: {
-      ...process.env,
+      ...hermeticContext.env,
       ...env,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -156,11 +160,11 @@ const agent = spawnService(agentEntry, {
   AGENT_SERVICE_TOKEN: token,
   FALLBACK_WIDGET: '0',
   KIDBOT_LOCAL_DEV: '0',
-  NODE_ENV: 'production',
-  OPENAI_API_KEY: '',
+  NODE_ENV: 'test',
+  KIDBOT_STUB_PROVIDER: '1',
   PORT: String(agentPort),
   RATE_LIMIT_STORE: 'memory',
-});
+}, { explicitStart: true });
 const mcp = spawnService(mcpEntry, {
   ...widgetProductionEnv,
   AGENT_PORT: String(agentPort),
@@ -168,7 +172,8 @@ const mcp = spawnService(mcpEntry, {
   FALLBACK_WIDGET: '0',
   KIDBOT_LOCAL_DEV: '0',
   MCP_PORT: String(mcpPort),
-  NODE_ENV: 'production',
+  MCP_REQUEST_CONTROL_STORE: 'memory',
+  NODE_ENV: 'test',
 });
 const wrongTokenMcp = spawnService(mcpEntry, {
   ...widgetProductionEnv,
@@ -177,7 +182,8 @@ const wrongTokenMcp = spawnService(mcpEntry, {
   FALLBACK_WIDGET: '0',
   KIDBOT_LOCAL_DEV: '0',
   MCP_PORT: String(wrongTokenMcpPort),
-  NODE_ENV: 'production',
+  MCP_REQUEST_CONTROL_STORE: 'memory',
+  NODE_ENV: 'test',
 });
 
 try {
@@ -216,4 +222,5 @@ try {
   await stopService(wrongTokenMcp);
   await stopService(mcp);
   await stopService(agent);
+  await hermeticContext.cleanup();
 }

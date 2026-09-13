@@ -1,5 +1,17 @@
-import { moderate, moderateAsync, safeSystemPrompt } from '../guardrails.js';
-import { MalformedOutputError, UnsafeOutputError, type ModelProvider } from '../provider.js';
+import { Resvg } from '@resvg/resvg-js';
+import {
+  exceedsAgeBandThreshold,
+  moderate,
+  moderateAsync,
+  safeSystemPrompt,
+} from '../guardrails.js';
+import {
+  MalformedOutputError,
+  ModerationFailureError,
+  UnsafeOutputError,
+  type ModelProvider,
+} from '../provider.js';
+import { defaultMaxGeneratedImageBytes } from '../imageAssetStore.js';
 import { safeFallbackSvg, validateColoringSvg } from '../svgSafety.js';
 import type { ColoringRequest, ColoringResponse } from '../types.js';
 
@@ -22,11 +34,29 @@ const extractSvg = (text: string): string => {
   return match?.[0] ?? text;
 };
 
+const renderSvgToBoundedPngBase64 = (svg: string): string => {
+  const boundedSvg = svg.replace(/<svg\b([^>]*)>/i, (_root, attributes: string) => {
+    const boundedAttributes = attributes.replace(
+      /\s(?:width|height)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi,
+      '',
+    );
+    return `<svg${boundedAttributes} width="1024" height="1024">`;
+  });
+  const png = Buffer.from(new Resvg(boundedSvg, {
+    fitTo: { mode: 'width', value: 1024 },
+    font: { loadSystemFonts: false },
+  }).render().asPng());
+  if (png.byteLength > defaultMaxGeneratedImageBytes) {
+    throw new MalformedOutputError('Rendered coloring image exceeded the moderation size limit');
+  }
+  return png.toString('base64');
+};
+
 const generateColoringOutlineWithProvider = async (
   request: ColoringRequest,
   provider: ModelProvider,
 ): Promise<ColoringResponse> => {
-  const sceneModeration = await moderateAsync(request.scene, provider);
+  const sceneModeration = await moderateAsync(request.scene, provider, request.ageBand);
   if (sceneModeration.blocked) {
     return { blocked: true, message: sceneModeration.message };
   }
@@ -49,9 +79,32 @@ const generateColoringOutlineWithProvider = async (
     throw new MalformedOutputError('Provider coloring output did not contain a safe SVG');
   }
 
-  const outputModeration = await moderateAsync(validated.svg, provider);
+  const outputModeration = await moderateAsync(validated.svg, provider, request.ageBand);
   if (outputModeration.blocked) {
     throw new UnsafeOutputError(outputModeration.message);
+  }
+  if (!provider.moderateImage) {
+    throw new ModerationFailureError('Rendered-image moderation is unavailable');
+  }
+  const pngBase64 = renderSvgToBoundedPngBase64(validated.svg);
+  let renderedModeration;
+  try {
+    renderedModeration = await provider.moderateImage(pngBase64);
+  } catch (error) {
+    if (error instanceof ModerationFailureError) {
+      throw error;
+    }
+    throw new ModerationFailureError('Rendered-image moderation failed');
+  }
+  if (renderedModeration.blocked) {
+    throw new UnsafeOutputError(renderedModeration.reason ?? 'Rendered coloring image was unsafe');
+  }
+  const exceededCategory = exceedsAgeBandThreshold(
+    renderedModeration.categoryScores,
+    request.ageBand ?? '7-9',
+  );
+  if (exceededCategory) {
+    throw new UnsafeOutputError(`Rendered coloring image exceeded ${exceededCategory} threshold`);
   }
 
   return {

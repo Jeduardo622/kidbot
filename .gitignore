@@ -11,7 +11,8 @@ coverage/
 .idea/
 *.log
 *.tsbuildinfo
-pnpm-lock.yaml
 .kidbot/
 .worktrees/
 .superpowers/
+.playwright-cli/
+output/

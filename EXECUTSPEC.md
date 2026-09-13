@@ -1,5 +1,7 @@
 # Kidbot Executive Specification
 
+Release acceptance is governed by [the v1 acceptance contract](docs/v1-acceptance.md). This document describes the intended product; listed technologies and future features are not claims of deployed implementation.
+
 ## Vision
 **Kidbot** is a creative, safe, and voice-driven AI playground for children ages **4–12**.  
 It helps kids explore curiosity through stories, science experiments, and artistic expression — all guided by a friendly voice persona they can talk to.

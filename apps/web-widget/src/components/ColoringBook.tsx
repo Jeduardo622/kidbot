@@ -1,4 +1,7 @@
-import type { PointerEvent as ReactPointerEvent } from 'react';
+import type {
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+} from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { LiveRegion } from './LiveRegion.js';
 import { sanitizeSvgOutline } from '../utils/svgSanitizer.js';
@@ -18,13 +21,9 @@ type Point = { x: number; y: number };
 type Stroke = { color: string; size: number; points: Point[] };
 
 const CANVAS_SIZE = 512;
+const KEYBOARD_STEP = 12;
 
-const renderStrokes = (canvas: HTMLCanvasElement, strokes: Stroke[]) => {
-  const ctx = canvas.getContext('2d');
-  if (!ctx) {
-    return;
-  }
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+const drawStrokes = (ctx: CanvasRenderingContext2D, strokes: Stroke[]) => {
   ctx.lineCap = 'round';
   for (const stroke of strokes) {
     if (stroke.points.length === 0) {
@@ -45,6 +44,29 @@ const renderStrokes = (canvas: HTMLCanvasElement, strokes: Stroke[]) => {
   }
 };
 
+const renderStrokes = (canvas: HTMLCanvasElement, strokes: Stroke[]) => {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawStrokes(ctx, strokes);
+};
+
+const loadOutlineImage = (svg: string): Promise<HTMLImageElement> =>
+  new Promise((resolve, reject) => {
+    const image = new Image();
+    const objectUrl = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+    const release = () => URL.revokeObjectURL(objectUrl);
+    image.onload = () => {
+      release();
+      resolve(image);
+    };
+    image.onerror = () => {
+      release();
+      reject(new Error('Coloring outline could not be loaded for export.'));
+    };
+    image.src = objectUrl;
+  });
+
 interface ColoringBookProps {
   sessionContext?: SessionContext;
 }
@@ -59,6 +81,9 @@ export const ColoringBook = ({ sessionContext = defaultSessionContext }: Colorin
   const [brushColor, setBrushColor] = useState('#2563eb');
   const [brushSize, setBrushSize] = useState(6);
   const [strokes, setStrokes] = useState<Stroke[]>([]);
+  const [saveStatus, setSaveStatus] = useState<
+    { kind: 'error' | 'pending' | 'success'; message: string } | undefined
+  >();
   const announcement = buildAnnouncementState({
     loading,
     loadingMessage: 'Kidbot is drawing your coloring outline.',
@@ -70,6 +95,7 @@ export const ColoringBook = ({ sessionContext = defaultSessionContext }: Colorin
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const drawingRef = useRef<boolean>(false);
   const currentStrokeRef = useRef<Stroke | null>(null);
+  const keyboardCursorRef = useRef<Point>({ x: CANVAS_SIZE / 2, y: CANVAS_SIZE / 2 });
 
   useEffect(() => {
     if (canvasRef.current) {
@@ -129,17 +155,56 @@ export const ColoringBook = ({ sessionContext = defaultSessionContext }: Colorin
 
   const handleClear = () => {
     setStrokes([]);
+    keyboardCursorRef.current = { x: CANVAS_SIZE / 2, y: CANVAS_SIZE / 2 };
   };
 
-  const handleSave = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) {
-      return;
+  const handleKeyboardDraw = (event: ReactKeyboardEvent<HTMLCanvasElement>) => {
+    const movement: Record<string, Point> = {
+      ArrowDown: { x: 0, y: KEYBOARD_STEP },
+      ArrowLeft: { x: -KEYBOARD_STEP, y: 0 },
+      ArrowRight: { x: KEYBOARD_STEP, y: 0 },
+      ArrowUp: { x: 0, y: -KEYBOARD_STEP },
+    };
+    const delta = movement[event.key];
+    if (!delta) return;
+    event.preventDefault();
+    const start = keyboardCursorRef.current;
+    const end = {
+      x: Math.max(0, Math.min(CANVAS_SIZE, start.x + delta.x)),
+      y: Math.max(0, Math.min(CANVAS_SIZE, start.y + delta.y)),
+    };
+    keyboardCursorRef.current = end;
+    setStrokes((prev) => [...prev, { color: brushColor, size: brushSize, points: [start, end] }]);
+    setSaveStatus(undefined);
+  };
+
+  const handleSave = async () => {
+    if (saveStatus?.kind === 'pending') return;
+    setSaveStatus({ kind: 'pending', message: 'Preparing coloring page…' });
+    try {
+      const exportCanvas = document.createElement('canvas');
+      exportCanvas.width = CANVAS_SIZE;
+      exportCanvas.height = CANVAS_SIZE;
+      const exportContext = exportCanvas.getContext('2d');
+      if (!exportContext) throw new Error('Canvas export is unavailable.');
+      exportContext.fillStyle = '#ffffff';
+      exportContext.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+      drawStrokes(exportContext, strokes);
+      if (outline) {
+        const outlineImage = await loadOutlineImage(outline);
+        exportContext.drawImage(outlineImage, 0, 0, CANVAS_SIZE, CANVAS_SIZE);
+      }
+      const link = document.createElement('a');
+      link.href = exportCanvas.toDataURL('image/png');
+      link.download = 'kidbot-coloring.png';
+      link.click();
+      setSaveStatus({ kind: 'success', message: 'Coloring page saved.' });
+    } catch {
+      setSaveStatus({
+        kind: 'error',
+        message: 'Coloring page could not be saved. Please try again.',
+      });
     }
-    const link = document.createElement('a');
-    link.href = canvas.toDataURL('image/png');
-    link.download = 'kidbot-coloring.png';
-    link.click();
   };
 
   const fetchOutline = async () => {
@@ -170,6 +235,8 @@ export const ColoringBook = ({ sessionContext = defaultSessionContext }: Colorin
         }
       }
       setStrokes([]);
+      keyboardCursorRef.current = { x: CANVAS_SIZE / 2, y: CANVAS_SIZE / 2 };
+      setSaveStatus(undefined);
     } catch (err) {
       setOutline(undefined);
       const unavailableMessage = unavailableMessageFromError(err);
@@ -212,9 +279,13 @@ export const ColoringBook = ({ sessionContext = defaultSessionContext }: Colorin
       <div className="coloring-stage">
         <div className="canvas-wrapper">
           <canvas
+            aria-describedby="coloring-canvas-instructions"
+            aria-label="Coloring canvas"
             ref={canvasRef}
+            tabIndex={0}
             width={CANVAS_SIZE}
             height={CANVAS_SIZE}
+            onKeyDown={handleKeyboardDraw}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={endStroke}
@@ -223,6 +294,9 @@ export const ColoringBook = ({ sessionContext = defaultSessionContext }: Colorin
           {outline && <div className="outline" dangerouslySetInnerHTML={{ __html: outline }} />}
         </div>
         <aside className="tools">
+          <p id="coloring-canvas-instructions">
+            Use arrow keys to draw from the center of the canvas.
+          </p>
           <label htmlFor="color">Color</label>
           <input
             id="color"
@@ -245,9 +319,21 @@ export const ColoringBook = ({ sessionContext = defaultSessionContext }: Colorin
           <button type="button" onClick={handleClear} disabled={strokes.length === 0}>
             Clear
           </button>
-          <button type="button" onClick={handleSave}>
-            Save PNG
+          <button
+            type="button"
+            disabled={saveStatus?.kind === 'pending' || (!outline && strokes.length === 0)}
+            onClick={() => void handleSave()}
+          >
+            {saveStatus?.kind === 'pending' ? 'Preparing PNG…' : 'Save PNG'}
           </button>
+          {saveStatus && (
+            <p
+              className={`save-status ${saveStatus.kind}`}
+              role={saveStatus.kind === 'error' ? 'alert' : 'status'}
+            >
+              {saveStatus.message}
+            </p>
+          )}
         </aside>
       </div>
     </section>

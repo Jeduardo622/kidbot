@@ -177,12 +177,15 @@ describe('contract integrity', () => {
       'story_panels',
       'voice_chat',
     ];
-    const expectedWidgetToolIds = expectedMcpToolIds.filter(
-      (toolId) => toolId !== 'parent_history_list',
-    );
+    const expectedWidgetToolIds = expectedMcpToolIds;
 
     expect(widgetToolIds).toEqual(expectedWidgetToolIds);
     expect(mcpToolIds).toEqual(expectedMcpToolIds);
     expect(widgetToolIds.every((toolId) => mcpToolIds.includes(toolId))).toBe(true);
+  });
+  it('keeps the local moderation rules byte-identical between MCP and agent-service', () => {
+    const agentRules = readFileSync(path.join(repoRoot, 'apps/agent-service/src/moderationRules.ts'), 'utf-8');
+    const mcpRules = readFileSync(path.join(repoRoot, 'apps/mcp-server/src/moderationRules.ts'), 'utf-8');
+    expect(mcpRules).toEqual(agentRules);
   });
 });

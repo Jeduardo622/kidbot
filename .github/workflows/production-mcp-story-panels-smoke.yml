@@ -29,7 +29,7 @@ jobs:
           package-manager-cache: false
 
       - name: Install dependencies
-        run: pnpm install --no-frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Verify production MCP URL secret
         run: |
@@ -37,6 +37,9 @@ jobs:
             echo "KIDBOT_REMOTE_MCP_URL is required as a protected production environment secret."
             exit 1
           fi
+
+      - name: Verify production readiness and widget artifact
+        run: pnpm run smoke:production-widget-dist-preflight
 
       - name: Run production MCP story panels smoke
         run: pnpm run smoke:production-mcp-story-panels

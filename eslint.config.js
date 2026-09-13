@@ -6,7 +6,7 @@ import reactPlugin from 'eslint-plugin-react';
 export default [
   {
     files: ['**/*.{ts,tsx}'],
-    ignores: ['node_modules/**', 'dist/**', 'build/**', 'coverage/**'],
+    ignores: ['node_modules/**', 'dist/**', 'build/**', 'coverage/**', '.worktrees/**'],
     languageOptions: {
       parser: tsParser,
       parserOptions: {

@@ -18,6 +18,7 @@ import { mcpConfig } from './config.js';
 import { createParentProfileStoreFromConfig, type AgeBand, type ParentHistoryEvent } from './parentStore.js';
 import {
   computeToolCost,
+  computeToolTimeoutMs,
   createCallerKey,
   createNetworkKey,
   createRequestControlStoreFromConfig,
@@ -257,7 +258,14 @@ const runControlled = async (
   networkIdentity: string,
   operation: (signal: AbortSignal) => Promise<CallToolResult>,
 ): Promise<CallToolResult> => {
-  const deadlineSignal = AbortSignal.timeout(mcpConfig.agentRequestTimeoutMs);
+  const deadlineSignal = AbortSignal.timeout(
+    computeToolTimeoutMs(
+      toolName,
+      input,
+      mcpConfig.agentRequestTimeoutMs,
+      mcpConfig.storyAgentRequestTimeoutMs,
+    ),
+  );
   const signal = AbortSignal.any([extra.signal, deadlineSignal]);
   const aborted = new Promise<never>((_resolve, reject) => {
     if (signal.aborted) {

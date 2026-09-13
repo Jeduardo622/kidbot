@@ -42,7 +42,7 @@ test('test:all delegates root test discovery to test:root', async () => {
 test('CI delegates root smoke-script tests to verify-change', async () => {
   const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
 
-  assert.match(workflow, /name: Verify engineering change\s+run: pnpm run verify-change/);
+  assert.match(workflow, /name: Verify engineering change\s+if: env\.HARNESS_TREE_IDENTICAL != '1'\s+run: pnpm run verify-change/);
   assert.doesNotMatch(workflow, /name: Run root smoke-script tests/);
   assert.doesNotMatch(workflow, /pnpm run eval:ai|evaluate-ai-outputs|OPENAI_API_KEY/);
   assert.doesNotMatch(workflow, /GITHUB_(?:ACTIONS|STEP_SUMMARY)\s*:/);
@@ -78,7 +78,11 @@ test('secured posture verification builds its required agent-service artifact fi
 
   assert.equal(
     packageJson.scripts['smoke:secured-posture'],
-    'pnpm --filter @kidbot/agent-service run build && node ./scripts/smoke-secured-posture.mjs',
+    'pnpm run build:production:agent && pnpm run build:production:mcp && node ./scripts/smoke-secured-posture.mjs',
+  );
+  assert.equal(
+    packageJson.scripts['build:production:mcp'],
+    'pnpm --filter @kidbot/web-widget run build && pnpm --filter @kidbot/mcp-server run build && node --import tsx apps/mcp-server/src/widgetArtifact.ts',
   );
 });
 
@@ -96,12 +100,32 @@ test('secured posture MCP children receive exact production widget origins', asy
   assert.equal((smoke.match(/\.\.\.widgetProductionEnv/g) ?? []).length, 2);
 });
 
+test('synthetic service smokes use a hermetic test posture without inherited credentials', async () => {
+  for (const file of ['scripts/smoke-secured-posture.mjs', 'scripts/smoke-parent-store.mjs']) {
+    const smoke = await readFile(file, 'utf8');
+    assert.match(smoke, /createHermeticServiceContext/);
+    assert.doesNotMatch(smoke, /\.\.\.process\.env/);
+  }
+
+  const secured = await readFile('scripts/smoke-secured-posture.mjs', 'utf8');
+  assert.match(secured, /NODE_ENV:\s*'test'/);
+  assert.match(secured, /KIDBOT_STUB_PROVIDER:\s*'1'/);
+});
+
+test('CI sends tree-identical changes to a separate full baseline', async () => {
+  const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
+  assert.match(workflow, /name: Verify tree-identical baseline/);
+  assert.match(workflow, /if: env\.HARNESS_TREE_IDENTICAL == '1'/);
+  assert.match(workflow, /if: env\.HARNESS_TREE_IDENTICAL != '1'/);
+  assert.equal((workflow.match(/run: pnpm run verify-change/g) ?? []).length, 1);
+});
+
 test('parent store Redis smoke builds both required service artifacts first', async () => {
   const packageJson = JSON.parse(await readFile('package.json', 'utf8'));
 
   assert.equal(
     packageJson.scripts['smoke:parent-store-redis'],
-    'pnpm --filter @kidbot/agent-service run build && pnpm --filter @kidbot/mcp-server run build && node ./scripts/smoke-parent-store.mjs local',
+    'pnpm run build:production:agent && pnpm run build:production:mcp && node ./scripts/smoke-parent-store.mjs local',
   );
 });
 

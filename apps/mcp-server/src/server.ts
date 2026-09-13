@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import cors from 'cors';
 import express from 'express';
-import { readFileSync, readdirSync, existsSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { registerAppResource, RESOURCE_MIME_TYPE } from '@modelcontextprotocol/ext-apps/server';
@@ -14,15 +14,25 @@ import type { Mode } from './types.js';
 import { createWidgetResourceMeta, widgetResourceUri } from './widgetMetadata.js';
 import { privacyPolicyHtml } from './privacyPolicy.js';
 import { createNetworkKey } from './requestControls.js';
+import { inspectWidgetArtifact, renderWidgetDocument, resolveWidgetMode } from './widgetArtifact.js';
+import {
+  createDrainGuard,
+  createServiceLifecycle,
+  isAgentProductionReady,
+  resolveHealthStatus,
+} from './serviceLifecycle.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+let serviceLifecycle: ReturnType<typeof createServiceLifecycle> | undefined;
+app.set('trust proxy', mcpConfig.trustProxy ? 1 : false);
 app.use(cors());
 
+app.use('/mcp', createDrainGuard(() => serviceLifecycle?.isDraining() === true));
 app.use('/mcp', (req, res, next) => {
-  const networkIdentity = req.socket.remoteAddress ?? 'unknown';
+  const networkIdentity = req.ip ?? req.socket.remoteAddress ?? 'unknown';
   const secret = mcpConfig.serviceAuthToken ?? mcpConfig.parentAuthSecret ?? 'kidbot-local-control';
   const networkKey = createNetworkKey({ secret, networkIdentity });
   void requestControlStore.acquire({
@@ -63,14 +73,14 @@ app.use('/mcp', (req, res, next) => {
 app.use(express.json({ limit: '1mb' }));
 
 const distDir = path.resolve(__dirname, '../../web-widget/dist');
-const assetsDir = path.join(distDir, 'assets');
 const fallbackHtmlPath = path.join(distDir, 'kidbot-fallback.html');
 const fallbackCssPath = path.join(distDir, 'kidbot-fallback.css');
 const fallbackJsPath = path.join(distDir, 'kidbot-fallback.js');
 
-const hasBundle = existsSync(distDir) && existsSync(assetsDir) && readdirSync(assetsDir).some((file) => file.endsWith('.js'));
+const widgetArtifact = inspectWidgetArtifact(distDir);
+const hasBundle = widgetArtifact.distReady;
 const fallbackRequested = mcpConfig.fallbackMode;
-const fallbackAvailable = existsSync(fallbackHtmlPath);
+const fallbackAvailable = widgetArtifact.fallbackReady;
 
 const resolveFallbackHtml = (): string => {
   if (!fallbackAvailable) {
@@ -94,17 +104,17 @@ const resolveDistHtml = (): string => {
     return resolveFallbackHtml();
   }
 
-  const assetFiles = readdirSync(assetsDir);
-  const jsFile = assetFiles.find((file) => file.endsWith('.js'));
-  const cssFile = assetFiles.find((file) => file.endsWith('.css'));
+  const jsContent = readFileSync(path.join(distDir, widgetArtifact.javascriptAsset ?? ''), 'utf-8');
+  const cssContent = readFileSync(path.join(distDir, widgetArtifact.stylesheetAsset ?? ''), 'utf-8');
 
-  const jsContent = jsFile ? readFileSync(path.join(assetsDir, jsFile), 'utf-8') : '';
-  const cssContent = cssFile ? readFileSync(path.join(assetsDir, cssFile), 'utf-8') : '';
-
-  return `<!doctype html><html><head><meta charset="utf-8"/><title>Kidbot Widget</title><style>${cssContent}</style></head><body><div id="kidbot-root"></div><script type="module">${jsContent}</script></body></html>`;
+  return renderWidgetDocument({ css: cssContent, javascript: jsContent });
 };
 
-const widgetMode: Mode = fallbackRequested || !hasBundle ? 'fallback' : 'dist';
+const widgetMode: Mode = resolveWidgetMode({
+  artifact: widgetArtifact,
+  fallbackRequested,
+  nodeEnv: process.env.NODE_ENV,
+});
 const widgetHtml = widgetMode === 'fallback' ? resolveFallbackHtml() : resolveDistHtml();
 const widgetResourceMeta = createWidgetResourceMeta(mcpConfig, widgetMode);
 
@@ -137,11 +147,18 @@ const createMcpServer = (networkIdentity: string): McpServer => {
 };
 
 const fixturesDir = path.resolve(__dirname, '../../../fixtures');
-if (existsSync(fixturesDir)) {
+if (fallbackRequested && existsSync(fixturesDir)) {
   app.use('/fixtures', express.static(fixturesDir));
 }
 
 if (existsSync(distDir)) {
+  app.use('/widget/kidbot-fallback.:extension', (_req, res, next) => {
+    if (!fallbackRequested) {
+      res.status(404).type('text').send('Offline demo is not enabled.');
+      return;
+    }
+    next();
+  });
   app.use('/widget', express.static(distDir));
 }
 
@@ -150,18 +167,83 @@ if (existsSync(publicDir)) {
   app.use('/public', express.static(publicDir));
 }
 
+/**
+ * Best-effort read of the agent-service provider mode so operators can see
+ * from the public MCP health endpoint whether children are getting model
+ * output or stub fixtures. Never affects `ok`, never blocks for long.
+ */
+const readAgentProviderMode = async (): Promise<{
+  reachable: boolean;
+  productionReady: boolean;
+  provider?: string;
+}> => {
+  if (mcpConfig.fallbackMode) {
+    return { reachable: false, productionReady: false, provider: 'offline-fixture' };
+  }
+  try {
+    const response = await fetch(`${mcpConfig.agentBaseUrl}/healthz`, {
+      signal: AbortSignal.timeout(2_000),
+    });
+    if (!response.ok) {
+      return { reachable: false, productionReady: false };
+    }
+    const body = (await response.json()) as {
+      provider?: { mode?: unknown };
+      ready?: unknown;
+    };
+    const mode = body.provider?.mode;
+    return {
+      reachable: true,
+      productionReady: isAgentProductionReady(body),
+      ...(typeof mode === 'string' ? { provider: mode } : {}),
+    };
+  } catch {
+    return { reachable: false, productionReady: false };
+  }
+};
+
 app.get('/healthz', asyncRoute(async (_req, res) => {
-  const parentStore = await parentProfileStore.readiness();
-  const requestControls = await requestControlStore.readiness();
-  const ok = parentStore.ready && requestControls.ready;
-  res.status(ok ? 200 : 503).json({
+  const [parentStore, requestControls, agentService] = await Promise.all([
+    parentProfileStore.readiness(),
+    requestControlStore.readiness(),
+    readAgentProviderMode(),
+  ]);
+  const storesReady = parentStore.ready && requestControls.ready;
+  const widgetProductionReady = widgetMode === 'dist' && widgetArtifact.distReady;
+  const productionReady = storesReady
+    && widgetProductionReady
+    && agentService.productionReady
+    && serviceLifecycle?.isDraining() !== true;
+  const { ok, status } = resolveHealthStatus({
+    nodeEnv: process.env.NODE_ENV,
+    productionReady,
+    storesReady,
+  });
+  res.status(status).json({
     ok,
+    productionReady,
     mode: widgetMode,
+    agentService,
+    widgetArtifact: {
+      distReady: widgetArtifact.distReady,
+      fallbackReady: widgetArtifact.fallbackReady,
+      productionReady: widgetProductionReady,
+      javascriptAsset: widgetArtifact.javascriptAsset,
+      stylesheetAsset: widgetArtifact.stylesheetAsset,
+    },
     parentProfileStore: parentStore,
     requestControlStore: requestControls,
     time: new Date().toISOString()
   });
 }));
+
+app.get('/livez', (_req, res) => {
+  res.status(200).json({
+    ok: true,
+    draining: serviceLifecycle?.isDraining() === true,
+    time: new Date().toISOString(),
+  });
+});
 
 app.get('/privacy', (_req, res) => {
   res.type('html').send(privacyPolicyHtml);
@@ -169,7 +251,7 @@ app.get('/privacy', (_req, res) => {
 
 app.get('/diag', (_req, res) => {
   const links: string[] = [];
-  if (existsSync(fallbackHtmlPath)) {
+  if (fallbackRequested && existsSync(fallbackHtmlPath)) {
     links.push('<li><a href="/widget/kidbot-fallback.html">Open fallback widget</a></li>');
   }
   if (existsSync(path.join(publicDir, 'diagnostic.html'))) {
@@ -178,11 +260,11 @@ app.get('/diag', (_req, res) => {
   links.push('<li><a href="/healthz">Health JSON</a></li>');
   links.push('<li><a href="/privacy">Privacy policy</a></li>');
 
-  res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"/><title>Kidbot Diagnostics</title><style>body{font-family:system-ui;margin:32px;color:#111;} a{color:#0066cc;} .tag{display:inline-block;padding:4px 8px;border-radius:999px;background:#eef;border:1px solid #ccd;margin-left:8px;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;}</style></head><body><h1>Kidbot Diagnostics <span class="tag">${widgetMode}</span></h1><p>Server port: ${mcpConfig.mcpPort}</p><ul>${links.join('')}</ul><p>Fixtures served from: ${existsSync(fixturesDir) ? '/fixtures' : 'not available'}</p></body></html>`);
+  res.type('html').send(`<!doctype html><html><head><meta charset="utf-8"/><title>Kidbot Diagnostics</title><style>body{font-family:system-ui;margin:32px;color:#111;} a{color:#0066cc;} .tag{display:inline-block;padding:4px 8px;border-radius:999px;background:#eef;border:1px solid #ccd;margin-left:8px;font-size:12px;text-transform:uppercase;letter-spacing:0.08em;}</style></head><body><h1>Kidbot Diagnostics <span class="tag">${widgetMode}</span></h1><p>Server port: ${mcpConfig.mcpPort}</p><ul>${links.join('')}</ul><p>Fixtures served from: ${fallbackRequested && existsSync(fixturesDir) ? '/fixtures' : 'not available'}</p></body></html>`);
 });
 
 app.post('/mcp', asyncRoute(async (req, res) => {
-  const mcpServer = createMcpServer(req.socket.remoteAddress ?? 'unknown');
+  const mcpServer = createMcpServer(req.ip ?? req.socket.remoteAddress ?? 'unknown');
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined
   });
@@ -212,8 +294,30 @@ app.post('/mcp', asyncRoute(async (req, res) => {
 }));
 
 const port = mcpConfig.mcpPort;
-
-app.listen(port, () => {
+const httpServer = app.listen(port, () => {
   // eslint-disable-next-line no-console
   console.log(`Kidbot MCP server listening on http://localhost:${port}`);
 });
+
+serviceLifecycle = createServiceLifecycle({
+  server: httpServer,
+  closeResources: async () => {
+    await Promise.all([
+      parentProfileStore.close?.(),
+      requestControlStore.close?.(),
+    ]);
+  },
+});
+
+const shutdown = () => {
+  void serviceLifecycle?.shutdown().then((result) => {
+    if (result === 'forced') process.exitCode = 1;
+  }).catch(() => {
+    process.exitCode = 1;
+    // eslint-disable-next-line no-console
+    console.error('MCP shutdown failed while closing service resources.');
+  });
+};
+
+process.once('SIGTERM', shutdown);
+process.once('SIGINT', shutdown);

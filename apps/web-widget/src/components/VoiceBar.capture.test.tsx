@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { VoiceBar } from './VoiceBar.js';
 
@@ -189,5 +189,40 @@ describe('VoiceBar voice capture', () => {
     unmount();
 
     expect(recognition?.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops capture and ignores its late transcript when the voice panel is hidden', () => {
+    installVoiceCapture();
+    const { rerender } = render(<VoiceBar active />);
+    fireEvent.click(screen.getByRole('button', { name: 'Start Voice Input' }));
+    const recognition = MockSpeechRecognition.instances[0];
+    rerender(<VoiceBar active={false} />);
+    expect(recognition?.stop).toHaveBeenCalledTimes(1);
+    recognition?.onresult?.(finalTranscriptEvent('Late transcript must not replace my draft'));
+    expect(screen.getByRole<HTMLTextAreaElement>('textbox').value).toBe('Tell me a cheerful space fact!');
+  });
+
+  it('ignores a late transcript after the child explicitly stops capture', () => {
+    installVoiceCapture();
+    render(<VoiceBar />);
+    fireEvent.click(screen.getByRole('button', { name: 'Start Voice Input' }));
+    const recognition = MockSpeechRecognition.instances[0];
+    fireEvent.click(screen.getByRole('button', { name: 'Stop Voice Input' }));
+    act(() => recognition?.onresult?.(finalTranscriptEvent('Unwanted late transcript')));
+    expect(screen.getByRole<HTMLTextAreaElement>('textbox').value).toBe('Tell me a cheerful space fact!');
+  });
+
+  it('ignores a pending reply after the voice panel becomes inactive', async () => {
+    let resolveReply!: (value: unknown) => void;
+    callTool.mockImplementation(() => new Promise((resolve) => { resolveReply = resolve; }));
+    const { rerender } = render(<VoiceBar active />);
+    fireEvent.click(screen.getByRole('button', { name: 'Speak' }));
+    rerender(<VoiceBar active={false} />);
+    await act(async () => {
+      resolveReply({ structuredContent: { blocked: false, persona: 'robot', text: 'Late response' } });
+    });
+    expect(screen.queryByText('Late response')).toBeNull();
+    rerender(<VoiceBar active />);
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Speak' }).disabled).toBe(false);
   });
 });

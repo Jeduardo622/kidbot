@@ -16,7 +16,7 @@ const runRootNodeTests = () => {
   const result = spawnSync(process.execPath, ['--import', 'tsx', '--test', ...rootTestFiles], {
     stdio: 'inherit'
   });
-  return result.status ?? 0;
+  return result.status ?? 1;
 };
 
 if (process.argv.includes('--root-only')) {
@@ -70,8 +70,8 @@ if (pnpmCommand && hasNodeModules) {
     shell: pnpmCommand.shell,
     stdio: 'inherit'
   });
-  if ((result.status ?? 0) !== 0) {
-    process.exit(result.status ?? 0);
+  if ((result.status ?? 1) !== 0) {
+    process.exit(result.status ?? 1);
   }
   process.exit(runRootNodeTests());
 }

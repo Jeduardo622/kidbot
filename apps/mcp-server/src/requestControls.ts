@@ -53,21 +53,36 @@ interface Bucket {
 }
 
 const minuteMs = 60_000;
+export const maxToolTimeoutMs = 600_000;
+
+const normalizedStoryPanelCount = (input: unknown): number => {
+  const panels = typeof input === 'object' && input !== null && 'panels' in input
+    ? Number((input as { panels?: unknown }).panels)
+    : 4;
+  return Number.isInteger(panels) ? Math.min(8, Math.max(2, panels)) : 4;
+};
 
 export const computeToolCost = (toolName: string, input: unknown): number => {
   if (toolName === 'story_panels') {
-    const panels = typeof input === 'object' && input !== null && 'panels' in input
-      ? Number((input as { panels?: unknown }).panels)
-      : 4;
-    return 3 + (Number.isInteger(panels) ? Math.min(8, Math.max(2, panels)) : 4);
+    return 3 + (2 * normalizedStoryPanelCount(input));
   }
   if (toolName === 'voice_chat' || toolName === 'science_sim') {
     return 3;
   }
   if (toolName === 'coloring_outline') {
-    return 2;
+    return 4;
   }
   return 1;
+};
+
+export const computeToolTimeoutMs = (
+  toolName: string,
+  _input: unknown,
+  requestTimeoutMs: number,
+  storyRequestTimeoutMs: number,
+): number => {
+  const requested = toolName === 'story_panels' ? storyRequestTimeoutMs : requestTimeoutMs;
+  return Math.min(maxToolTimeoutMs, requested);
 };
 
 const headerValue = (headers: Record<string, string | string[] | undefined>, name: string): string => {

@@ -6,11 +6,13 @@ import { createConnection } from 'node:net';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { spawn } from 'node:child_process';
+import { createHermeticServiceContext } from './hermetic-service-env.mjs';
 
 const rootDir = process.cwd();
 const mode = process.argv[2];
 const agentEntry = join(rootDir, 'apps', 'agent-service', 'dist', 'index.js');
 const mcpEntry = join(rootDir, 'apps', 'mcp-server', 'dist', 'server.js');
+const explicitStartLauncher = join(rootDir, 'scripts', 'start-service-export.mjs');
 const forbiddenHistoryFragments = [
   'moon fact',
   'Tell me',
@@ -62,11 +64,11 @@ const getFreePort = () =>
     });
   });
 
-const spawnService = (entry, env) => {
-  const child = spawn(process.execPath, [entry], {
-    cwd: rootDir,
+const spawnService = (entry, env, context, { explicitStart = false } = {}) => {
+  const child = spawn(process.execPath, explicitStart ? [explicitStartLauncher, entry] : [entry], {
+    cwd: context.cwd,
     env: {
-      ...process.env,
+      ...context.env,
       ...env,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -367,7 +369,7 @@ const runParentFlow = async (baseUrl) => {
   };
 };
 
-const assertParentSecretStartupFailures = async (redisUrl) => {
+const assertParentSecretStartupFailures = async (redisUrl, context) => {
   const missingSecretPort = await getFreePort();
   const missingSecretMcp = spawnService(mcpEntry, {
     AGENT_SERVICE_TOKEN: `kidbot-service-${randomBytes(32).toString('base64url')}`,
@@ -377,7 +379,7 @@ const assertParentSecretStartupFailures = async (redisUrl) => {
     NODE_ENV: 'production',
     PARENT_PROFILE_STORE: 'redis',
     REDIS_URL: redisUrl,
-  });
+  }, context);
 
   try {
     const exit = await readExit(missingSecretMcp);
@@ -398,7 +400,7 @@ const assertParentSecretStartupFailures = async (redisUrl) => {
     PARENT_AUTH_SECRET: shortSecret,
     PARENT_PROFILE_STORE: 'redis',
     REDIS_URL: redisUrl,
-  });
+  }, context);
 
   try {
     const exit = await readExit(shortSecretMcp);
@@ -420,40 +422,43 @@ const runLocal = async () => {
     throw new Error(`Redis is not reachable at REDIS_URL=${redisUrl}`);
   }
 
-  await assertParentSecretStartupFailures(redisUrl);
-
-  const serviceToken = `kidbot-service-${randomBytes(32).toString('base64url')}`;
-  const parentSecret = `kidbot-parent-secret-${randomBytes(48).toString('base64url')}`;
-  const agentPort = await getFreePort();
-  const mcpPort = await getFreePort();
-  const agentBaseUrl = `http://127.0.0.1:${agentPort}`;
-  const mcpBaseUrl = `http://127.0.0.1:${mcpPort}`;
-  const agent = spawnService(agentEntry, {
-    AGENT_SERVICE_TOKEN: serviceToken,
-    FALLBACK_WIDGET: '0',
-    KIDBOT_LOCAL_DEV: '0',
-    NODE_ENV: 'production',
-    OPENAI_API_KEY: '',
-    PORT: String(agentPort),
-    PROVIDER_FAILURE_POLICY: '503',
-    RATE_LIMIT_STORE: 'memory',
-  });
-  const mcp = spawnService(mcpEntry, {
-    AGENT_PORT: String(agentPort),
-    AGENT_SERVICE_TOKEN: serviceToken,
-    FALLBACK_WIDGET: '0',
-    KIDBOT_LOCAL_DEV: '0',
-    KIDBOT_WIDGET_DOMAIN: 'https://kidbot-production.up.railway.app',
-    KIDBOT_WIDGET_RESOURCE_DOMAINS: 'https://rxnwualzddplucjhclij.supabase.co',
-    MCP_PORT: String(mcpPort),
-    NODE_ENV: 'production',
-    PARENT_AUTH_SECRET: parentSecret,
-    PARENT_HISTORY_MAX_EVENTS: '20',
-    PARENT_PROFILE_STORE: 'redis',
-    REDIS_URL: redisUrl,
-  });
-
+  const hermeticContext = await createHermeticServiceContext();
+  let agent;
+  let mcp;
   try {
+    await assertParentSecretStartupFailures(redisUrl, hermeticContext);
+
+    const serviceToken = `kidbot-service-${randomBytes(32).toString('base64url')}`;
+    const parentSecret = `kidbot-parent-secret-${randomBytes(48).toString('base64url')}`;
+    const agentPort = await getFreePort();
+    const mcpPort = await getFreePort();
+    const agentBaseUrl = `http://127.0.0.1:${agentPort}`;
+    const mcpBaseUrl = `http://127.0.0.1:${mcpPort}`;
+    agent = spawnService(agentEntry, {
+      AGENT_SERVICE_TOKEN: serviceToken,
+      FALLBACK_WIDGET: '0',
+      KIDBOT_LOCAL_DEV: '0',
+      NODE_ENV: 'test',
+      KIDBOT_STUB_PROVIDER: '1',
+      PORT: String(agentPort),
+      PROVIDER_FAILURE_POLICY: '503',
+      RATE_LIMIT_STORE: 'memory',
+    }, hermeticContext, { explicitStart: true });
+    mcp = spawnService(mcpEntry, {
+      AGENT_PORT: String(agentPort),
+      AGENT_SERVICE_TOKEN: serviceToken,
+      FALLBACK_WIDGET: '0',
+      KIDBOT_LOCAL_DEV: '0',
+      KIDBOT_WIDGET_DOMAIN: 'https://kidbot-production.up.railway.app',
+      KIDBOT_WIDGET_RESOURCE_DOMAINS: 'https://rxnwualzddplucjhclij.supabase.co',
+      MCP_PORT: String(mcpPort),
+      NODE_ENV: 'test',
+      PARENT_AUTH_SECRET: parentSecret,
+      PARENT_HISTORY_MAX_EVENTS: '20',
+      PARENT_PROFILE_STORE: 'redis',
+      REDIS_URL: redisUrl,
+    }, hermeticContext);
+
     await waitForHealth(agentBaseUrl, 'agent-service', agent.diagnostics);
     const health = await waitForHealth(mcpBaseUrl, 'mcp-server', mcp.diagnostics);
     assertRedisParentHealth(health);
@@ -462,6 +467,7 @@ const runLocal = async () => {
   } finally {
     await stopService(mcp);
     await stopService(agent);
+    await hermeticContext.cleanup();
   }
 };
 

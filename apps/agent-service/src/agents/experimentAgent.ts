@@ -122,7 +122,7 @@ const planExperimentWithProvider = async (
   request: ScienceRequest,
   provider: ModelProvider,
 ): Promise<ScienceResponse> => {
-  const topicModeration = await moderateAsync(request.topic, provider);
+  const topicModeration = await moderateAsync(request.topic, provider, request.ageBand);
   if (topicModeration.blocked) {
     return { blocked: true, message: topicModeration.message };
   }
@@ -157,7 +157,7 @@ const planExperimentWithProvider = async (
     repaired.explanation,
     repaired.supervision,
   ].join(' ');
-  const outputModeration = await moderateAsync(outputText, provider);
+  const outputModeration = await moderateAsync(outputText, provider, request.ageBand);
   if (outputModeration.blocked) {
     throw new UnsafeOutputError(outputModeration.message);
   }

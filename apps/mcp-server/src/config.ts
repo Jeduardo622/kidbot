@@ -1,4 +1,4 @@
-import type { RequestControlLimits } from './requestControls.js';
+import { computeToolTimeoutMs, maxToolTimeoutMs, type RequestControlLimits } from './requestControls.js';
 
 export interface McpServerConfig {
   agentPort: number;
@@ -15,8 +15,11 @@ export interface McpServerConfig {
   requestControlStore: 'memory' | 'redis';
   requestControlLimits: RequestControlLimits;
   agentRequestTimeoutMs: number;
+  storyAgentRequestTimeoutMs: number;
   widgetDomain: string;
   widgetResourceDomains: string[];
+  /** Trust one reverse-proxy hop for client IPs; defaults to on only in production. */
+  trustProxy: boolean;
 }
 
 type McpServerEnv = Partial<
@@ -26,10 +29,12 @@ type McpServerEnv = Partial<
     | 'AGENT_SERVICE_TOKEN'
     | 'FALLBACK_WIDGET'
     | 'KIDBOT_LOCAL_DEV'
+    | 'KIDBOT_TRUST_PROXY'
     | 'KIDBOT_WIDGET_DOMAIN'
     | 'KIDBOT_WIDGET_RESOURCE_DOMAINS'
     | 'MCP_PORT'
     | 'MCP_AGENT_REQUEST_TIMEOUT_MS'
+    | 'MCP_AGENT_STORY_REQUEST_TIMEOUT_MS'
     | 'MCP_CALLER_CONCURRENCY'
     | 'MCP_CALLER_COST_PER_MINUTE'
     | 'MCP_CALLER_REQUESTS_PER_MINUTE'
@@ -50,6 +55,14 @@ type McpServerEnv = Partial<
 >;
 
 const minProductionTokenLength = 32;
+
+export const parseTrustProxy = (value: string | undefined, nodeEnv: string | undefined): boolean => {
+  const trimmed = value?.trim();
+  if (trimmed === '1' || trimmed === 'true') return true;
+  if (trimmed === '0' || trimmed === 'false') return false;
+  if (trimmed) throw new Error('KIDBOT_TRUST_PROXY must be 0 or 1.');
+  return nodeEnv === 'production';
+};
 
 const trimOptional = (value: string | undefined): string | undefined => {
   const trimmed = value?.trim();
@@ -188,9 +201,26 @@ export const parseMcpServerConfig = (env: McpServerEnv = process.env): McpServer
   const agentRequestTimeoutMs = parsePositiveInteger(
     'MCP_AGENT_REQUEST_TIMEOUT_MS',
     env.MCP_AGENT_REQUEST_TIMEOUT_MS,
-    45_000,
+    35_000,
+  );
+  const storyAgentRequestTimeoutMs = parsePositiveInteger(
+    'MCP_AGENT_STORY_REQUEST_TIMEOUT_MS',
+    env.MCP_AGENT_STORY_REQUEST_TIMEOUT_MS,
+    185_000,
   );
   const production = env.NODE_ENV === 'production';
+  if (production && agentRequestTimeoutMs < 35_000) {
+    throw new Error('MCP_AGENT_REQUEST_TIMEOUT_MS must be at least 35000 in production.');
+  }
+  if (production && storyAgentRequestTimeoutMs < 185_000) {
+    throw new Error('MCP_AGENT_STORY_REQUEST_TIMEOUT_MS must be at least 185000 in production.');
+  }
+  if (storyAgentRequestTimeoutMs < agentRequestTimeoutMs) {
+    throw new Error('MCP_AGENT_STORY_REQUEST_TIMEOUT_MS must be at least MCP_AGENT_REQUEST_TIMEOUT_MS.');
+  }
+  if (storyAgentRequestTimeoutMs > maxToolTimeoutMs) {
+    throw new Error(`MCP_AGENT_STORY_REQUEST_TIMEOUT_MS must not exceed ${maxToolTimeoutMs}.`);
+  }
   const parentHistoryRetentionDays = parsePositiveInteger(
     'PARENT_HISTORY_RETENTION_DAYS',
     env.PARENT_HISTORY_RETENTION_DAYS,
@@ -253,11 +283,18 @@ export const parseMcpServerConfig = (env: McpServerEnv = process.env): McpServer
       globalConcurrency: parsePositiveInteger(
         'MCP_GLOBAL_CONCURRENCY', env.MCP_GLOBAL_CONCURRENCY, 8,
       ),
-      leaseMs: agentRequestTimeoutMs + 5_000,
+      leaseMs: computeToolTimeoutMs(
+        'story_panels',
+        { panels: 8 },
+        agentRequestTimeoutMs,
+        storyAgentRequestTimeoutMs,
+      ) + 5_000,
     },
     agentRequestTimeoutMs,
+    storyAgentRequestTimeoutMs,
     widgetDomain,
     widgetResourceDomains,
+    trustProxy: parseTrustProxy(env.KIDBOT_TRUST_PROXY, env.NODE_ENV),
   };
 };
 
