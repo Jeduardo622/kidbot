@@ -82,10 +82,10 @@ const toolIds = [
   'parent_history_list',
 ];
 const toolContractExpectations = {
-  voice_chat: { title: 'Voice Chat', readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
+  voice_chat: { title: 'Voice Chat', readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: false },
   story_panels: { title: 'Story Panels', readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
-  coloring_outline: { title: 'Coloring Outline', readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
-  science_sim: { title: 'Science Simulation', readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
+  coloring_outline: { title: 'Coloring Outline', readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: false },
+  science_sim: { title: 'Science Simulation', readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: false },
   parent_profile_create: { title: 'Create Parent Profile', readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: false, appOnly: true },
   parent_profile_delete: { title: 'Delete Parent Profile', readOnlyHint: false, destructiveHint: true, openWorldHint: false, idempotentHint: true, appOnly: true, invalidParentAccess: true },
   parent_profile_update: { title: 'Update Parent Profile', readOnlyHint: false, destructiveHint: true, openWorldHint: false, idempotentHint: false, appOnly: true, invalidParentAccess: true },

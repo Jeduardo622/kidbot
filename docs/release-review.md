@@ -22,13 +22,13 @@ Optional scrapbook, ambient audio, achievements, collaboration, galleries, and c
 
 Verified 2026-09-12: [OpenAI plugin guidelines](https://developers.openai.com/plugins/app-guidelines) prohibit explicitly targeting children under 13. Kidbot's current age bands are 4–6, 7–9, and 10–12, so a direct child-facing ChatGPT directory submission is blocked. [OpenAI's age guidance](https://help.openai.com/en/articles/8313401-is-chatgpt-safe-for-all-ages) says education interactions for under-13s must be conducted by an adult; that does not itself approve this app's targeting. [App Developer Terms](https://openai.com/policies/developer-apps-terms/) also restrict sending personal information of children under 13 or the applicable age of digital consent.
 
-The owner must select and review a distribution/identity model. Merely changing marketing copy or adding a session PIN is not a resolution. No child recruitment, production collection, or submission is authorized by this document.
+Decision 2026-09-13: the owner retained the child audience, rejected adult retargeting, and approved local work plus parent-identity design. [Standalone child-product direction and identity options](child-product-direction.md) now guide the next release. Merely changing marketing copy or adding a session PIN is not a resolution. No child recruitment, production collection, deployment or submission is authorized by this document. Standalone delivery is not yet implemented.
 
 ## Submission source review
 
 All eight registered tools declare output schemas and the three required impact hints. Parent controls are app-only, but `parentAccessToken` still exists in input schemas (also on generation tools via session metadata). Review whether these capabilities must move to a supported authenticated side channel; never ask children or a model to type credentials.
 
-The voice, coloring and science tools declare `openWorldHint: true` despite fixed-provider behavior. A metadata correction is awaiting owner confirmation under the submission skill; the JSON submission import is intentionally not generated while that mismatch remains. Story image publication requires a separate hint review. Destructive profile updates/deletion remain explicitly marked destructive.
+The owner approved the voice, coloring and science metadata correction: those three tools now declare `openWorldHint: false` for their bounded generation and metadata paths. Story image publication retains its existing hint and requires separate review if that behavior changes. Destructive profile updates/deletion remain explicitly marked destructive. No JSON submission import is generated because the owner selected child-facing standalone distribution, not ChatGPT directory submission.
 
 Production CSP origins are validated as exact HTTPS origins. Actual deployed resource/domain compatibility still requires host testing. Metadata history exposes activity timestamps/identifiers only to the parent flow; review minimization and disclosure before submission.
 
