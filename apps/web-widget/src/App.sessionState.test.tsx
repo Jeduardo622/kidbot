@@ -45,6 +45,7 @@ describe('App parent/session safety controls', () => {
 
   const setPin = async () => {
     fireEvent.change(screen.getByLabelText('Create parent PIN'), { target: { value: '1234' } });
+    fireEvent.change(screen.getByLabelText('Confirm PIN'), { target: { value: '1234' } });
     fireEvent.click(screen.getByRole('button', { name: 'Set Parent PIN' }));
     await screen.findByText('Parent controls unlocked.');
   };
@@ -171,6 +172,7 @@ describe('App parent/session safety controls', () => {
     expect(screen.getByRole('alert').textContent).toContain('Enter a 4-digit PIN.');
 
     fireEvent.change(screen.getByLabelText('Create parent PIN'), { target: { value: '1234' } });
+    fireEvent.change(screen.getByLabelText('Confirm PIN'), { target: { value: '1234' } });
     fireEvent.click(screen.getByRole('button', { name: 'Set Parent PIN' }));
     expect((await parentControls().findByRole('status')).textContent).toContain(
       'Parent controls unlocked.',
@@ -614,10 +616,10 @@ describe('App parent/session safety controls', () => {
   it('marks the active navigation item for assistive technology', () => {
     render(<App />);
 
-    expect(screen.getByRole('button', { name: 'Voice' }).getAttribute('aria-pressed')).toBe('true');
-    expect(screen.getByRole('button', { name: 'Comics' }).getAttribute('aria-pressed')).toBe('false');
-    fireEvent.click(screen.getByRole('button', { name: 'Comics' }));
-    expect(screen.getByRole('button', { name: 'Comics' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('tab', { name: 'Voice' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tab', { name: 'Comics' }).getAttribute('aria-selected')).toBe('false');
+    fireEvent.click(screen.getByRole('tab', { name: 'Comics' }));
+    expect(screen.getByRole('tab', { name: 'Comics' }).getAttribute('aria-selected')).toBe('true');
   });
 
   it('applies border-box sizing and narrow viewport overflow containment', () => {

@@ -33,15 +33,15 @@ describe('App scrapbook', () => {
     );
     render(<App />);
 
-    fireEvent.click(screen.getByRole('button', { name: /Comics/ }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Comics' }));
     fireEvent.click(screen.getByRole('button', { name: 'Plan Panels' }));
     await screen.findByText('Dara peeks out.');
     fireEvent.click(screen.getByRole('button', { name: 'Save to My Creations' }));
 
-    const creationsTab = screen.getByRole('button', { name: /^My Creations/ });
+    const creationsTab = screen.getByRole('tab', { name: /^My Creations/ });
     expect(within(creationsTab).getByLabelText('1 saved')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: /Voice/ }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Voice' }));
     fireEvent.click(creationsTab);
     const scrapbook = screen.getByRole('region', { name: 'My Creations' });
     expect(within(scrapbook).getByText('A brave turtle shares snacks')).toBeTruthy();

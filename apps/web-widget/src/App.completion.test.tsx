@@ -23,6 +23,7 @@ describe('App completion flows', () => {
 
   const unlockAndEnableHistory = async () => {
     fireEvent.change(screen.getByLabelText('Create parent PIN'), { target: { value: '1234' } });
+    fireEvent.change(screen.getByLabelText('Confirm PIN'), { target: { value: '1234' } });
     fireEvent.click(screen.getByRole('button', { name: 'Set Parent PIN' }));
     callTool.mockResolvedValueOnce({
       structuredContent: {
@@ -38,19 +39,20 @@ describe('App completion flows', () => {
 
   it('keeps feature work mounted while switching tabs', () => {
     render(<App />);
-    fireEvent.click(screen.getByRole('button', { name: 'Coloring' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Coloring' }));
     fireEvent.change(screen.getByLabelText('Scene'), { target: { value: 'My saved sketch' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Science Lab' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Coloring' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Science Lab' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Coloring' }));
 
     expect((screen.getByLabelText('Scene') as HTMLInputElement).value).toBe('My saved sketch');
   });
 
   it('clears mounted feature state when the locked age changes', async () => {
     render(<App />);
-    fireEvent.click(screen.getByRole('button', { name: 'Coloring' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Coloring' }));
     fireEvent.change(screen.getByLabelText('Scene'), { target: { value: 'Age-specific sketch' } });
     fireEvent.change(screen.getByLabelText('Create parent PIN'), { target: { value: '1234' } });
+    fireEvent.change(screen.getByLabelText('Confirm PIN'), { target: { value: '1234' } });
     fireEvent.click(screen.getByRole('button', { name: 'Set Parent PIN' }));
     fireEvent.change(screen.getByLabelText('Locked age'), { target: { value: '10-12' } });
 

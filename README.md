@@ -236,6 +236,10 @@ The widget currently uses browser `speechSynthesis` for local voice playback, wi
 Voice input currently uses browser speech recognition where available and writes captured text into the existing prompt box. Future Realtime STT/TTS should replace the internals behind the voice capture/playback utilities, not the `voice_chat` contract.
 Browser speech recognition may ask for microphone permission; unsupported browsers continue to use typed input.
 
+### Age Bands in the Widget
+
+The locked age band drives presentation as well as moderation. `apps/web-widget/src/utils/ageBand.ts` maps each band to a type and touch-target scale (`data-age-scale` on the widget root), a simplified-controls flag for 4-6 (no panel count, brush slider, or free-text topic), default panel count and brush size, and band-specific science topics. The parent PIN must be entered twice to be set, five wrong attempts lock parent controls for 60 seconds, and the PIN is session-only. The widget follows the host color scheme through CSS tokens and exposes the activity nav as a real tablist.
+
 ### Session Scrapbook
 
 The "My Creations" tab keeps stories, coloring pages (composited PNG data URLs), and finished experiments in React memory for the life of the widget. Nothing in it is written to host widget state or the server; it is capped at 24 items and cleared on reload. Story panels can be continued with `continueFrom` (the last caption) on `story_panels`, and the Coloring Corner ships six built-in starter outlines plus a bucket fill that stops at outline lines.
