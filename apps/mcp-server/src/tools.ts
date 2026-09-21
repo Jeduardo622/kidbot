@@ -390,7 +390,9 @@ const handleWithModeration = async <Schema extends z.ZodTypeAny, ResponseType ex
 ): Promise<CallToolResult> => {
   const parsed = schema.parse(payload);
   const toModerate = validator(parsed).join(' ');
-  const preCheck = moderate(toModerate);
+  // Fallback mode serves fixtures without any provider moderation behind
+  // them, so the strict local tier applies there.
+  const preCheck = moderate(toModerate, { strict: fallbackMode });
   if (preCheck.blocked) {
     return blockedResponse(preCheck.message ?? 'Let\'s try a different friendly idea.');
   }
@@ -407,7 +409,7 @@ const handleWithModeration = async <Schema extends z.ZodTypeAny, ResponseType ex
   }
 
   const transcriptText = transcript(parsed, agentResponse);
-  const postCheck = moderate(transcriptText);
+  const postCheck = moderate(transcriptText, { strict: fallbackMode });
   if (postCheck.blocked) {
     return blockedResponse(postCheck.message ?? 'Let\'s stick with cheerful topics.');
   }

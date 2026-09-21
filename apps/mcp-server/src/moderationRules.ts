@@ -10,9 +10,14 @@
  * - Every pattern uses word boundaries. Bare substrings ("die", "mean",
  *   "phone") blocked ordinary kid questions such as "what does photosynthesis
  *   mean?" and "why do leaves die in fall?".
- * - Only unambiguous terms belong here. Anything context dependent
- *   ("blood", "kill", "fight", "hate", "kiss") is left to the provider moderation
- *   call, which sees the whole sentence and scores it by category.
+ * - Two tiers. The base tier holds only unambiguous terms; anything context
+ *   dependent ("blood", "kill", "fight", "hate", "kiss") is left to the
+ *   provider moderation call, which sees the whole sentence and scores it by
+ *   category. The strict tier adds those context-dependent terms and is used
+ *   on every path that has NO provider moderation behind it: stub content,
+ *   the fallback widget, and provider-failure fallback. Strict mode knowingly
+ *   over-blocks ("why do leaves die?") because in those modes there is no
+ *   contextual judge, and echoing an unmoderated request is worse.
  * - Messages are supportive redirects, never scolding.
  */
 export interface ModerationRule {
@@ -60,14 +65,55 @@ export const MODERATION_RULES: readonly ModerationRule[] = [
   },
 ];
 
+/**
+ * Context-dependent terms. Only applied in strict mode (no provider
+ * moderation available). Each reuses a base rule id and message.
+ */
+export const STRICT_MODERATION_RULES: readonly ModerationRule[] = [
+  {
+    id: 'violence',
+    pattern:
+      /\b(?:kill(?:s|ed|ing|er|ers)?|die(?:s|d)?|dying|dead|death|blood|fight(?:s|ing)?|fought|hurt(?:s|ing)?|shoot(?:s|ing)?|shot|attack(?:s|ed|ing)?|wars?|knife|knives|swords?|punch(?:es|ed|ing)?|scary|monsters?)\b/i,
+    message: "Let's pick a calm and friendly idea instead.",
+  },
+  {
+    id: 'sexual',
+    pattern: /\b(?:kiss(?:es|ed|ing)?|boyfriends?|girlfriends?|crush(?:es)?)\b/i,
+    message: 'Kidbot sticks to friendly adventures and science fun.',
+  },
+  {
+    id: 'hate',
+    pattern: /\b(?:hate(?:s|d|ful)?|stupid|ugly|losers?|idiots?|dumb|bully|bullies|bullying)\b/i,
+    message: 'Kidbot celebrates kindness and respect for everyone.',
+  },
+  {
+    id: 'personal-info',
+    pattern: /\b(?:address(?:es)?|phones?|emails?|birthday|school name)\b/i,
+    message: "Let's keep personal information private and talk about stories or science instead.",
+  },
+  {
+    id: 'substances',
+    pattern: /\b(?:drugs?|beer|wine|alcohol|drunk|smoking)\b/i,
+    message: "Let's explore a healthy, fun idea instead.",
+  },
+];
+
 export interface LocalModerationResult {
   blocked: boolean;
   message?: string;
   ruleId?: ModerationRule['id'];
+  /** True when a strict-tier (context-dependent) rule produced the block. */
+  strict?: true;
+}
+
+export interface ApplyModerationOptions {
+  /** Apply the strict tier as well. Use when no provider moderation will run. */
+  strict?: boolean;
 }
 
 export const applyModerationRules = (
   text: string | undefined | null,
+  options: ApplyModerationOptions = {},
 ): LocalModerationResult => {
   if (!text) {
     return { blocked: false };
@@ -76,6 +122,14 @@ export const applyModerationRules = (
   for (const rule of MODERATION_RULES) {
     if (rule.pattern.test(text)) {
       return { blocked: true, message: rule.message, ruleId: rule.id };
+    }
+  }
+
+  if (options.strict) {
+    for (const rule of STRICT_MODERATION_RULES) {
+      if (rule.pattern.test(text)) {
+        return { blocked: true, message: rule.message, ruleId: rule.id, strict: true };
+      }
     }
   }
 

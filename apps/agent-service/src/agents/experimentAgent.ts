@@ -1,4 +1,4 @@
-import { kidTone, moderate, moderateAsync, safeSystemPrompt } from '../guardrails.js';
+import { kidTone, moderateAsync, moderateWithoutProvider, safeSystemPrompt } from '../guardrails.js';
 import { MalformedOutputError, UnsafeOutputError, type ModelProvider } from '../provider.js';
 import { asRecord, cleanText, cleanTextArray, extractJson } from '../structuredOutput.js';
 import type { AgeBand, ScienceRequest, ScienceResponse } from '../types.js';
@@ -178,7 +178,7 @@ export function planExperiment(
     return planExperimentWithProvider(request, provider);
   }
 
-  const topicModeration = moderate(request.topic);
+  const topicModeration = moderateWithoutProvider(request.topic);
   if (topicModeration.blocked) {
     return { blocked: true, message: topicModeration.message };
   }
@@ -187,7 +187,7 @@ export function planExperiment(
   const selected =
     Object.entries(topicMap).find(([key]) => lowerTopic.includes(key))?.[1] ?? defaultTopic;
 
-  const stepsModeration = moderate(selected.steps.join(' '));
+  const stepsModeration = moderateWithoutProvider(selected.steps.join(' '));
   if (stepsModeration.blocked) {
     return { blocked: true, message: stepsModeration.message };
   }
