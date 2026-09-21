@@ -1,10 +1,18 @@
 import './devBridge.js';
 import { StrictMode, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import { ActivityErrorBoundary } from './components/ActivityErrorBoundary.js';
 import { ColoringBook } from './components/ColoringBook.js';
 import { ComicBoard } from './components/ComicBoard.js';
 import { ScienceLab } from './components/ScienceLab.js';
+import { Scrapbook } from './components/Scrapbook.js';
 import { VoiceBar } from './components/VoiceBar.js';
+import {
+  addScrapbookItem,
+  removeScrapbookItem,
+  type ScrapbookDraft,
+  type ScrapbookItem,
+} from './utils/scrapbook.js';
 import {
   ageBandOptions,
   createSessionId,
@@ -15,13 +23,14 @@ import {
 import { isStaleParentCredentialFailure, readToolEnvelope } from './utils/toolResult.js';
 import './styles.css';
 
-type TabKey = 'voice' | 'comics' | 'coloring' | 'science';
+type TabKey = 'voice' | 'comics' | 'coloring' | 'science' | 'creations';
 
-const tabs: Array<{ key: TabKey; label: string }> = [
-  { key: 'voice', label: 'Voice' },
-  { key: 'comics', label: 'Comics' },
-  { key: 'coloring', label: 'Coloring' },
-  { key: 'science', label: 'Science Lab' }
+const tabs: Array<{ key: TabKey; label: string; icon: string }> = [
+  { key: 'voice', label: 'Voice', icon: '🎙️' },
+  { key: 'comics', label: 'Comics', icon: '📖' },
+  { key: 'coloring', label: 'Coloring', icon: '🖍️' },
+  { key: 'science', label: 'Science Lab', icon: '🧪' },
+  { key: 'creations', label: 'My Creations', icon: '⭐' },
 ];
 
 const defaultProfileId = 'local-default';
@@ -147,6 +156,13 @@ export const App = () => {
     profileId: defaultProfileId,
   });
   const [activeTab, setActiveTab] = useState<TabKey>('voice');
+  const [scrapbook, setScrapbook] = useState<ScrapbookItem[]>([]);
+  const saveToScrapbook = (draft: ScrapbookDraft) => {
+    setScrapbook((prev) => addScrapbookItem(prev, draft));
+  };
+  const removeFromScrapbook = (id: string) => {
+    setScrapbook((prev) => removeScrapbookItem(prev, id));
+  };
   const [pinInput, setPinInput] = useState('');
   const [pinStatus, setPinStatus] = useState<PinStatus>();
   const [persistenceStatus, setPersistenceStatus] = useState<PersistenceStatus>();
@@ -656,23 +672,42 @@ export const App = () => {
                 setSessionState((prev) => ({ ...prev, tab: tab.key }));
               }}
             >
+              <span className="tab-icon" aria-hidden="true">{tab.icon}</span>
               {tab.label}
+              {tab.key === 'creations' && scrapbook.length > 0 && (
+                <span className="tab-count" aria-label={`${scrapbook.length} saved`}>
+                  {scrapbook.length}
+                </span>
+              )}
             </button>
           ))}
         </nav>
       </header>
       <main>
         <div id="activity-voice" className="feature-panel" hidden={activeTab !== 'voice'}>
-          <VoiceBar key={featureStateKey} active={activeTab === 'voice'} sessionContext={sessionContext} />
+          <ActivityErrorBoundary activity="Voice Playground">
+            <VoiceBar key={featureStateKey} active={activeTab === 'voice'} sessionContext={sessionContext} />
+          </ActivityErrorBoundary>
         </div>
         <div id="activity-comics" className="feature-panel" hidden={activeTab !== 'comics'}>
-          <ComicBoard key={featureStateKey} sessionContext={sessionContext} />
+          <ActivityErrorBoundary activity="Comic Storyboard">
+            <ComicBoard key={featureStateKey} active={activeTab === 'comics'} sessionContext={sessionContext} onSaveToScrapbook={saveToScrapbook} />
+          </ActivityErrorBoundary>
         </div>
         <div id="activity-coloring" className="feature-panel" hidden={activeTab !== 'coloring'}>
-          <ColoringBook key={featureStateKey} sessionContext={sessionContext} />
+          <ActivityErrorBoundary activity="Coloring Corner">
+            <ColoringBook key={featureStateKey} sessionContext={sessionContext} onSaveToScrapbook={saveToScrapbook} />
+          </ActivityErrorBoundary>
         </div>
         <div id="activity-science" className="feature-panel" hidden={activeTab !== 'science'}>
-          <ScienceLab key={featureStateKey} sessionContext={sessionContext} />
+          <ActivityErrorBoundary activity="Science Lab">
+            <ScienceLab key={featureStateKey} sessionContext={sessionContext} onSaveToScrapbook={saveToScrapbook} />
+          </ActivityErrorBoundary>
+        </div>
+        <div id="activity-creations" className="feature-panel" hidden={activeTab !== 'creations'}>
+          <ActivityErrorBoundary activity="My Creations">
+            <Scrapbook items={scrapbook} onRemove={removeFromScrapbook} />
+          </ActivityErrorBoundary>
         </div>
       </main>
     </div>

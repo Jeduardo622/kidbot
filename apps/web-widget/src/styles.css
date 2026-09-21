@@ -578,3 +578,325 @@ img.panel-artwork {
     gap: 1.5rem;
   }
 }
+
+/* ---- Phase 2: shared ---- */
+.kidbot-header nav button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 44px;
+}
+
+.tab-icon {
+  font-size: 1.15rem;
+}
+
+.tab-count {
+  min-width: 1.4rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 999px;
+  background: #1e3a8a;
+  color: #fff;
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+.hint {
+  margin: 0;
+  color: #475569;
+}
+
+.panel button.chip,
+.panel .chip {
+  padding: 0.4rem 0.85rem;
+  background: #e0e7ff;
+  color: #1e3a8a;
+  min-height: 40px;
+}
+
+.panel button.chip[aria-pressed='true'],
+.panel button.chip.selected {
+  background: linear-gradient(135deg, #38bdf8, #6366f1);
+  color: #fff;
+}
+
+.panel button.subtle {
+  background: #f1f5f9;
+  color: #334155;
+}
+
+.panel button.primary {
+  font-weight: 700;
+}
+
+.activity-error h2 {
+  margin: 0;
+}
+
+/* ---- Voice ---- */
+.persona-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #334155;
+  font-weight: 600;
+}
+
+.persona-avatar {
+  font-size: 1.2rem;
+}
+
+.persona-fairy { background: #fce7f3; }
+.persona-explorer { background: #dcfce7; }
+.persona-robot { background: #e0f2fe; }
+
+.transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.turn {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  max-width: 85%;
+}
+
+.turn p {
+  margin: 0;
+  padding: 0.6rem 0.85rem;
+  border-radius: 16px;
+  background: #f1f5f9;
+}
+
+.turn-child {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+
+.turn-child p {
+  background: #dbeafe;
+}
+
+.turn-avatar {
+  font-size: 1.3rem;
+  line-height: 1.6;
+}
+
+.voice-actions {
+  gap: 0.5rem;
+}
+
+/* ---- Comics ---- */
+.panel-number {
+  display: inline-block;
+  min-width: 1.6rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  background: #1e3a8a;
+  color: #fff;
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.skeleton-block,
+.skeleton-line {
+  border-radius: 8px;
+  background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+  background-size: 200% 100%;
+  animation: kidbot-shimmer 1.4s infinite;
+}
+
+.skeleton-line {
+  height: 0.9rem;
+  width: 100%;
+}
+
+.skeleton-line.skeleton-title {
+  height: 1.2rem;
+  width: 60%;
+}
+
+.skeleton-line.short {
+  width: 40%;
+}
+
+@keyframes kidbot-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-block,
+  .skeleton-line {
+    animation: none;
+  }
+}
+
+/* ---- Coloring ---- */
+.starter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.starter-label {
+  color: #475569;
+  font-weight: 600;
+}
+
+.tool-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.palette {
+  display: grid;
+  grid-template-columns: repeat(6, 32px);
+  gap: 0.4rem;
+}
+
+.panel .swatch {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 50%;
+  border: 3px solid #e2e8f0;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.15);
+}
+
+.panel .swatch.selected,
+.panel .swatch[aria-pressed='true'] {
+  border-color: #0f172a;
+  transform: scale(1.12);
+}
+
+.canvas-wrapper.tool-fill canvas { cursor: cell; }
+.canvas-wrapper.tool-eraser canvas { cursor: crosshair; }
+.canvas-wrapper.tool-brush canvas { cursor: crosshair; }
+
+/* ---- Science ---- */
+.topic-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.step-track {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.step-track li {
+  width: 2rem;
+  height: 2rem;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #e2e8f0;
+  color: #334155;
+  font-weight: 700;
+}
+
+.step-track li.current {
+  background: #1e3a8a;
+  color: #fff;
+}
+
+.step-track li.done {
+  background: #16a34a;
+  color: #fff;
+}
+
+.supervision {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  background: #fef3c7;
+  border: 2px solid #fcd34d;
+  color: #78350f;
+}
+
+.observation {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+/* ---- Scrapbook ---- */
+.scrapbook-empty {
+  margin: 0;
+  color: #475569;
+}
+
+.scrapbook-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.scrapbook-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem;
+  border-radius: 16px;
+  background: #f8fafc;
+  box-shadow: inset 0 0 0 2px #e0f2fe;
+}
+
+.scrapbook-card h3,
+.scrapbook-card p {
+  margin: 0;
+}
+
+.scrapbook-card-header {
+  display: flex;
+  justify-content: space-between;
+  color: #475569;
+  font-size: 0.85rem;
+}
+
+.scrapbook-kind {
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.scrapbook-thumb {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 12px;
+  background: #fff;
+  object-fit: contain;
+}
+
+.scrapbook-story {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.scrapbook-explanation,
+.scrapbook-observation {
+  color: #475569;
+}

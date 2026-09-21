@@ -5,9 +5,9 @@ import { readFileSync, existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { ZodError } from 'zod';
-import { craftVoiceReply } from './agents/voiceAgent.js';
+import { craftVoiceReply, voiceModerationInput } from './agents/voiceAgent.js';
 import { generateColoringOutline } from './agents/imageAgent.js';
-import { planStory } from './agents/storyAgent.js';
+import { planStory, storyModerationInput } from './agents/storyAgent.js';
 import { planExperiment } from './agents/experimentAgent.js';
 import { parseAgentServiceConfig } from './config.js';
 import { resolveFixturesDir } from './fixtures.js';
@@ -273,7 +273,7 @@ const readFixtureText = (relativePath: string, fallback: string): string => {
 };
 
 const stubVoice = (payload: VoiceRequest) => {
-  const inputModeration = moderateWithoutProvider(payload.text);
+  const inputModeration = moderateWithoutProvider(voiceModerationInput(payload));
   if (inputModeration.blocked) {
     return { blocked: true, message: inputModeration.message, source: 'stub' as const };
   }
@@ -299,7 +299,7 @@ const stubVoice = (payload: VoiceRequest) => {
 };
 
 const stubStory = (payload: StoryRequest) => {
-  const inputModeration = moderateWithoutProvider(payload.theme);
+  const inputModeration = moderateWithoutProvider(storyModerationInput(payload));
   if (inputModeration.blocked) {
     return { blocked: true, message: inputModeration.message, source: 'stub' as const };
   }

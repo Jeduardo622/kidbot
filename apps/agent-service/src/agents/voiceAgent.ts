@@ -25,11 +25,28 @@ const withSsml = (persona: Persona, text: string): string => {
   return `<speak>${safeText}</speak>`;
 };
 
+/**
+ * Everything the child supplied for this turn, current text plus any prior
+ * turns the client replays, moderated as one string so one moderation call
+ * covers a spoofed or edited history.
+ */
+export const voiceModerationInput = (request: VoiceRequest): string =>
+  [...(request.history ?? []).map((turn) => turn.text), request.text].join('\n');
+
+const historyLines = (request: VoiceRequest): string[] => {
+  const history = request.history ?? [];
+  if (history.length === 0) return [];
+  return [
+    'Earlier in this conversation (oldest first):',
+    ...history.map((turn) => `${turn.role === 'child' ? 'Child' : 'Kidbot'}: ${turn.text}`),
+  ];
+};
+
 const craftVoiceReplyWithProvider = async (
   request: VoiceRequest,
   provider: ModelProvider,
 ): Promise<VoiceResponse> => {
-  const inputModeration = await moderateAsync(request.text, provider, request.ageBand);
+  const inputModeration = await moderateAsync(voiceModerationInput(request), provider, request.ageBand);
   if (inputModeration.blocked) {
     return { blocked: true, message: inputModeration.message };
   }
@@ -44,6 +61,7 @@ const craftVoiceReplyWithProvider = async (
       `Tone: ${tone.sentenceLength}; ${tone.vocabulary}`,
       'Answer the child in 1-3 cheerful, age-appropriate sentences.',
       'Avoid scary, violent, romantic, adult, or personal-data content.',
+      ...historyLines(request),
       `Child request: ${request.text}`,
     ].join('\n'),
     maxTokens: 220,
@@ -79,7 +97,7 @@ export function craftVoiceReply(
     return craftVoiceReplyWithProvider(request, provider);
   }
 
-  const inputModeration = moderateWithoutProvider(request.text);
+  const inputModeration = moderateWithoutProvider(voiceModerationInput(request));
   if (inputModeration.blocked) {
     return { blocked: true, message: inputModeration.message };
   }

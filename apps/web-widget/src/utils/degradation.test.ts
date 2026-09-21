@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   SERVICE_UNAVAILABLE_MESSAGE,
@@ -22,7 +22,7 @@ describe('bridge error messages', () => {
 
   it('does not expose arbitrary diagnostics from an Error-like bridge value', () => {
     expect(errorMessage({ message: 'Provider request failed at https://internal.example.test' })).toBe(
-      'Something went wrong.',
+      'Something went wrong. Please try again.',
     );
   });
 
@@ -33,7 +33,7 @@ describe('bridge error messages', () => {
   });
 
   it('keeps the generic fallback for values without a usable message', () => {
-    expect(errorMessage({ message: '   ' })).toBe('Something went wrong.');
+    expect(errorMessage({ message: '   ' })).toBe('Something went wrong. Please try again.');
   });
 
   it('fails closed when an Error-like message getter throws', () => {
@@ -43,6 +43,29 @@ describe('bridge error messages', () => {
       },
     });
 
-    expect(errorMessage(error)).toBe('Something went wrong.');
+    expect(errorMessage(error)).toBe('Something went wrong. Please try again.');
+  });
+});
+
+describe('child-facing error copy', () => {
+  it('never shows raw bridge or auth diagnostics from a real Error', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    expect(errorMessage(new Error('Unauthorized'))).toBe('Something went wrong. Please try again.');
+    expect(errorMessage(new Error('fetch failed: ECONNREFUSED 127.0.0.1:3000'))).toBe(
+      'Something went wrong. Please try again.',
+    );
+    expect(consoleError).toHaveBeenCalledWith('[kidbot] tool call failed:', 'Unauthorized');
+    consoleError.mockRestore();
+  });
+
+  it('passes through the widget-authored messages', () => {
+    for (const message of [
+      'Kidbot returned an invalid result. Please try again.',
+      'Kidbot could not complete this request. Please try again.',
+      'Too many requests. Try again in 12 seconds.',
+      'Kidbot is busy with another request. Please try again shortly.',
+    ]) {
+      expect(errorMessage(new Error(message))).toBe(message);
+    }
   });
 });

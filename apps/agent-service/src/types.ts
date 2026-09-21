@@ -14,9 +14,17 @@ const sessionMetadataSchema = z.object({
   ageBand: z.enum(ageBandValues).optional()
 });
 
+export const voiceHistoryTurnSchema = z.object({
+  role: z.enum(['child', 'kidbot']),
+  text: z.string().min(1).max(280),
+}).strict();
+
+export type VoiceHistoryTurn = z.infer<typeof voiceHistoryTurnSchema>;
+
 export const voiceRequestSchema = z.object({
   text: z.string().min(1).max(280),
   persona: z.enum(personaValues),
+  history: z.array(voiceHistoryTurnSchema).max(6).optional(),
 }).merge(sessionMetadataSchema);
 
 export type VoiceRequest = z.infer<typeof voiceRequestSchema>;
@@ -24,6 +32,7 @@ export type VoiceRequest = z.infer<typeof voiceRequestSchema>;
 export const storyRequestSchema = z.object({
   theme: z.string().min(3).max(120),
   panels: z.number().int().min(2).max(8),
+  continueFrom: z.string().min(3).max(240).optional(),
 }).merge(sessionMetadataSchema);
 
 export type StoryRequest = z.infer<typeof storyRequestSchema>;

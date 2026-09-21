@@ -681,7 +681,7 @@ export const registerTools = (
         voiceInputSchema,
         input,
         voiceTool.name,
-        (data) => [data.text ?? ''],
+        (data) => [...(data.history ?? []).map((turn) => turn.text), data.text ?? ''],
         async (data) =>
           fallbackMode
             ? Promise.resolve(fixtureVoice(data))
@@ -712,7 +712,7 @@ export const registerTools = (
         storyPanelsSchema,
         input,
         storyTool.name,
-        (data) => [data.theme ?? ''],
+        (data) => [data.theme ?? '', data.continueFrom ?? ''],
         async (data) =>
           fallbackMode
             ? Promise.resolve(fixturePanels(data))

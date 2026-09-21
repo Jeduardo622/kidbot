@@ -167,7 +167,7 @@ describe('VoiceBar voice capture', () => {
     fireEvent.change(screen.getByPlaceholderText('Ask a question or share a topic'), {
       target: { value: 'Tell me about Jupiter' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Speak' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
 
     await waitFor(() => {
       expect(callTool).toHaveBeenCalledWith(
@@ -216,13 +216,13 @@ describe('VoiceBar voice capture', () => {
     let resolveReply!: (value: unknown) => void;
     callTool.mockImplementation(() => new Promise((resolve) => { resolveReply = resolve; }));
     const { rerender } = render(<VoiceBar active />);
-    fireEvent.click(screen.getByRole('button', { name: 'Speak' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
     rerender(<VoiceBar active={false} />);
     await act(async () => {
       resolveReply({ structuredContent: { blocked: false, persona: 'robot', text: 'Late response' } });
     });
     expect(screen.queryByText('Late response')).toBeNull();
     rerender(<VoiceBar active />);
-    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Speak' }).disabled).toBe(false);
+    expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Ask' }).disabled).toBe(false);
   });
 });

@@ -34,7 +34,7 @@ describe('ChatGPT tool-result envelopes', () => {
       structuredContent: { blocked: false, persona: 'robot', text: 'Envelope voice reply.' },
     });
     render(<VoiceBar />);
-    fireEvent.click(screen.getByRole('button', { name: 'Speak' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
     expect(await screen.findByText('Envelope voice reply.')).toBeTruthy();
   });
 
@@ -43,7 +43,7 @@ describe('ChatGPT tool-result envelopes', () => {
       structuredContent: { blocked: true, message: 'Kidbot paused this request.' },
     });
     render(<VoiceBar />);
-    fireEvent.click(screen.getByRole('button', { name: 'Speak' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
     expect((await screen.findAllByText('Kidbot paused this request.')).length).toBeGreaterThan(0);
   });
 
@@ -186,7 +186,7 @@ describe('ChatGPT tool-result envelopes', () => {
   });
 
   it.each([
-    ['VoiceBar', <VoiceBar key="voice-malformed" />, 'Speak', { blocked: false, persona: 'pirate', text: 42 }],
+    ['VoiceBar', <VoiceBar key="voice-malformed" />, 'Ask', { blocked: false, persona: 'pirate', text: 42 }],
     ['ComicBoard', <ComicBoard key="comic-malformed" />, 'Plan Panels', { blocked: false, panels: 'not-panels' }],
     ['ColoringBook', <ColoringBook key="coloring-malformed" />, 'Get Outline', { blocked: false, svg: 42 }],
     [
@@ -212,7 +212,7 @@ describe('ChatGPT tool-result envelopes', () => {
     [
       'VoiceBar',
       <VoiceBar key="voice-rate" />,
-      'Speak',
+      'Ask',
       { error: true, code: 'rate_limited', retryAfter: 12 },
       'Too many requests. Try again in 12 seconds.',
     ],
@@ -250,7 +250,7 @@ describe('ChatGPT tool-result envelopes', () => {
       structuredContent: { blocked: false, persona: 'robot', text: 'Unsafe success.' },
     });
     render(<VoiceBar />);
-    fireEvent.click(screen.getByRole('button', { name: 'Speak' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
     expect((await screen.findAllByText('Kidbot could not complete this request. Please try again.')).length).toBeGreaterThan(0);
     expect(screen.queryByText('Unsafe success.')).toBeNull();
   });
