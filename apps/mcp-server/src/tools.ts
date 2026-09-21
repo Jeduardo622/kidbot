@@ -18,6 +18,7 @@ import { mcpConfig } from './config.js';
 import { createParentProfileStoreFromConfig, type AgeBand, type ParentHistoryEvent } from './parentStore.js';
 import {
   computeToolCost,
+  computeToolTimeoutMs,
   createCallerKey,
   createNetworkKey,
   createRequestControlStoreFromConfig,
@@ -257,7 +258,14 @@ const runControlled = async (
   networkIdentity: string,
   operation: (signal: AbortSignal) => Promise<CallToolResult>,
 ): Promise<CallToolResult> => {
-  const deadlineSignal = AbortSignal.timeout(mcpConfig.agentRequestTimeoutMs);
+  const deadlineSignal = AbortSignal.timeout(
+    computeToolTimeoutMs(
+      toolName,
+      input,
+      mcpConfig.agentRequestTimeoutMs,
+      mcpConfig.storyAgentRequestTimeoutMs,
+    ),
+  );
   const signal = AbortSignal.any([extra.signal, deadlineSignal]);
   const aborted = new Promise<never>((_resolve, reject) => {
     if (signal.aborted) {
@@ -663,7 +671,7 @@ export const registerTools = (
     outputSchema: voiceToolOutputSchema,
     resultSchema: voiceToolOutputUnion,
     successSchema: voiceSuccessSchema,
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: false },
   };
   registerKidbotTool(server, voiceTool.name, voiceTool, async (input: unknown, extra) =>
     runControlled(voiceTool.name, input, extra as ToolRequestExtra, networkIdentity, async (signal) =>
@@ -725,7 +733,7 @@ export const registerTools = (
     outputSchema: coloringOutlineToolOutputSchema,
     resultSchema: coloringOutlineToolOutputUnion,
     successSchema: coloringOutlineSuccessSchema,
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: false },
   };
   registerKidbotTool(server, coloringTool.name, coloringTool, async (input: unknown, extra) =>
     runControlled(coloringTool.name, input, extra as ToolRequestExtra, networkIdentity, async (signal) =>
@@ -752,7 +760,7 @@ export const registerTools = (
     outputSchema: scienceSimToolOutputSchema,
     resultSchema: scienceSimToolOutputUnion,
     successSchema: scienceSimSuccessSchema,
-    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true, idempotentHint: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false, idempotentHint: false },
   };
   registerKidbotTool(server, scienceTool.name, scienceTool, async (input: unknown, extra) =>
     runControlled(scienceTool.name, input, extra as ToolRequestExtra, networkIdentity, async (signal) =>

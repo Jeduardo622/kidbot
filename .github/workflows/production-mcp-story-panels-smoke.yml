@@ -38,5 +38,8 @@ jobs:
             exit 1
           fi
 
+      - name: Verify production readiness and widget artifact
+        run: pnpm run smoke:production-widget-dist-preflight
+
       - name: Run production MCP story panels smoke
         run: pnpm run smoke:production-mcp-story-panels

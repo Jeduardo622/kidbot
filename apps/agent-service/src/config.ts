@@ -11,6 +11,8 @@ export interface AgentServiceConfig {
   requireServiceAuth: boolean;
   startupPosture: 'secured' | 'local-fallback';
   port: number;
+  requestTimeoutMs: number;
+  storyRequestTimeoutMs: number;
   /**
    * Trust one reverse-proxy hop (X-Forwarded-For) when deriving client IPs
    * for rate limiting. On by default in production (Railway edge proxy);
@@ -23,6 +25,8 @@ export interface AgentServiceConfig {
 type AgentServiceEnv = Partial<
   Record<
     | 'AGENT_SERVICE_TOKEN'
+    | 'AGENT_REQUEST_TIMEOUT_MS'
+    | 'AGENT_STORY_REQUEST_TIMEOUT_MS'
     | 'FALLBACK_WIDGET'
     | 'KIDBOT_LOCAL_DEV'
     | 'KIDBOT_STUB_PROVIDER'
@@ -56,6 +60,14 @@ const parsePort = (value: string | undefined, fallback: number): number => {
     throw new Error('PORT must be an integer between 1 and 65535.');
   }
   return port;
+};
+
+const parsePositiveInteger = (name: string, value: string | undefined, fallback: number): number => {
+  const parsed = Number(value ?? fallback);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(`${name} must be a positive integer.`);
+  }
+  return parsed;
 };
 
 const validateServiceToken = ({
@@ -125,6 +137,10 @@ export const parseAgentServiceConfig = (
     throw new Error('FALLBACK_WIDGET=1 is not allowed in production.');
   }
 
+  if (env.NODE_ENV === 'production' && env.KIDBOT_STUB_PROVIDER === '1') {
+    throw new Error('KIDBOT_STUB_PROVIDER=1 is not allowed in production.');
+  }
+
   if (fallbackMode && !localDevIntent) {
     throw new Error(
       'FALLBACK_WIDGET=1 requires KIDBOT_LOCAL_DEV=1 for explicit local fallback posture.',
@@ -144,6 +160,28 @@ export const parseAgentServiceConfig = (
     nodeEnv: env.NODE_ENV,
     stubProviderAllowed: env.KIDBOT_STUB_PROVIDER === '1',
   });
+  const requestTimeoutMs = parsePositiveInteger(
+    'AGENT_REQUEST_TIMEOUT_MS',
+    env.AGENT_REQUEST_TIMEOUT_MS,
+    30_000,
+  );
+  const storyRequestTimeoutMs = parsePositiveInteger(
+    'AGENT_STORY_REQUEST_TIMEOUT_MS',
+    env.AGENT_STORY_REQUEST_TIMEOUT_MS,
+    180_000,
+  );
+  if (storyRequestTimeoutMs < requestTimeoutMs) {
+    throw new Error('AGENT_STORY_REQUEST_TIMEOUT_MS must be at least AGENT_REQUEST_TIMEOUT_MS.');
+  }
+  if (storyRequestTimeoutMs > 600_000) {
+    throw new Error('AGENT_STORY_REQUEST_TIMEOUT_MS must not exceed 600000.');
+  }
+  if (env.NODE_ENV === 'production' && requestTimeoutMs < 30_000) {
+    throw new Error('AGENT_REQUEST_TIMEOUT_MS must be at least 30000 in production.');
+  }
+  if (env.NODE_ENV === 'production' && storyRequestTimeoutMs < 180_000) {
+    throw new Error('AGENT_STORY_REQUEST_TIMEOUT_MS must be at least 180000 in production.');
+  }
 
   return {
     providerApiKey,
@@ -155,6 +193,8 @@ export const parseAgentServiceConfig = (
     requireServiceAuth,
     startupPosture,
     port: parsePort(env.PORT ?? env.AGENT_PORT, 4505),
+    requestTimeoutMs,
+    storyRequestTimeoutMs,
     trustProxy: parseTrustProxy(env.KIDBOT_TRUST_PROXY, env.NODE_ENV),
   };
 };

@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { test } from 'node:test';
 
@@ -40,4 +41,23 @@ test('fails closed for empty, zero, unsafe, and unavailable bases', async () => 
   ]) {
     await assert.rejects(resolveHarnessBase({ repoRoot, baseRef: '', before: '', ...input }), /base|ref|resolve|unsafe/i);
   }
+});
+
+test('CLI explicitly marks a tree-identical push for the separate CI baseline', async () => {
+  const repoRoot = await repository();
+  const { stdout: baseStdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot });
+  const before = baseStdout.trim();
+  await execFileAsync('git', ['commit', '--allow-empty', '-m', 'tree-identical'], {
+    cwd: repoRoot,
+    env: { ...process.env, GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.com', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.com' },
+  });
+
+  const script = fileURLToPath(new URL('../scripts/resolve-harness-base.mjs', import.meta.url));
+  const { stdout } = await execFileAsync(process.execPath, [script], {
+    cwd: repoRoot,
+    env: { ...process.env, EVENT_NAME: 'push', BEFORE_SHA: before, BASE_REF: '' },
+  });
+
+  assert.match(stdout, new RegExp(`HARNESS_BASE=${before}`));
+  assert.match(stdout, /HARNESS_TREE_IDENTICAL=1/);
 });

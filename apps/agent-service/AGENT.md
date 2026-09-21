@@ -1,4 +1,4 @@
-Kidbot Agent Service (Agents SDK)
+Kidbot Agent Service (OpenAI client SDK)
 
 Stable, kid-safe orchestration layer for Voice Chat + Persona, Story Panels, Coloring Outlines, and Science Sims.
 
@@ -6,7 +6,7 @@ TL;DR
 
 Language: TypeScript (Node 20+)
 
-Frameworks: Express, OpenAI Agents SDK, Zod
+Frameworks: Express, OpenAI client SDK, Zod. Realtime/Agents SDK integration is deferred from the supervised beta.
 
 Port: 4505
 
@@ -72,6 +72,8 @@ Testing (manual)
 curl examples for each route; ensure ≤100 words for voice, panels 2–6, valid SVG, safe experiments.
 
 Roadmap
+
+The canonical release scope and evidence checklist is docs/v1-acceptance.md at the repository root. The version ordering below is historical; it does not indicate completion.
 
 v0.1 MVP (stubs OK)
 

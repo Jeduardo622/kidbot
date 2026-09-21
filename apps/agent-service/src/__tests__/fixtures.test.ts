@@ -11,7 +11,8 @@ describe('fixtures directory resolution', () => {
     const fromSrc = resolveFixturesDir(srcDir);
     const fromDist = resolveFixturesDir(path.resolve(srcDir, '../dist'));
     expect(fromSrc).toEqual(fromDist);
-    expect(path.basename(path.dirname(fromSrc))).toEqual('kidbot-1');
+    expect(fromSrc).toEqual(path.resolve(srcDir, '../../../fixtures'));
+    expect(existsSync(fromSrc)).toBe(true);
   });
 
   it('finds every fixture the stub handlers read', () => {

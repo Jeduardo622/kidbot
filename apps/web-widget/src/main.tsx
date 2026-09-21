@@ -88,8 +88,57 @@ interface ParentProfileDeleteResponse {
   profileId?: string;
 }
 
+interface ParentHistoryEvent {
+  ageBand: AgeBand;
+  id: string;
+  profileId: string;
+  sessionId: string;
+  status: 'blocked' | 'degraded' | 'error' | 'ok';
+  timestamp: string;
+  tool: string;
+}
+
+type HistoryStatus =
+  | { kind: 'error'; message: string }
+  | { events: ParentHistoryEvent[]; kind: 'ready' }
+  | { kind: 'pending' }
+  | undefined;
+
+const historyToolLabels: Record<string, string> = {
+  coloring_outline: 'Coloring Corner',
+  science_sim: 'Science Lab',
+  story_panels: 'Comic Storyboard',
+  voice_chat: 'Voice Playground',
+};
+
+const historyStatusLabels: Record<ParentHistoryEvent['status'], string> = {
+  blocked: 'Paused for safety',
+  degraded: 'Completed with limited service',
+  error: 'Could not complete',
+  ok: 'Completed',
+};
+
+const isParentHistoryEvent = (value: unknown): value is ParentHistoryEvent => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const event = value as Record<string, unknown>;
+  return (
+    typeof event.id === 'string' &&
+    typeof event.timestamp === 'string' &&
+    !Number.isNaN(Date.parse(event.timestamp)) &&
+    typeof event.tool === 'string' &&
+    typeof event.sessionId === 'string' &&
+    typeof event.profileId === 'string' &&
+    isAgeBand(event.ageBand) &&
+    (event.status === 'ok' ||
+      event.status === 'blocked' ||
+      event.status === 'degraded' ||
+      event.status === 'error')
+  );
+};
+
 export const App = () => {
   const historyConsentRef = useRef<HTMLInputElement>(null);
+  const historyReadVersionRef = useRef(0);
   const parentPinRef = useRef<HTMLInputElement>(null);
   const [sessionState, setSessionState] = useState<PersistedWidgetState>(() => readInitialState());
   const [parentCredentials, setParentCredentials] = useState<ParentCredentialState>({
@@ -101,6 +150,8 @@ export const App = () => {
   const [pinInput, setPinInput] = useState('');
   const [pinStatus, setPinStatus] = useState<PinStatus>();
   const [persistenceStatus, setPersistenceStatus] = useState<PersistenceStatus>();
+  const [historyStatus, setHistoryStatus] = useState<HistoryStatus>();
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const persistencePending = persistenceStatus?.kind === 'pending';
   const parentPinSet = Boolean(parentCredentials.parentPin);
   const sessionContext: SessionContext = {
@@ -111,6 +162,7 @@ export const App = () => {
     profileId: parentCredentials.profileId,
     sessionId: sessionState.sessionId,
   };
+  const featureStateKey = `${sessionState.sessionId}:${sessionState.ageBand}`;
 
   useEffect(() => {
     setActiveTab(sessionState.tab);
@@ -124,6 +176,11 @@ export const App = () => {
       tab: activeTab,
     });
   }, [activeTab, sessionState.ageBand, sessionState.sessionId]);
+
+  useEffect(() => {
+    historyReadVersionRef.current += 1;
+    setHistoryStatus(undefined);
+  }, [sessionState.ageBand, sessionState.sessionId]);
 
   useEffect(() => {
     if (parentCredentials.parentModeUnlocked) {
@@ -184,9 +241,24 @@ export const App = () => {
     setParentCredentials((prev) => ({ ...prev, parentModeUnlocked: false }));
     setPinInput('');
     setPinStatus(undefined);
+    setConfirmDelete(false);
+  };
+
+  const clearRetainedParentCredential = () => {
+    historyReadVersionRef.current += 1;
+    setHistoryStatus(undefined);
+    setParentCredentials((prev) => ({
+      historyEnabled: false,
+      parentModeUnlocked: prev.parentModeUnlocked,
+      parentPin: prev.parentPin,
+      profileId: defaultProfileId,
+    }));
+    setConfirmDelete(false);
   };
 
   const updateAgeBand = async (ageBand: AgeBand) => {
+    historyReadVersionRef.current += 1;
+    setHistoryStatus(undefined);
     if (!parentCredentials.historyEnabled || !parentCredentials.parentAccessToken) {
       setSessionState((prev) => ({ ...prev, ageBand }));
       return;
@@ -200,12 +272,8 @@ export const App = () => {
         profileId: parentCredentials.profileId,
       });
       if (isStaleParentCredentialFailure(rawResult)) {
-        setParentCredentials((prev) => ({
-          historyEnabled: false,
-          parentModeUnlocked: prev.parentModeUnlocked,
-          parentPin: prev.parentPin,
-          profileId: defaultProfileId,
-        }));
+        clearRetainedParentCredential();
+        setHistoryStatus(undefined);
         throw new Error('Retained parent credential is no longer valid.');
       }
       const envelope = readToolEnvelope(rawResult);
@@ -227,6 +295,8 @@ export const App = () => {
 
   const updateHistoryConsent = async (enabled: boolean) => {
     if (persistencePending) return;
+    historyReadVersionRef.current += 1;
+    setHistoryStatus(undefined);
     setPinStatus(undefined);
 
     if (enabled) {
@@ -242,12 +312,8 @@ export const App = () => {
               profileId: parentCredentials.profileId,
             });
           if (isStaleParentCredentialFailure(rawResult)) {
-            setParentCredentials((prev) => ({
-              historyEnabled: false,
-              parentModeUnlocked: prev.parentModeUnlocked,
-              parentPin: prev.parentPin,
-              profileId: defaultProfileId,
-            }));
+            clearRetainedParentCredential();
+            setHistoryStatus(undefined);
             throw new Error('Retained parent credential is no longer valid.');
           }
           const envelope = readToolEnvelope(rawResult);
@@ -279,6 +345,7 @@ export const App = () => {
 
     if (!parentCredentials.parentAccessToken || parentCredentials.profileId === defaultProfileId) {
       setParentCredentials((prev) => ({ ...prev, historyEnabled: false }));
+      setHistoryStatus(undefined);
       return;
     }
 
@@ -295,10 +362,61 @@ export const App = () => {
       if (updateResult?.profileId !== parentCredentials.profileId || updateResult.historyEnabled !== false) {
         throw new Error('Unexpected profile update result.');
       }
+      historyReadVersionRef.current += 1;
       setParentCredentials((prev) => ({ ...prev, historyEnabled: false }));
+      setHistoryStatus(undefined);
       setPersistenceStatus({ kind: 'success', message: 'Saved history was purged.' });
     } catch {
       setPersistenceStatus({ kind: 'error', message: 'History could not be disabled.' });
+    }
+  };
+
+  const loadParentHistory = async () => {
+    if (
+      persistencePending ||
+      historyStatus?.kind === 'pending' ||
+      !parentCredentials.parentAccessToken ||
+      parentCredentials.profileId === defaultProfileId
+    ) {
+      return;
+    }
+    const historyReadVersion = historyReadVersionRef.current + 1;
+    historyReadVersionRef.current = historyReadVersion;
+    setHistoryStatus({ kind: 'pending' });
+    try {
+      const rawResult = await window.openai?.callTool?.('parent_history_list', {
+        limit: 25,
+        parentAccessToken: parentCredentials.parentAccessToken,
+        profileId: parentCredentials.profileId,
+      });
+      if (historyReadVersion !== historyReadVersionRef.current) return;
+      if (isStaleParentCredentialFailure(rawResult)) {
+        clearRetainedParentCredential();
+        setHistoryStatus({
+          kind: 'error',
+          message: 'Saved profile access expired. Enable history again to continue.',
+        });
+        return;
+      }
+      const envelope = readToolEnvelope(rawResult);
+      if (envelope.isError) throw new Error('Parent history request failed.');
+      const events = envelope.structuredContent.events;
+      if (
+        !Array.isArray(events) ||
+        !events.every(
+          (event) =>
+            isParentHistoryEvent(event) && event.profileId === parentCredentials.profileId,
+        )
+      ) {
+        throw new Error('Unexpected parent history result.');
+      }
+      setHistoryStatus({ events, kind: 'ready' });
+    } catch {
+      if (historyReadVersion !== historyReadVersionRef.current) return;
+      setHistoryStatus({
+        kind: 'error',
+        message: 'Saved activity could not be loaded. Please try again.',
+      });
     }
   };
 
@@ -311,6 +429,8 @@ export const App = () => {
       return;
     }
 
+    historyReadVersionRef.current += 1;
+    setHistoryStatus(undefined);
     const profileIdToDelete = parentCredentials.profileId;
     setPinStatus(undefined);
     setPersistenceStatus({ kind: 'pending', message: 'Deleting parent profile…' });
@@ -325,12 +445,15 @@ export const App = () => {
       if (deleteResult?.deleted !== true || deleteResult.profileId !== profileIdToDelete) {
         throw new Error('Unexpected profile delete result.');
       }
+      historyReadVersionRef.current += 1;
       setParentCredentials((prev) => ({
         ...prev,
         historyEnabled: false,
         parentAccessToken: undefined,
         profileId: defaultProfileId,
       }));
+      setHistoryStatus(undefined);
+      setConfirmDelete(false);
       setPersistenceStatus({ kind: 'success', message: 'Parent profile deleted.' });
     } catch {
       setPersistenceStatus({ kind: 'error', message: 'Profile could not be deleted.' });
@@ -341,6 +464,12 @@ export const App = () => {
     <div className="kidbot-app">
       <header className="kidbot-header">
         <h1>Kidbot Play Studio</h1>
+        <div className="transparency-note">
+          <p>Kidbot is an AI friend that helps you learn and play.</p>
+          <a href="/privacy" target="_blank" rel="noreferrer">
+            Read the Kidbot privacy policy
+          </a>
+        </div>
         <section className="parent-controls" aria-label="Parent controls">
           <div className="session-summary">
             <span>Age: {sessionState.ageBand}</span>
@@ -392,23 +521,88 @@ export const App = () => {
               </div>
               {parentCredentials.parentAccessToken &&
                 parentCredentials.profileId !== defaultProfileId && (
-                  <div className="delete-profile">
-                    <p id="delete-profile-description">
-                      Permanently deletes the parent profile and saved history.
-                    </p>
+                  <div className="saved-parent-data">
                     <button
-                      aria-describedby="delete-profile-description"
-                      className="danger-button"
-                      disabled={persistencePending}
                       type="button"
-                      onClick={() => {
-                        void deleteParentProfile();
-                      }}
+                      disabled={persistencePending || historyStatus?.kind === 'pending'}
+                      onClick={() => void loadParentHistory()}
                     >
-                      Delete parent profile
+                      {historyStatus?.kind === 'pending'
+                        ? 'Loading saved activity…'
+                        : 'View saved activity'}
                     </button>
+                    {historyStatus?.kind === 'pending' && (
+                      <p className="history-status" role="status">
+                        Loading saved activity…
+                      </p>
+                    )}
+                    {historyStatus?.kind === 'ready' && (
+                      <section
+                        aria-label="Saved activity"
+                        className="saved-activity"
+                      >
+                        <h3>Saved activity</h3>
+                        {historyStatus.events.length === 0 ? (
+                          <p>No saved activity yet.</p>
+                        ) : (
+                          <ul>
+                            {historyStatus.events.map((event) => (
+                              <li key={event.id}>
+                                <strong>{historyToolLabels[event.tool] ?? 'Kidbot activity'}</strong>
+                                <span>
+                                  Ages {event.ageBand} · {historyStatusLabels[event.status]}
+                                </span>
+                                <time dateTime={event.timestamp}>{event.timestamp}</time>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </section>
+                    )}
+                    <div className="delete-profile">
+                      <p id="delete-profile-description">
+                        Permanently deletes the parent profile and saved history.
+                      </p>
+                      {!confirmDelete ? (
+                        <button
+                          aria-describedby="delete-profile-description"
+                          className="danger-button"
+                          disabled={persistencePending}
+                          type="button"
+                          onClick={() => setConfirmDelete(true)}
+                        >
+                          Delete parent profile
+                        </button>
+                      ) : (
+                        <div className="delete-confirmation" role="group" aria-label="Confirm profile deletion">
+                          <p>Delete this parent profile and all saved activity?</p>
+                          <div className="control-row">
+                            <button
+                              type="button"
+                              disabled={persistencePending}
+                              onClick={() => setConfirmDelete(false)}
+                            >
+                              Cancel deletion
+                            </button>
+                            <button
+                              className="danger-button"
+                              type="button"
+                              disabled={persistencePending}
+                              onClick={() => void deleteParentProfile()}
+                            >
+                              Confirm delete parent profile
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
+              {historyStatus?.kind === 'error' && (
+                <p className="history-status error" role="alert">
+                  {historyStatus.message}
+                </p>
+              )}
             </div>
           ) : (
             <div className="control-row">
@@ -449,9 +643,10 @@ export const App = () => {
             </p>
           )}
         </section>
-        <nav>
+        <nav aria-label="Play studio activities">
           {tabs.map((tab) => (
             <button
+              aria-controls={`activity-${tab.key}`}
               aria-pressed={activeTab === tab.key}
               key={tab.key}
               className={activeTab === tab.key ? 'active' : ''}
@@ -467,10 +662,18 @@ export const App = () => {
         </nav>
       </header>
       <main>
-        {activeTab === 'voice' && <VoiceBar sessionContext={sessionContext} />}
-        {activeTab === 'comics' && <ComicBoard sessionContext={sessionContext} />}
-        {activeTab === 'coloring' && <ColoringBook sessionContext={sessionContext} />}
-        {activeTab === 'science' && <ScienceLab sessionContext={sessionContext} />}
+        <div id="activity-voice" className="feature-panel" hidden={activeTab !== 'voice'}>
+          <VoiceBar key={featureStateKey} active={activeTab === 'voice'} sessionContext={sessionContext} />
+        </div>
+        <div id="activity-comics" className="feature-panel" hidden={activeTab !== 'comics'}>
+          <ComicBoard key={featureStateKey} sessionContext={sessionContext} />
+        </div>
+        <div id="activity-coloring" className="feature-panel" hidden={activeTab !== 'coloring'}>
+          <ColoringBook key={featureStateKey} sessionContext={sessionContext} />
+        </div>
+        <div id="activity-science" className="feature-panel" hidden={activeTab !== 'science'}>
+          <ScienceLab key={featureStateKey} sessionContext={sessionContext} />
+        </div>
       </main>
     </div>
   );

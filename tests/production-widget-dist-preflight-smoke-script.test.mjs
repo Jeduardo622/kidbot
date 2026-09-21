@@ -24,6 +24,8 @@ test('production widget dist preflight validates health mode and built widget as
       return jsonResponse({
         ok: true,
         mode: 'dist',
+        agentService: { reachable: true, provider: 'openai', productionReady: true },
+        widgetArtifact: { distReady: true, productionReady: true },
         parentProfileStore: { mode: 'redis', ready: true },
       });
     }
@@ -38,12 +40,50 @@ test('production widget dist preflight validates health mode and built widget as
   assert.equal(result.ok, true);
   assert.equal(result.mcpBaseUrl, 'https://kidbot-mcp-server-production.up.railway.app');
   assert.equal(result.health.mode, 'dist');
+  assert.equal(result.health.agentProvider, 'openai');
+  assert.equal(result.health.agentProductionReady, true);
+  assert.equal(result.health.widgetProductionReady, true);
   assert.equal(result.health.parentProfileMode, 'redis');
   assert.equal(result.widget.builtAssetReference, 'assets/index-BYqblii3.js');
   assert.deepEqual(calls, [
     'https://kidbot-mcp-server-production.up.railway.app/healthz',
     'https://kidbot-mcp-server-production.up.railway.app/widget/',
   ]);
+});
+
+test('production widget dist preflight rejects stub or unreachable agent readiness', () => {
+  for (const agentService of [
+    { reachable: true, provider: 'stub', productionReady: false },
+    { reachable: false, productionReady: false },
+  ]) {
+    assert.throws(
+      () => assertWidgetDistPreflight({
+        health: {
+          ok: true,
+          mode: 'dist',
+          agentService,
+          widgetArtifact: { distReady: true, productionReady: true },
+        },
+        widgetHtml: '<script type="module" src="./assets/index-BYqblii3.js"></script>',
+      }),
+      /agent service is not production-ready/i,
+    );
+  }
+});
+
+test('production widget dist preflight rejects incomplete artifact readiness', () => {
+  assert.throws(
+    () => assertWidgetDistPreflight({
+      health: {
+        ok: true,
+        mode: 'dist',
+        agentService: { reachable: true, provider: 'openai', productionReady: true },
+        widgetArtifact: { distReady: false, productionReady: false },
+      },
+      widgetHtml: '<script type="module" src="./assets/index-BYqblii3.js"></script>',
+    }),
+    /widget artifact is not production-ready/i,
+  );
 });
 
 test('production widget dist preflight fails early when health reports fallback mode', () => {
@@ -61,7 +101,12 @@ test('production widget dist preflight fails early when widget HTML lacks built 
   assert.throws(
     () =>
       assertWidgetDistPreflight({
-        health: { ok: true, mode: 'dist' },
+        health: {
+          ok: true,
+          mode: 'dist',
+          agentService: { reachable: true, provider: 'openai', productionReady: true },
+          widgetArtifact: { distReady: true, productionReady: true },
+        },
         widgetHtml: '<script src="./kidbot-fallback.js"></script>',
       }),
     /does not reference a built assets\/index-\*\.js bundle/i,

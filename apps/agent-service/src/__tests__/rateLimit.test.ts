@@ -98,6 +98,18 @@ describe('rate limit stores', () => {
     ).toThrow(/RATE_LIMIT_STORE/i);
   });
 
+  it('requires Redis rate limiting in production', () => {
+    expect(() =>
+      createRateLimitStoreFromEnv({ NODE_ENV: 'production' }),
+    ).toThrow(/REDIS_URL is required/i);
+    expect(() =>
+      createRateLimitStoreFromEnv({
+        NODE_ENV: 'production',
+        RATE_LIMIT_STORE: 'memory',
+      }),
+    ).toThrow(/RATE_LIMIT_STORE must be redis in production/i);
+  });
+
   it('reports memory store readiness', async () => {
     const store = createMemoryRateLimitStore();
     await expect(store.readiness()).resolves.toEqual({ mode: 'memory', ready: true });

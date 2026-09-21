@@ -37,6 +37,14 @@ type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
 export interface ImageAssetStoreDeps {
   fetch?: FetchLike;
+  mkdir?: (directory: string) => Promise<void>;
+  randomUUID?: () => string;
+  rm?: (target: string) => Promise<void>;
+  writeFile?: (
+    target: string,
+    contents: string | Uint8Array,
+    options?: { signal?: AbortSignal },
+  ) => Promise<void>;
 }
 
 export class ImageAssetTooLargeError extends ProviderUnavailableError {
@@ -45,6 +53,20 @@ export class ImageAssetTooLargeError extends ProviderUnavailableError {
     this.name = 'ImageAssetTooLargeError';
   }
 }
+
+export const defaultMaxGeneratedImageBytes = 2_500_000;
+
+export const decodeBoundedImageBase64 = (base64: string, maxBytes: number): Buffer => {
+  const maxEncodedLength = Math.ceil(maxBytes / 3) * 4;
+  if (base64.length > maxEncodedLength) {
+    throw new ImageAssetTooLargeError();
+  }
+  const bytes = Buffer.from(base64, 'base64');
+  if (bytes.byteLength > maxBytes) {
+    throw new ImageAssetTooLargeError();
+  }
+  return bytes;
+};
 
 const parsePositiveInteger = (name: string, value: string | undefined, fallback: number) => {
   const parsed = Number(value ?? fallback);
@@ -101,6 +123,9 @@ export const parseImageAssetStorageConfig = (
   if (mode !== 'data-url' && mode !== 'local' && mode !== 'supabase') {
     throw new Error('KIDBOT_IMAGE_STORAGE_MODE must be data-url, local, or supabase.');
   }
+  if (env.NODE_ENV === 'production' && mode === 'data-url') {
+    throw new Error('KIDBOT_IMAGE_STORAGE_MODE=data-url is not allowed in production.');
+  }
 
   const supabaseUrl =
     mode === 'supabase'
@@ -136,7 +161,11 @@ export const parseImageAssetStorageConfig = (
     mode,
     directory: env.KIDBOT_IMAGE_STORAGE_DIR?.trim() || '.kidbot/generated-images',
     publicBaseUrl,
-    maxBytes: parsePositiveInteger('KIDBOT_IMAGE_MAX_BYTES', env.KIDBOT_IMAGE_MAX_BYTES, 2_500_000),
+    maxBytes: parsePositiveInteger(
+      'KIDBOT_IMAGE_MAX_BYTES',
+      env.KIDBOT_IMAGE_MAX_BYTES,
+      defaultMaxGeneratedImageBytes,
+    ),
     ttlMs: ttlSeconds * 1_000,
     ...(mode === 'supabase'
       ? {
@@ -184,7 +213,7 @@ const supabaseHeaders = (config: ImageAssetStorageConfig, extra?: Record<string,
 
 export interface ImageAssetStore {
   readonly config: ImageAssetStorageConfig;
-  storePngBase64(base64: string): Promise<string>;
+  storePngBase64(base64: string, signal?: AbortSignal): Promise<string>;
 }
 
 export const createImageAssetStore = (
@@ -192,14 +221,11 @@ export const createImageAssetStore = (
   deps: ImageAssetStoreDeps = {},
 ): ImageAssetStore => ({
   config,
-  async storePngBase64(base64) {
+  async storePngBase64(base64, signal) {
+    signal?.throwIfAborted();
+    const bytes = decodeBoundedImageBase64(base64, config.maxBytes);
     if (config.mode === 'data-url') {
       return `data:image/png;base64,${base64}`;
-    }
-
-    const bytes = Buffer.from(base64, 'base64');
-    if (bytes.byteLength > config.maxBytes) {
-      throw new ImageAssetTooLargeError();
     }
 
     if (config.mode === 'supabase') {
@@ -216,7 +242,8 @@ export const createImageAssetStore = (
             'Cache-Control': `max-age=${Math.max(1, Math.floor(config.ttlMs / 1_000))}`,
             'x-upsert': 'false',
           }),
-          body: bytes,
+          body: new Uint8Array(bytes),
+          signal,
         },
       );
       if (!response.ok) {
@@ -225,12 +252,33 @@ export const createImageAssetStore = (
       return joinPublicObjectUrl(config.publicBaseUrl, objectPath);
     }
 
-    await mkdir(config.directory, { recursive: true });
-    const filename = `${randomUUID()}.png`;
+    const mkdirImpl = deps.mkdir ?? (async (directory: string) => {
+      await mkdir(directory, { recursive: true });
+    });
+    const writeFileImpl = deps.writeFile ?? (async (
+      target: string,
+      contents: string | Uint8Array,
+      options?: { signal?: AbortSignal },
+    ) => {
+      await writeFile(target, contents, { signal: options?.signal });
+    });
+    const rmImpl = deps.rm ?? (async (target: string) => {
+      await rm(target, { force: true });
+    });
+    await mkdirImpl(config.directory);
+    signal?.throwIfAborted();
+    const filename = `${(deps.randomUUID ?? randomUUID)()}.png`;
     const fullPath = path.join(config.directory, filename);
+    const markerPath = `${fullPath}.expires`;
     const expiresAt = Date.now() + config.ttlMs;
-    await writeFile(fullPath, bytes);
-    await writeFile(`${fullPath}.expires`, String(expiresAt));
+    try {
+      await writeFileImpl(fullPath, bytes, { signal });
+      signal?.throwIfAborted();
+      await writeFileImpl(markerPath, String(expiresAt), { signal });
+    } catch (error) {
+      await Promise.allSettled([rmImpl(fullPath), rmImpl(markerPath)]);
+      throw error;
+    }
     return joinPublicUrl(config.publicBaseUrl, filename);
   },
 });

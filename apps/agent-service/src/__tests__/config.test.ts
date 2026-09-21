@@ -11,6 +11,8 @@ describe('agent-service provider mode', () => {
       OPENAI_API_KEY: 'sk-test-key',
     });
     expect(config.providerMode).toBe('openai');
+    expect(config.requestTimeoutMs).toBe(30_000);
+    expect(config.storyRequestTimeoutMs).toBe(180_000);
   });
 
   it('refuses to start in production without a provider key', () => {
@@ -25,14 +27,39 @@ describe('agent-service provider mode', () => {
     ).toThrow(/OPENAI_API_KEY is required/);
   });
 
-  it('allows stub mode only with an explicit opt-in', () => {
-    expect(
+  it('rejects explicit stub mode in production', () => {
+    expect(() =>
       parseAgentServiceConfig({
         NODE_ENV: 'production',
         AGENT_SERVICE_TOKEN: token,
         KIDBOT_STUB_PROVIDER: '1',
-      }).providerMode,
-    ).toBe('stub');
+      }),
+    ).toThrow(/KIDBOT_STUB_PROVIDER=1 is not allowed in production/i);
+  });
+
+  it('parses bounded route-level request deadlines', () => {
+    const config = parseAgentServiceConfig({
+      NODE_ENV: 'test',
+      AGENT_SERVICE_TOKEN: token,
+      AGENT_REQUEST_TIMEOUT_MS: '25000',
+      AGENT_STORY_REQUEST_TIMEOUT_MS: '150000',
+    });
+    expect(config.requestTimeoutMs).toBe(25_000);
+    expect(config.storyRequestTimeoutMs).toBe(150_000);
+    expect(() => parseAgentServiceConfig({
+      NODE_ENV: 'test',
+      AGENT_SERVICE_TOKEN: token,
+      AGENT_STORY_REQUEST_TIMEOUT_MS: '600001',
+    })).toThrow(/AGENT_STORY_REQUEST_TIMEOUT_MS must not exceed 600000/i);
+    expect(() => parseAgentServiceConfig({
+      NODE_ENV: 'test',
+      AGENT_SERVICE_TOKEN: token,
+      AGENT_REQUEST_TIMEOUT_MS: '40000',
+      AGENT_STORY_REQUEST_TIMEOUT_MS: '30000',
+    })).toThrow(/AGENT_STORY_REQUEST_TIMEOUT_MS must be at least AGENT_REQUEST_TIMEOUT_MS/i);
+  });
+
+  it('allows stub mode only in test or explicit local fallback posture', () => {
     expect(
       parseAgentServiceConfig({ NODE_ENV: 'test', AGENT_SERVICE_TOKEN: token }).providerMode,
     ).toBe('stub');
