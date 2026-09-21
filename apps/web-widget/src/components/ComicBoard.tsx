@@ -9,6 +9,8 @@ import { isSpeechPlaybackAvailable, speakText, stopSpeaking } from '../utils/voi
 
 interface ComicBoardProps {
   sessionContext?: SessionContext;
+  /** False while another tab is showing; narration stops when it flips false. */
+  active?: boolean;
   onSaveToScrapbook?: (draft: ScrapbookDraft) => void;
 }
 
@@ -57,6 +59,7 @@ const SkeletonPanels = ({ count }: { count: number }) => (
 
 export const ComicBoard = ({
   sessionContext = defaultSessionContext,
+  active = true,
   onSaveToScrapbook,
 }: ComicBoardProps) => {
   const [theme, setTheme] = useState('A brave turtle shares snacks');
@@ -80,7 +83,13 @@ export const ComicBoard = ({
     readyMessage: panels.length > 0 ? `Planned ${panels.length} panels.` : '',
   });
 
-  useEffect(() => () => stopSpeaking(), []);
+  useEffect(() => {
+    if (!active) {
+      stopSpeaking();
+      setSpeaking(false);
+    }
+    return () => stopSpeaking();
+  }, [active]);
 
   const handlePlan = async () => {
     stopSpeaking();

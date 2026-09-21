@@ -181,10 +181,15 @@ export const VoiceBar = ({ sessionContext = defaultSessionContext, active = true
     setCaptureError(undefined);
     setBlocked(undefined);
     setLastReply(undefined);
-    const history = transcript.slice(-HISTORY_TURNS);
+    const boundedQuestion = question.slice(0, TEXT_MAX);
+    // Replayed turns must satisfy the schema cap even when a reply or a
+    // dictated question ran long.
+    const history = transcript
+      .slice(-HISTORY_TURNS)
+      .map((turn) => ({ role: turn.role, text: turn.text.slice(0, TEXT_MAX) }));
     const outcome = await tool.run({
       ...sessionContext,
-      text: question.slice(0, TEXT_MAX),
+      text: boundedQuestion,
       persona,
       ...(history.length > 0 ? { history } : {}),
     });
@@ -194,7 +199,7 @@ export const VoiceBar = ({ sessionContext = defaultSessionContext, active = true
       if (reply.text) {
         const replyText = reply.text;
         const turns: TranscriptTurn[] = [
-          { role: 'child', text: question },
+          { role: 'child', text: boundedQuestion },
           { role: 'kidbot', text: replyText },
         ];
         setTranscript((prev) => [...prev, ...turns].slice(-TRANSCRIPT_TURNS));

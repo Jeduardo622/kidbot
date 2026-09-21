@@ -89,4 +89,17 @@ describe('VoiceBar conversation transcript and persona voices', () => {
     expect(screen.queryByRole('list', { name: 'Conversation' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Replay' })).toBeNull();
   });
+
+  it('bounds replayed history turns to the schema cap even after a long reply', async () => {
+    render(<VoiceBar />);
+    const longReply = 'A'.repeat(400);
+    await ask('Tell me everything', longReply);
+    await ask('And then?', 'Short.');
+
+    const lastInput = callTool.mock.calls[1]?.[1] as { history: Array<{ text: string }> };
+    expect(lastInput.history).toHaveLength(2);
+    expect(lastInput.history[1]?.text).toHaveLength(280);
+    expect(lastInput.history[1]?.text).toBe(longReply.slice(0, 280));
+    expect(screen.getByRole('list', { name: 'Conversation' }).textContent).toContain(longReply);
+  });
 });

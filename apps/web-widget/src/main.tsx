@@ -691,7 +691,7 @@ export const App = () => {
         </div>
         <div id="activity-comics" className="feature-panel" hidden={activeTab !== 'comics'}>
           <ActivityErrorBoundary activity="Comic Storyboard">
-            <ComicBoard key={featureStateKey} sessionContext={sessionContext} onSaveToScrapbook={saveToScrapbook} />
+            <ComicBoard key={featureStateKey} active={activeTab === 'comics'} sessionContext={sessionContext} onSaveToScrapbook={saveToScrapbook} />
           </ActivityErrorBoundary>
         </div>
         <div id="activity-coloring" className="feature-panel" hidden={activeTab !== 'coloring'}>

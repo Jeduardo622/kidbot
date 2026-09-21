@@ -121,4 +121,18 @@ describe('ComicBoard continuation, narration, and saving', () => {
     expect(container.querySelector('.blocked')).toBeTruthy();
     expect(container.querySelector('.error')).toBeNull();
   });
+
+  it('stops narration when the tab becomes inactive', async () => {
+    const { rerender } = render(<ComicBoard active />);
+    await planStory();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Read to me' }));
+    expect(speak).toHaveBeenCalledTimes(1);
+    cancel.mockClear();
+
+    rerender(<ComicBoard active={false} />);
+    expect(cancel).toHaveBeenCalled();
+    rerender(<ComicBoard active />);
+    expect(screen.getByRole('button', { name: 'Read to me' })).toBeTruthy();
+  });
 });

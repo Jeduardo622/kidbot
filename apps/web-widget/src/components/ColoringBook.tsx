@@ -302,6 +302,9 @@ export const ColoringBook = ({
   const applyStarter = (svg: string, title: string) => {
     const sanitized = sanitizeSvgOutline(svg);
     if (!sanitized) return;
+    // A still-pending Get Outline must not overwrite the starter (and wipe
+    // the child's strokes) when it eventually resolves.
+    tool.cancel();
     tool.reset();
     setBlocked(undefined);
     setOutline(sanitized);
