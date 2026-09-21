@@ -1,5 +1,9 @@
 import { randomUUID } from 'crypto';
-import { applyModerationRules, type LocalModerationResult } from './moderationRules.js';
+import {
+  applyModerationRules,
+  type ApplyModerationOptions,
+  type LocalModerationResult,
+} from './moderationRules.js';
 import { ModerationFailureError, type ModelProvider } from './provider.js';
 import type { AgeBand } from './types.js';
 
@@ -8,12 +12,24 @@ export const safeSystemPrompt = `You are Kidbot, a cheerful guide for kids. Keep
 export type ModerationResult = LocalModerationResult;
 
 /**
- * Local, synchronous moderation. Only unambiguous, word-bounded terms block
- * here; see moderationRules.ts. Everything context dependent is left to the
- * provider moderation call in moderateAsync.
+ * Local, synchronous moderation. By default only unambiguous, word-bounded
+ * terms block here; see moderationRules.ts. Everything context dependent is
+ * left to the provider moderation call in moderateAsync. Pass
+ * `{ strict: true }` (or use moderateWithoutProvider) on any path where no
+ * provider moderation will run.
  */
-export const moderate = (text: string | undefined | null): ModerationResult =>
-  applyModerationRules(text);
+export const moderate = (
+  text: string | undefined | null,
+  options: ApplyModerationOptions = {},
+): ModerationResult => applyModerationRules(text, options);
+
+/**
+ * Moderation for stub, fallback, and provider-failure paths. There is no
+ * contextual judge behind these, so the strict local tier applies and
+ * over-blocking is accepted.
+ */
+export const moderateWithoutProvider = (text: string | undefined | null): ModerationResult =>
+  applyModerationRules(text, { strict: true });
 
 /**
  * Provider moderation category thresholds by age band. The provider returns
@@ -83,8 +99,11 @@ export const moderateAsync = async (
   provider?: ModelProvider,
   ageBand: AgeBand = DEFAULT_AGE_BAND,
 ): Promise<ModerationResult> => {
+  if (!provider) {
+    return moderateWithoutProvider(text);
+  }
   const local = moderate(text);
-  if (local.blocked || !text?.trim() || !provider) {
+  if (local.blocked || !text?.trim()) {
     return local;
   }
 

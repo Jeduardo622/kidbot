@@ -1,8 +1,8 @@
 import { Resvg } from '@resvg/resvg-js';
 import {
   exceedsAgeBandThreshold,
-  moderate,
   moderateAsync,
+  moderateWithoutProvider,
   safeSystemPrompt,
 } from '../guardrails.js';
 import {
@@ -126,7 +126,7 @@ export function generateColoringOutline(
     return generateColoringOutlineWithProvider(request, provider);
   }
 
-  const sceneModeration = moderate(request.scene);
+  const sceneModeration = moderateWithoutProvider(request.scene);
   if (sceneModeration.blocked) {
     return { blocked: true, message: sceneModeration.message };
   }
@@ -134,7 +134,7 @@ export function generateColoringOutline(
   const svg = svgTemplate();
   const validated = validateColoringSvg(svg);
   const safeSvg = validated.svg ?? safeFallbackSvg();
-  const svgModeration = moderate(safeSvg);
+  const svgModeration = moderateWithoutProvider(safeSvg);
   if (svgModeration.blocked) {
     return { blocked: true, message: svgModeration.message };
   }

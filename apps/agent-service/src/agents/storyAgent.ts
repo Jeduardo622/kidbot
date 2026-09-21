@@ -2,8 +2,8 @@ import type { AgeBand, StoryPanel, StoryRequest, StoryResponse } from '../types.
 import {
   exceedsAgeBandThreshold,
   kidTone,
-  moderate,
   moderateAsync,
+  moderateWithoutProvider,
   safeSystemPrompt,
 } from '../guardrails.js';
 import {
@@ -247,13 +247,13 @@ export function planStory(
     return planStoryWithProvider(request, provider, options);
   }
 
-  const inputModeration = moderate(request.theme);
+  const inputModeration = moderateWithoutProvider(request.theme);
   if (inputModeration.blocked) {
     return { blocked: true, message: inputModeration.message };
   }
 
   const panels = createPanels(request);
-  const outputModeration = moderate(panels.map((panel) => panel.caption).join(' '));
+  const outputModeration = moderateWithoutProvider(panels.map((panel) => panel.caption).join(' '));
   if (outputModeration.blocked) {
     return { blocked: true, message: outputModeration.message };
   }

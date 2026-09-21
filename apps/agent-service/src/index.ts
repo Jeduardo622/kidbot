@@ -11,7 +11,7 @@ import { planStory } from './agents/storyAgent.js';
 import { planExperiment } from './agents/experimentAgent.js';
 import { parseAgentServiceConfig } from './config.js';
 import { resolveFixturesDir } from './fixtures.js';
-import { correlationId, moderate } from './guardrails.js';
+import { correlationId, moderateWithoutProvider } from './guardrails.js';
 import {
   ProviderError,
   ProviderUnavailableError,
@@ -273,7 +273,7 @@ const readFixtureText = (relativePath: string, fallback: string): string => {
 };
 
 const stubVoice = (payload: VoiceRequest) => {
-  const inputModeration = moderate(payload.text);
+  const inputModeration = moderateWithoutProvider(payload.text);
   if (inputModeration.blocked) {
     return { blocked: true, message: inputModeration.message, source: 'stub' as const };
   }
@@ -299,7 +299,7 @@ const stubVoice = (payload: VoiceRequest) => {
 };
 
 const stubStory = (payload: StoryRequest) => {
-  const inputModeration = moderate(payload.theme);
+  const inputModeration = moderateWithoutProvider(payload.theme);
   if (inputModeration.blocked) {
     return { blocked: true, message: inputModeration.message, source: 'stub' as const };
   }
@@ -324,7 +324,7 @@ const stubStory = (payload: StoryRequest) => {
 };
 
 const stubColoring = (payload: ColoringRequest) => {
-  const inputModeration = moderate(payload.scene);
+  const inputModeration = moderateWithoutProvider(payload.scene);
   if (inputModeration.blocked) {
     return { blocked: true, message: inputModeration.message, source: 'stub' as const };
   }
@@ -342,7 +342,7 @@ const stubColoring = (payload: ColoringRequest) => {
 };
 
 const stubScience = (payload: ScienceRequest) => {
-  const inputModeration = moderate(payload.topic);
+  const inputModeration = moderateWithoutProvider(payload.topic);
   if (inputModeration.blocked) {
     return { blocked: true, message: inputModeration.message, source: 'stub' as const };
   }

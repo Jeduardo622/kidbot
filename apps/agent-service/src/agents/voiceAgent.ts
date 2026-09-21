@@ -1,4 +1,4 @@
-import { kidTone, moderate, moderateAsync, safeSystemPrompt } from '../guardrails.js';
+import { kidTone, moderateAsync, moderateWithoutProvider, safeSystemPrompt } from '../guardrails.js';
 import { MalformedOutputError, UnsafeOutputError, type ModelProvider } from '../provider.js';
 import type { Persona, VoiceRequest, VoiceResponse } from '../types.js';
 
@@ -79,13 +79,13 @@ export function craftVoiceReply(
     return craftVoiceReplyWithProvider(request, provider);
   }
 
-  const inputModeration = moderate(request.text);
+  const inputModeration = moderateWithoutProvider(request.text);
   if (inputModeration.blocked) {
     return { blocked: true, message: inputModeration.message };
   }
 
   const { text, ssml } = buildSpeech(request);
-  const outputModeration = moderate(text);
+  const outputModeration = moderateWithoutProvider(text);
   if (outputModeration.blocked) {
     return { blocked: true, message: outputModeration.message };
   }

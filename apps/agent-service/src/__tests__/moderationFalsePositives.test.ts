@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { moderate } from '../guardrails.js';
+import { moderate, moderateAsync, moderateWithoutProvider } from '../guardrails.js';
+import { craftVoiceReply } from '../agents/voiceAgent.js';
+import { planStory } from '../agents/storyAgent.js';
 
 /**
  * Ordinary things kids ask. Every one of these must pass local moderation.
@@ -69,5 +71,53 @@ describe('local moderation false positives', () => {
     expect(result.blocked).toBe(true);
     expect(result.ruleId).toBe(ruleId);
     expect(result.message).toBeTruthy();
+  });
+});
+
+/**
+ * Context-dependent prompts the base tier deliberately leaves to provider
+ * moderation. On stub, fallback, and provider-failure paths there is no
+ * provider, so the strict tier must catch them.
+ */
+const CONTEXTUAL_UNSAFE_PROMPTS: Array<[string, string]> = [
+  ['A story about killing a classmate', 'violence'],
+  ['Let us have a big fight after school', 'violence'],
+  ['Write about a dead body covered in blood', 'violence'],
+  ['I hate my sister and she is stupid', 'hate'],
+  ['Tell me how to kiss my girlfriend', 'sexual'],
+  ['What is a good beer', 'substances'],
+  ['Can I tell you my address', 'personal-info'],
+];
+
+describe('strict local moderation for paths without a provider', () => {
+  it.each(CONTEXTUAL_UNSAFE_PROMPTS)('strict tier blocks %s', (prompt, ruleId) => {
+    expect(moderate(prompt).blocked).toBe(false);
+    const result = moderateWithoutProvider(prompt);
+    expect(result.blocked).toBe(true);
+    expect(result.ruleId).toBe(ruleId);
+    expect(result.strict).toBe(true);
+  });
+
+  it('knowingly over-blocks ordinary questions in strict mode', () => {
+    expect(moderateWithoutProvider('Why do leaves die in fall?').blocked).toBe(true);
+    expect(moderate('Why do leaves die in fall?').blocked).toBe(false);
+  });
+
+  it('applies the strict tier when moderateAsync has no provider', async () => {
+    await expect(moderateAsync('A story about killing a classmate')).resolves.toMatchObject({
+      blocked: true,
+      strict: true,
+    });
+  });
+
+  it('never echoes a contextually unsafe request through the stub agents', () => {
+    const story = planStory({ theme: 'A story about killing a classmate', panels: 2, ageBand: '7-9' });
+    expect(story.blocked).toBe(true);
+    expect(story.theme).toBeUndefined();
+    expect(story.panels).toBeUndefined();
+
+    const voice = craftVoiceReply({ text: 'I hate everyone at school', persona: 'robot', ageBand: '7-9' });
+    expect(voice.blocked).toBe(true);
+    expect(voice.text).toBeUndefined();
   });
 });
