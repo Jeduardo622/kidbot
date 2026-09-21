@@ -40,6 +40,10 @@ const buildPanelCaption = (
   return `${intro}, ${theme.toLowerCase()} (${toneNote.toLowerCase()})`.slice(0, 160);
 };
 
+/** Theme plus the continuation caption, moderated together as one input. */
+export const storyModerationInput = (request: StoryRequest): string =>
+  request.continueFrom ? `${request.theme}\n${request.continueFrom}` : request.theme;
+
 const createPanels = (request: StoryRequest): StoryPanel[] => {
   const tone = kidTone(request.ageBand ?? '7-9');
   const prompts = [
@@ -186,7 +190,7 @@ const planStoryWithProvider = async (
   provider: ModelProvider,
   options: StoryGenerationOptions = {},
 ): Promise<StoryResponse> => {
-  const inputModeration = await moderateAsync(request.theme, provider, request.ageBand);
+  const inputModeration = await moderateAsync(storyModerationInput(request), provider, request.ageBand);
   if (inputModeration.blocked) {
     return { blocked: true, message: inputModeration.message };
   }
@@ -197,7 +201,9 @@ const planStoryWithProvider = async (
     system: safeSystemPrompt,
     user: [
       'Return only JSON with this shape: {"panels":[{"title":"","caption":"","imagePrompt":"","imageUrl":null}]}',
-      `Create exactly ${request.panels} coherent comic panels with a clear beginning, middle, and ending.`,
+      request.continueFrom
+        ? `Continue an existing story with exactly ${request.panels} new comic panels that pick up right after this moment: "${request.continueFrom}". Keep the same characters and end on a satisfying note.`
+        : `Create exactly ${request.panels} coherent comic panels with a clear beginning, middle, and ending.`,
       `Theme: ${request.theme}`,
       `Tone: ${tone.sentenceLength}; ${tone.vocabulary}`,
       'Keep it age-appropriate. Avoid scary, violent, romantic, adult, or personal-data content.',
@@ -247,7 +253,7 @@ export function planStory(
     return planStoryWithProvider(request, provider, options);
   }
 
-  const inputModeration = moderateWithoutProvider(request.theme);
+  const inputModeration = moderateWithoutProvider(storyModerationInput(request));
   if (inputModeration.blocked) {
     return { blocked: true, message: inputModeration.message };
   }

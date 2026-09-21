@@ -50,7 +50,7 @@ describe('ComicBoard artwork rendering', () => {
     ).toBe(true);
     expect(within(panel).queryByRole('img', { name: 'friendly dragon in a cozy cave' })).toBeNull();
     expect(within(panel).getByText('Dara peeks out.')).toBeTruthy();
-    expect(within(panel).getByText('friendly dragon in a cozy cave')).toBeTruthy();
+    expect(within(panel).queryByText('friendly dragon in a cozy cave')).toBeNull();
   });
 
   it('renders a real imageUrl as an image with stable prompt-based alt text', async () => {

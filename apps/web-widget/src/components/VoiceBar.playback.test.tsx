@@ -56,7 +56,7 @@ describe('VoiceBar speech playback', () => {
 
     render(<VoiceBar />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Speak' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
 
     await waitFor(() => {
       expect(speak).toHaveBeenCalledTimes(1);
@@ -83,7 +83,7 @@ describe('VoiceBar speech playback', () => {
 
     render(<VoiceBar />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Speak' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
 
     await waitFor(() => {
       expect(screen.getAllByText('Kidbot paused this request.').length).toBeGreaterThan(0);
@@ -102,7 +102,7 @@ describe('VoiceBar speech playback', () => {
 
     render(<VoiceBar />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Speak' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
 
     await waitFor(() => {
       expect(
@@ -126,7 +126,7 @@ describe('VoiceBar speech playback', () => {
 
     render(<VoiceBar />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Speak' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
 
     await screen.findByText('Space fact ready!');
     expect(screen.queryByRole('button', { name: 'Replay' })).not.toBeNull();

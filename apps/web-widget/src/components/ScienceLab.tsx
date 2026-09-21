@@ -1,118 +1,182 @@
 import { useState } from 'react';
 import { LiveRegion } from './LiveRegion.js';
 import { buildAnnouncementState } from '../utils/announcementState.js';
-import {
-  degradedMessage,
-  errorMessage,
-  unavailableMessageFromError,
-} from '../utils/degradation.js';
+import type { ScrapbookDraft } from '../utils/scrapbook.js';
 import { defaultSessionContext, type SessionContext } from '../utils/sessionContext.js';
-import {
-  isScienceResult,
-  readStructuredContent,
-  type ScienceResult,
-} from '../utils/toolResult.js';
+import { isScienceResult, type ScienceResult } from '../utils/toolResult.js';
+import { useToolCall } from '../utils/useToolCall.js';
 
-const topics = ['Buoyancy', 'Magnetism', 'Rainbows', 'Plant Growth'];
+export const suggestedTopics = [
+  'Buoyancy',
+  'Magnetism',
+  'Rainbows',
+  'Plant Growth',
+  'Static electricity',
+  'Baking soda volcano',
+  'Shadows and light',
+  'Melting ice',
+];
+
+const TOPIC_MIN = 3;
+const TOPIC_MAX = 120;
 
 interface ScienceLabProps {
   sessionContext?: SessionContext;
+  onSaveToScrapbook?: (draft: ScrapbookDraft) => void;
 }
 
-export const ScienceLab = ({ sessionContext = defaultSessionContext }: ScienceLabProps) => {
+export const ScienceLab = ({
+  sessionContext = defaultSessionContext,
+  onSaveToScrapbook,
+}: ScienceLabProps) => {
   const [topic, setTopic] = useState('Buoyancy');
   const [plan, setPlan] = useState<ScienceResult | undefined>();
-  const [error, setError] = useState<string | undefined>();
-  const [unavailable, setUnavailable] = useState<string | undefined>();
-  const [loading, setLoading] = useState(false);
+  const [blocked, setBlocked] = useState<string | undefined>();
   const [selectedChoice, setSelectedChoice] = useState<number | undefined>();
   const [showExplanation, setShowExplanation] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
   const [predictionReady, setPredictionReady] = useState(false);
+  const [observation, setObservation] = useState('');
+  const [saved, setSaved] = useState(false);
+  const tool = useToolCall<ScienceResult>('science_sim', isScienceResult, {
+    blockedFallback: 'Kidbot paused this experiment.',
+  });
+  const trimmedTopic = topic.trim();
+  const topicValid = trimmedTopic.length >= TOPIC_MIN && trimmedTopic.length <= TOPIC_MAX;
   const announcement = buildAnnouncementState({
-    loading,
+    loading: tool.loading,
     loadingMessage: 'Kidbot is preparing your science experiment.',
-    errorMessage: error,
-    urgentMessage: unavailable,
-    readyMessage: plan && !plan.blocked ? `${plan.title ?? 'Experiment'} ready.` : '',
+    errorMessage: tool.error,
+    urgentMessage: tool.unavailable ?? blocked,
+    readyMessage: plan ? `${plan.title ?? 'Experiment'} ready.` : '',
   });
 
-  const fetchPlan = async () => {
-    setLoading(true);
-    setError(undefined);
-    setUnavailable(undefined);
-    setPlan(undefined);
+  const resetProgress = () => {
     setShowExplanation(false);
     setSelectedChoice(undefined);
     setCurrentStep(0);
     setPredictionReady(false);
-    try {
-      const result = readStructuredContent(await window.openai?.callTool?.('science_sim', {
-        ...sessionContext,
-        topic,
-      }), isScienceResult);
-      const unavailableMessage = degradedMessage(result);
-      if (unavailableMessage) {
-        setUnavailable(unavailableMessage);
-      } else if (result.blocked) {
-        setPlan(undefined);
-        setError(result.message ?? 'Kidbot paused this experiment.');
-      } else {
-        setPlan(result);
-        setPredictionReady((result.steps?.length ?? 0) === 0);
-      }
-    } catch (err) {
-      setPlan(undefined);
-      const unavailableMessage = unavailableMessageFromError(err);
-      if (unavailableMessage) {
-        setUnavailable(unavailableMessage);
-      } else {
-        setError(errorMessage(err));
-      }
-    } finally {
-      setLoading(false);
+    setObservation('');
+    setSaved(false);
+  };
+
+  const fetchPlan = async () => {
+    if (!topicValid) return;
+    setPlan(undefined);
+    setBlocked(undefined);
+    resetProgress();
+    const outcome = await tool.run({ ...sessionContext, topic: trimmedTopic });
+    if (outcome.kind === 'ok') {
+      setPlan(outcome.result);
+      setPredictionReady((outcome.result.steps?.length ?? 0) === 0);
+    } else if (outcome.kind === 'blocked') {
+      setBlocked(outcome.message);
     }
   };
 
+  const wasCorrect =
+    plan?.prediction !== undefined && selectedChoice === plan.prediction.answerIndex;
+
+  const saveExperiment = () => {
+    if (!plan?.prediction || selectedChoice === undefined || !onSaveToScrapbook) return;
+    onSaveToScrapbook({
+      kind: 'experiment',
+      title: plan.title ?? trimmedTopic,
+      prediction: plan.prediction.choices[selectedChoice] ?? '',
+      wasCorrect,
+      explanation: plan.explanation ?? '',
+      ...(observation.trim() ? { observation: observation.trim() } : {}),
+    });
+    setSaved(true);
+  };
+
+  const steps = plan?.steps ?? [];
+
   return (
-    <section className="panel science-lab" aria-busy={loading}>
+    <section className="panel science-lab" aria-busy={tool.loading}>
       <h2>Science Lab</h2>
       <LiveRegion message={announcement.message} isAlert={announcement.isAlert} />
       <div className="control-row">
         <label htmlFor="topic">Topic</label>
-        <select id="topic" value={topic} onChange={(event) => setTopic(event.target.value)}>
-          {topics.map((item) => (
-            <option key={item} value={item}>
-              {item}
-            </option>
+        <input
+          id="topic"
+          list="topic-ideas"
+          maxLength={TOPIC_MAX}
+          placeholder="What do you want to explore?"
+          value={topic}
+          onChange={(event) => setTopic(event.target.value)}
+        />
+        <datalist id="topic-ideas">
+          {suggestedTopics.map((item) => (
+            <option key={item} value={item} />
           ))}
-        </select>
+        </datalist>
         <span className="locked-age">Age: {sessionContext.ageBand}</span>
-        <button type="button" onClick={fetchPlan} disabled={loading}>
-          {loading ? 'Mixing...' : 'Generate Experiment'}
+        <button type="button" onClick={() => void fetchPlan()} disabled={tool.loading || !topicValid}>
+          {tool.loading ? 'Mixing...' : 'Generate Experiment'}
         </button>
       </div>
-      {error && <p className="error">{error}</p>}
-      {unavailable && <p className="degraded">{unavailable}</p>}
-      {plan && !plan.blocked && (
+      <div className="topic-chips" aria-label="Topic ideas">
+        {suggestedTopics.slice(0, 4).map((item) => (
+          <button
+            key={item}
+            type="button"
+            className="chip"
+            aria-pressed={trimmedTopic.toLowerCase() === item.toLowerCase()}
+            onClick={() => setTopic(item)}
+          >
+            {item}
+          </button>
+        ))}
+      </div>
+      {!topicValid && trimmedTopic.length > 0 && (
+        <p className="hint">Topics need at least {TOPIC_MIN} letters.</p>
+      )}
+      {tool.error && <p className="error">{tool.error}</p>}
+      {tool.unavailable && <p className="degraded">{tool.unavailable}</p>}
+      {blocked && <p className="blocked">{blocked}</p>}
+      {plan && (
         <article className="experiment-card">
           <h3>{plan.title}</h3>
+          {plan.supervision && (
+            <p className="supervision" role="note">
+              <strong>Grown-up check:</strong> {plan.supervision}
+            </p>
+          )}
           <p className="objective">Objective: {plan.objective}</p>
           {plan.materials && (
             <div>
               <h4>Materials</h4>
               <ul>
-                {plan.materials.map((item) => (
-                  <li key={item}>{item}</li>
+                {plan.materials.map((item, index) => (
+                  <li key={`${index}-${item}`}>{item}</li>
                 ))}
               </ul>
             </div>
           )}
-          {plan.steps && plan.steps.length > 0 && !predictionReady && (
+          {steps.length > 0 && (
+            <ol className="step-track" aria-label="Experiment progress">
+              {steps.map((_, index) => {
+                const done = predictionReady || index < currentStep;
+                const current = !predictionReady && index === currentStep;
+                return (
+                  <li
+                    key={index}
+                    className={done ? 'done' : current ? 'current' : ''}
+                    aria-current={current ? 'step' : undefined}
+                    aria-label={`Step ${index + 1}${done ? ', done' : current ? ', in progress' : ''}`}
+                  >
+                    {done ? '✓' : index + 1}
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+          {steps.length > 0 && !predictionReady && (
             <div className="experiment-step">
               <h4>Steps</h4>
-              <p className="step-progress">Step {currentStep + 1} of {plan.steps.length}</p>
-              <p>{plan.steps[currentStep]}</p>
+              <p className="step-progress">Step {currentStep + 1} of {steps.length}</p>
+              <p>{steps[currentStep]}</p>
               <div className="step-actions">
                 <button
                   type="button"
@@ -121,7 +185,7 @@ export const ScienceLab = ({ sessionContext = defaultSessionContext }: ScienceLa
                 >
                   Previous step
                 </button>
-                {currentStep < plan.steps.length - 1 ? (
+                {currentStep < steps.length - 1 ? (
                   <button type="button" onClick={() => setCurrentStep((step) => step + 1)}>
                     Next step
                   </button>
@@ -137,7 +201,7 @@ export const ScienceLab = ({ sessionContext = defaultSessionContext }: ScienceLa
             <div className="prediction">
               <h4>Prediction</h4>
               <p>{plan.prediction.question}</p>
-              {plan.steps && plan.steps.length > 0 && (
+              {steps.length > 0 && (
                 <button
                   type="button"
                   onClick={() => {
@@ -152,7 +216,7 @@ export const ScienceLab = ({ sessionContext = defaultSessionContext }: ScienceLa
                 {plan.prediction.choices.map((choice, index) => (
                   <button
                     aria-pressed={selectedChoice === index}
-                    key={choice}
+                    key={`${index}-${choice}`}
                     type="button"
                     className={selectedChoice === index ? 'selected' : ''}
                     onClick={() => {
@@ -164,6 +228,9 @@ export const ScienceLab = ({ sessionContext = defaultSessionContext }: ScienceLa
                   </button>
                 ))}
               </div>
+              {selectedChoice === undefined && (
+                <p className="hint">Pick your guess first, then reveal what happens.</p>
+              )}
               <button
                 type="button"
                 disabled={selectedChoice === undefined}
@@ -172,16 +239,31 @@ export const ScienceLab = ({ sessionContext = defaultSessionContext }: ScienceLa
                 Reveal explanation
               </button>
               {showExplanation && plan.explanation && (
-                <p className="explanation">
-                  {plan.explanation}{' '}
-                  {selectedChoice === plan.prediction.answerIndex
-                    ? '✅ Great prediction!'
-                    : "Let's explore why!"}
-                </p>
+                <>
+                  <p className="explanation">
+                    {plan.explanation}{' '}
+                    {wasCorrect ? '✅ Great prediction!' : "Let's explore why!"}
+                  </p>
+                  <div className="observation">
+                    <label htmlFor="observation">What did you see when you tried it?</label>
+                    <textarea
+                      id="observation"
+                      rows={2}
+                      maxLength={280}
+                      placeholder="The orange floated!"
+                      value={observation}
+                      onChange={(event) => setObservation(event.target.value)}
+                    />
+                  </div>
+                  {onSaveToScrapbook && (
+                    <button type="button" disabled={saved} onClick={saveExperiment}>
+                      {saved ? 'Saved to My Creations' : 'Save to My Creations'}
+                    </button>
+                  )}
+                </>
               )}
             </div>
           )}
-          {plan.supervision && <p className="supervision">Supervision: {plan.supervision}</p>}
         </article>
       )}
     </section>

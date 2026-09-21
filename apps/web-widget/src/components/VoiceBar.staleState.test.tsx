@@ -20,7 +20,7 @@ describe('VoiceBar stale-state handling', () => {
     delete (window as { openai?: unknown }).openai;
   });
 
-  it('clears a previous successful response when a later request fails', async () => {
+  it('keeps the transcript but clears the replay control when a later request fails', async () => {
     callTool.mockResolvedValueOnce(hostResult({
       blocked: false,
       persona: 'robot',
@@ -30,22 +30,24 @@ describe('VoiceBar stale-state handling', () => {
 
     render(<VoiceBar />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Speak' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
     await screen.findByText('Space fact ready!');
     expect(screen.queryByRole('button', { name: 'Replay' })).not.toBeNull();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Speak' }));
+    fireEvent.change(screen.getByLabelText('Your question or story idea'), { target: { value: 'Another?' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
     await waitFor(() => {
-      expect(screen.queryAllByText('Unauthorized').length).toBeGreaterThan(0);
+      expect(screen.queryAllByText('Something went wrong. Please try again.').length).toBeGreaterThan(0);
+      expect(screen.queryAllByText('Unauthorized').length).toBe(0);
     });
 
     await waitFor(() => {
-      expect(screen.queryByText('Space fact ready!')).toBeNull();
       expect(screen.queryByRole('button', { name: 'Replay' })).toBeNull();
     });
+    expect(screen.getByText('Space fact ready!')).toBeTruthy();
   });
 
-  it('shows blocked feedback as an alert and hides previous success UI', async () => {
+  it('shows blocked feedback as an alert and hides the replay control', async () => {
     callTool.mockResolvedValueOnce(hostResult({
       blocked: false,
       persona: 'robot',
@@ -58,18 +60,19 @@ describe('VoiceBar stale-state handling', () => {
 
     render(<VoiceBar />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Speak' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
     await screen.findByText('A happy moon fact.');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Speak' }));
+    fireEvent.change(screen.getByLabelText('Your question or story idea'), { target: { value: 'Something else' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
     await waitFor(() => {
       expect(screen.queryAllByText('KidBot paused this request.').length).toBeGreaterThan(0);
     });
 
     await waitFor(() => {
-      expect(screen.queryByText('A happy moon fact.')).toBeNull();
       expect(screen.queryByRole('button', { name: 'Replay' })).toBeNull();
     });
+    expect(screen.getByText('A happy moon fact.')).toBeTruthy();
   });
 
   it('shows provider degradation as unavailable instead of a safety block', async () => {
@@ -82,7 +85,7 @@ describe('VoiceBar stale-state handling', () => {
 
     render(<VoiceBar />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Speak' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
 
     await waitFor(() => {
       expect(
@@ -100,7 +103,7 @@ describe('VoiceBar stale-state handling', () => {
 
     render(<VoiceBar />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Speak' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ask' }));
 
     await waitFor(() => {
       expect(

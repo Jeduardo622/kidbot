@@ -42,7 +42,8 @@ describe('ComicBoard stale-state handling', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Plan Panels' }));
     await waitFor(() => {
-      expect(screen.queryAllByText('Unauthorized').length).toBeGreaterThan(0);
+      expect(screen.queryAllByText('Something went wrong. Please try again.').length).toBeGreaterThan(0);
+      expect(screen.queryAllByText('Unauthorized').length).toBe(0);
     });
 
     await waitFor(() => {

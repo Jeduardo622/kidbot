@@ -1,6 +1,8 @@
 export const SERVICE_UNAVAILABLE_MESSAGE =
   'Kidbot is having trouble reaching its idea engine right now. Please try again in a moment.';
 
+export const GENERIC_ERROR_MESSAGE = 'Something went wrong. Please try again.';
+
 export interface DegradedResult {
   degraded?: boolean;
   message?: string;
@@ -20,12 +22,28 @@ const messageFromError = (error: unknown): string | undefined => {
   }
 };
 
+/**
+ * Messages the widget itself authored (see toolResult.ts). Only these, plus
+ * the timeout mapping, are ever shown to a child. Anything else, including
+ * bridge, network, or auth diagnostics, collapses to GENERIC_ERROR_MESSAGE
+ * and is logged for the developer instead.
+ */
+const CHILD_SAFE_MESSAGES = new Set([
+  'Widget bridge returned an invalid result.',
+  'Kidbot returned an invalid result. Please try again.',
+  'Kidbot could not complete this request. Please try again.',
+  'Kidbot is busy with another request. Please try again shortly.',
+  'Too many requests. Please try again shortly.',
+  'This request timed out. Please try again.',
+]);
+
+const RETRY_AFTER_PATTERN = /^Too many requests\. Try again in \d+ seconds\.$/;
+
 const safeBridgeMessage = (message: string): string | undefined => {
   if (/request timed out|took too long/i.test(message)) {
     return 'This request timed out. Please try again.';
   }
-  if (message === 'Widget bridge returned an invalid result.') return message;
-  if (message === 'Kidbot returned an invalid result. Please try again.') return message;
+  if (CHILD_SAFE_MESSAGES.has(message) || RETRY_AFTER_PATTERN.test(message)) return message;
   return undefined;
 };
 
@@ -38,7 +56,17 @@ export const unavailableMessageFromError = (error: unknown): string | undefined 
   return undefined;
 };
 
-export const errorMessage = (error: unknown): string =>
-  error instanceof Error
-    ? (error.message || 'Something went wrong.')
-    : safeBridgeMessage(messageFromError(error) ?? '') ?? 'Something went wrong.';
+/**
+ * Child-facing message for any thrown value. Raw diagnostics never reach the
+ * screen; they go to the console so a developer can still see them.
+ */
+export const errorMessage = (error: unknown): string => {
+  const raw = messageFromError(error);
+  const safe = raw ? safeBridgeMessage(raw) : undefined;
+  if (safe) return safe;
+  if (raw) {
+    // eslint-disable-next-line no-console
+    console.error('[kidbot] tool call failed:', raw);
+  }
+  return GENERIC_ERROR_MESSAGE;
+};

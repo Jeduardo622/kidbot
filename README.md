@@ -232,9 +232,13 @@ GitHub Actions also includes the manual `Production Parent Store Smoke` workflow
 
 ### Voice Playback Boundary
 
-The widget currently uses browser `speechSynthesis` for local voice playback. Realtime STT/TTS should be integrated behind the widget voice playback boundary so the existing `voice_chat` tool contract and child-safety flow remain unchanged.
+The widget currently uses browser `speechSynthesis` for local voice playback, with a per-persona rate and pitch preset (`personaVoicePresets` in `apps/web-widget/src/utils/voicePlayback.ts`) and a Stop control. The Voice tab keeps a short on-screen transcript and replays up to the last six turns as `history` on `voice_chat`, which both services moderate together with the new question. Realtime STT/TTS should be integrated behind the widget voice playback boundary so the existing `voice_chat` tool contract and child-safety flow remain unchanged.
 Voice input currently uses browser speech recognition where available and writes captured text into the existing prompt box. Future Realtime STT/TTS should replace the internals behind the voice capture/playback utilities, not the `voice_chat` contract.
 Browser speech recognition may ask for microphone permission; unsupported browsers continue to use typed input.
+
+### Session Scrapbook
+
+The "My Creations" tab keeps stories, coloring pages (composited PNG data URLs), and finished experiments in React memory for the life of the widget. Nothing in it is written to host widget state or the server; it is capped at 24 items and cleared on reload. Story panels can be continued with `continueFrom` (the last caption) on `story_panels`, and the Coloring Corner ships six built-in starter outlines plus a bucket fill that stops at outline lines.
 
 ### Story Panel Artwork Boundary
 

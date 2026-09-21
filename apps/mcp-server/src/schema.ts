@@ -35,14 +35,23 @@ const sessionMetadataSchema = z.object({
   parentAccessToken: z.string().max(256).optional()
 });
 
+export const voiceHistoryTurnSchema = z.object({
+  role: z.enum(['child', 'kidbot']),
+  text: z.string().min(1).max(280),
+}).strict();
+
 export const voiceInputSchema = z.object({
   text: z.string().min(1).max(280),
   persona: personaSchema,
+  /** Recent turns of this conversation, oldest first, so replies stay in context. */
+  history: z.array(voiceHistoryTurnSchema).max(6).optional(),
 }).merge(sessionMetadataSchema);
 
 export const storyPanelsSchema = z.object({
   theme: z.string().min(3).max(120),
   panels: z.number().int().min(2).max(8),
+  /** Caption of the last panel already shown, when the child asks what happens next. */
+  continueFrom: z.string().min(3).max(240).optional(),
 }).merge(sessionMetadataSchema);
 
 export const coloringOutlineSchema = z.object({
