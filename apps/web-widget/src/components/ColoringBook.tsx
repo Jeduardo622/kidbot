@@ -3,7 +3,9 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { EmptyState } from './EmptyState.js';
 import { LiveRegion } from './LiveRegion.js';
+import { ageBandPresentation } from '../utils/ageBand.js';
 import { sanitizeSvgOutline } from '../utils/svgSanitizer.js';
 import { buildAnnouncementState } from '../utils/announcementState.js';
 import {
@@ -73,8 +75,9 @@ export const ColoringBook = ({
   const [outline, setOutline] = useState<string | undefined>();
   const [outlineTitle, setOutlineTitle] = useState<string>('My coloring page');
   const [blocked, setBlocked] = useState<string | undefined>();
+  const presentation = ageBandPresentation(sessionContext.ageBand);
   const [brushColor, setBrushColor] = useState(PALETTE[0]?.hex ?? '#2563eb');
-  const [brushSize, setBrushSize] = useState(8);
+  const [brushSize, setBrushSize] = useState(presentation.brushSize);
   const [activeTool, setActiveTool] = useState<Tool>('brush');
   const [ops, setOps] = useState<ColoringOp[]>([]);
   const [saveStatus, setSaveStatus] = useState<
@@ -379,6 +382,18 @@ export const ColoringBook = ({
       {tool.error && <p className="error">{tool.error}</p>}
       {tool.unavailable && <p className="degraded">{tool.unavailable}</p>}
       {blocked && <p className="blocked">{blocked}</p>}
+      {!outline && !hasWork && !tool.loading && starters[0] && (
+        <EmptyState
+          icon="🖍️"
+          title="Pick a page to color!"
+          hint={presentation.greeting}
+          actionLabel={`Color the ${starters[0].title.toLowerCase()}`}
+          onAction={() => {
+            const first = starters[0];
+            if (first) applyStarter(first.svg, first.title);
+          }}
+        />
+      )}
       <div className="coloring-stage">
         <div className={`canvas-wrapper tool-${activeTool}`}>
           <canvas
@@ -427,22 +442,26 @@ export const ColoringBook = ({
               />
             ))}
           </div>
-          <label htmlFor="color">More colors</label>
-          <input
-            id="color"
-            type="color"
-            value={brushColor}
-            onChange={(event) => setBrushColor(event.target.value)}
-          />
-          <label htmlFor="brush">Brush size</label>
-          <input
-            id="brush"
-            type="range"
-            min={2}
-            max={24}
-            value={brushSize}
-            onChange={(event) => setBrushSize(Number(event.target.value))}
-          />
+          {!presentation.simplified && (
+            <>
+              <label htmlFor="color">More colors</label>
+              <input
+                id="color"
+                type="color"
+                value={brushColor}
+                onChange={(event) => setBrushColor(event.target.value)}
+              />
+              <label htmlFor="brush">Brush size</label>
+              <input
+                id="brush"
+                type="range"
+                min={2}
+                max={24}
+                value={brushSize}
+                onChange={(event) => setBrushSize(Number(event.target.value))}
+              />
+            </>
+          )}
           <button type="button" onClick={handleUndo} disabled={!hasWork}>
             Undo
           </button>
