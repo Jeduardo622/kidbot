@@ -20,6 +20,7 @@ import {
   type AgeBand,
   type SessionContext,
 } from './utils/sessionContext.js';
+import { ageBandPresentation } from './utils/ageBand.js';
 import { isStaleParentCredentialFailure, readToolEnvelope } from './utils/toolResult.js';
 import './styles.css';
 
@@ -34,6 +35,9 @@ const tabs: Array<{ key: TabKey; label: string; icon: string }> = [
 ];
 
 const defaultProfileId = 'local-default';
+const PIN_MAX_ATTEMPTS = 5;
+const PIN_LOCK_MS = 60_000;
+const PIN_LOCK_MESSAGE = 'Too many tries. Parent controls are locked for 60 seconds.';
 
 interface PersistedWidgetState {
   ageBand: AgeBand;
@@ -145,6 +149,19 @@ const isParentHistoryEvent = (value: unknown): value is ParentHistoryEvent => {
   );
 };
 
+const summarizeHistory = (events: ParentHistoryEvent[]): string => {
+  const byTool = new Map<string, number>();
+  let paused = 0;
+  for (const event of events) {
+    const label = historyToolLabels[event.tool] ?? 'Other';
+    byTool.set(label, (byTool.get(label) ?? 0) + 1);
+    if (event.status === 'blocked') paused += 1;
+  }
+  const parts = [...byTool.entries()].map(([label, count]) => `${label} ${count}`);
+  parts.push(`Paused for safety ${paused}`);
+  return parts.join(' · ');
+};
+
 export const App = () => {
   const historyConsentRef = useRef<HTMLInputElement>(null);
   const historyReadVersionRef = useRef(0);
@@ -163,7 +180,14 @@ export const App = () => {
   const removeFromScrapbook = (id: string) => {
     setScrapbook((prev) => removeScrapbookItem(prev, id));
   };
+  const selectTab = (key: TabKey) => {
+    setActiveTab(key);
+    setSessionState((prev) => ({ ...prev, tab: key }));
+  };
   const [pinInput, setPinInput] = useState('');
+  const [pinConfirmInput, setPinConfirmInput] = useState('');
+  const [pinAttempts, setPinAttempts] = useState(0);
+  const [pinLockedUntil, setPinLockedUntil] = useState<number | undefined>();
   const [pinStatus, setPinStatus] = useState<PinStatus>();
   const [persistenceStatus, setPersistenceStatus] = useState<PersistenceStatus>();
   const [historyStatus, setHistoryStatus] = useState<HistoryStatus>();
@@ -179,6 +203,37 @@ export const App = () => {
     sessionId: sessionState.sessionId,
   };
   const featureStateKey = `${sessionState.sessionId}:${sessionState.ageBand}`;
+  const presentation = ageBandPresentation(sessionState.ageBand);
+  const pinLocked = pinLockedUntil !== undefined && pinLockedUntil > Date.now();
+
+  useEffect(() => {
+    if (pinLockedUntil === undefined) return;
+    const remaining = pinLockedUntil - Date.now();
+    if (remaining <= 0) {
+      setPinLockedUntil(undefined);
+      setPinStatus(undefined);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setPinLockedUntil(undefined);
+      setPinStatus(undefined);
+    }, remaining);
+    return () => window.clearTimeout(timer);
+  }, [pinLockedUntil]);
+
+  // The age scale sets --kb-font-scale, but the only rule that consumes it for
+  // general type is `font-size` on :root, which is computed before any
+  // descendant override. Mirroring the band onto the document element is what
+  // makes every rem-based size actually grow for younger children.
+  useEffect(() => {
+    const documentRoot = document.documentElement;
+    documentRoot.setAttribute('data-age-band', sessionState.ageBand);
+    documentRoot.setAttribute('data-age-scale', presentation.scale);
+    return () => {
+      documentRoot.removeAttribute('data-age-band');
+      documentRoot.removeAttribute('data-age-scale');
+    };
+  }, [sessionState.ageBand, presentation.scale]);
 
   useEffect(() => {
     setActiveTab(sessionState.tab);
@@ -227,29 +282,52 @@ export const App = () => {
   };
 
   const handleParentSubmit = async () => {
+    if (pinLocked) {
+      setPinStatus({ kind: 'error', message: PIN_LOCK_MESSAGE });
+      return;
+    }
     if (!/^\d{4}$/.test(pinInput)) {
       setPinStatus({ kind: 'error', message: 'Enter a 4-digit PIN.' });
       return;
     }
 
     if (!parentPinSet) {
+      if (pinConfirmInput !== pinInput) {
+        setPinStatus({ kind: 'error', message: 'The two PINs did not match. Please type the same PIN twice.' });
+        return;
+      }
       setParentCredentials((prev) => ({
         ...prev,
         parentModeUnlocked: true,
         parentPin: pinInput,
       }));
       setPinInput('');
+      setPinConfirmInput('');
+      setPinAttempts(0);
       setPinStatus({ kind: 'success', message: 'Parent controls unlocked.' });
       return;
     }
 
     if (pinInput !== parentCredentials.parentPin) {
-      setPinStatus({ kind: 'error', message: 'PIN did not match.' });
+      const attempts = pinAttempts + 1;
+      setPinInput('');
+      if (attempts >= PIN_MAX_ATTEMPTS) {
+        setPinAttempts(0);
+        setPinLockedUntil(Date.now() + PIN_LOCK_MS);
+        setPinStatus({ kind: 'error', message: PIN_LOCK_MESSAGE });
+        return;
+      }
+      setPinAttempts(attempts);
+      setPinStatus({
+        kind: 'error',
+        message: `PIN did not match. ${PIN_MAX_ATTEMPTS - attempts} tries left.`,
+      });
       return;
     }
 
     setParentCredentials((prev) => ({ ...prev, parentModeUnlocked: true }));
     setPinInput('');
+    setPinAttempts(0);
     setPinStatus({ kind: 'success', message: 'Parent controls unlocked.' });
   };
 
@@ -477,7 +555,7 @@ export const App = () => {
   };
 
   return (
-    <div className="kidbot-app">
+    <div className="kidbot-app" data-age-band={sessionState.ageBand} data-age-scale={presentation.scale}>
       <header className="kidbot-header">
         <h1>Kidbot Play Studio</h1>
         <div className="transparency-note">
@@ -558,6 +636,11 @@ export const App = () => {
                         className="saved-activity"
                       >
                         <h3>Saved activity</h3>
+                        {historyStatus.events.length > 0 && (
+                          <p className="history-summary">
+                            {summarizeHistory(historyStatus.events)}
+                          </p>
+                        )}
                         {historyStatus.events.length === 0 ? (
                           <p>No saved activity yet.</p>
                         ) : (
@@ -621,23 +704,45 @@ export const App = () => {
               )}
             </div>
           ) : (
-            <div className="control-row">
-              <label htmlFor="parent-pin">
-                {parentPinSet ? 'Parent PIN' : 'Create parent PIN'}
-              </label>
-              <input
-                ref={parentPinRef}
-                id="parent-pin"
-                inputMode="numeric"
-                maxLength={4}
-                pattern="[0-9]*"
-                type="password"
-                value={pinInput}
-                onChange={(event) => setPinInput(event.target.value.replace(/\D/g, '').slice(0, 4))}
-              />
-              <button type="button" onClick={handleParentSubmit}>
-                {parentPinSet ? 'Unlock Parent Controls' : 'Set Parent PIN'}
-              </button>
+            <div className="pin-entry">
+              <div className="control-row">
+                <label htmlFor="parent-pin">
+                  {parentPinSet ? 'Parent PIN' : 'Create parent PIN'}
+                </label>
+                <input
+                  ref={parentPinRef}
+                  id="parent-pin"
+                  inputMode="numeric"
+                  maxLength={4}
+                  pattern="[0-9]*"
+                  type="password"
+                  disabled={pinLocked}
+                  value={pinInput}
+                  onChange={(event) => setPinInput(event.target.value.replace(/\D/g, '').slice(0, 4))}
+                />
+                {!parentPinSet && (
+                  <>
+                    <label htmlFor="parent-pin-confirm">Confirm PIN</label>
+                    <input
+                      id="parent-pin-confirm"
+                      inputMode="numeric"
+                      maxLength={4}
+                      pattern="[0-9]*"
+                      type="password"
+                      value={pinConfirmInput}
+                      onChange={(event) =>
+                        setPinConfirmInput(event.target.value.replace(/\D/g, '').slice(0, 4))
+                      }
+                    />
+                  </>
+                )}
+                <button type="button" disabled={pinLocked} onClick={handleParentSubmit}>
+                  {parentPinSet ? 'Unlock Parent Controls' : 'Set Parent PIN'}
+                </button>
+              </div>
+              <p className="hint pin-hint">
+                The PIN only lasts for this play session and is never stored. Reloading clears it.
+              </p>
             </div>
           )}
           {pinStatus && (
@@ -659,17 +764,32 @@ export const App = () => {
             </p>
           )}
         </section>
-        <nav aria-label="Play studio activities">
-          {tabs.map((tab) => (
+        <nav aria-label="Play studio activities" role="tablist">
+          {tabs.map((tab, index) => (
             <button
               aria-controls={`activity-${tab.key}`}
-              aria-pressed={activeTab === tab.key}
+              aria-selected={activeTab === tab.key}
+              id={`tab-${tab.key}`}
               key={tab.key}
               className={activeTab === tab.key ? 'active' : ''}
+              role="tab"
+              tabIndex={activeTab === tab.key ? 0 : -1}
               type="button"
-              onClick={() => {
-                setActiveTab(tab.key);
-                setSessionState((prev) => ({ ...prev, tab: tab.key }));
+              onClick={() => selectTab(tab.key)}
+              onKeyDown={(event) => {
+                const delta = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+                if (delta === 0 && event.key !== 'Home' && event.key !== 'End') return;
+                event.preventDefault();
+                const nextIndex =
+                  event.key === 'Home'
+                    ? 0
+                    : event.key === 'End'
+                      ? tabs.length - 1
+                      : (index + delta + tabs.length) % tabs.length;
+                const next = tabs[nextIndex];
+                if (!next) return;
+                selectTab(next.key);
+                document.getElementById(`tab-${next.key}`)?.focus();
               }}
             >
               <span className="tab-icon" aria-hidden="true">{tab.icon}</span>
@@ -684,27 +804,27 @@ export const App = () => {
         </nav>
       </header>
       <main>
-        <div id="activity-voice" className="feature-panel" hidden={activeTab !== 'voice'}>
+        <div id="activity-voice" className="feature-panel" role="tabpanel" aria-labelledby="tab-voice" hidden={activeTab !== 'voice'}>
           <ActivityErrorBoundary activity="Voice Playground">
             <VoiceBar key={featureStateKey} active={activeTab === 'voice'} sessionContext={sessionContext} />
           </ActivityErrorBoundary>
         </div>
-        <div id="activity-comics" className="feature-panel" hidden={activeTab !== 'comics'}>
+        <div id="activity-comics" className="feature-panel" role="tabpanel" aria-labelledby="tab-comics" hidden={activeTab !== 'comics'}>
           <ActivityErrorBoundary activity="Comic Storyboard">
             <ComicBoard key={featureStateKey} active={activeTab === 'comics'} sessionContext={sessionContext} onSaveToScrapbook={saveToScrapbook} />
           </ActivityErrorBoundary>
         </div>
-        <div id="activity-coloring" className="feature-panel" hidden={activeTab !== 'coloring'}>
+        <div id="activity-coloring" className="feature-panel" role="tabpanel" aria-labelledby="tab-coloring" hidden={activeTab !== 'coloring'}>
           <ActivityErrorBoundary activity="Coloring Corner">
             <ColoringBook key={featureStateKey} sessionContext={sessionContext} onSaveToScrapbook={saveToScrapbook} />
           </ActivityErrorBoundary>
         </div>
-        <div id="activity-science" className="feature-panel" hidden={activeTab !== 'science'}>
+        <div id="activity-science" className="feature-panel" role="tabpanel" aria-labelledby="tab-science" hidden={activeTab !== 'science'}>
           <ActivityErrorBoundary activity="Science Lab">
             <ScienceLab key={featureStateKey} sessionContext={sessionContext} onSaveToScrapbook={saveToScrapbook} />
           </ActivityErrorBoundary>
         </div>
-        <div id="activity-creations" className="feature-panel" hidden={activeTab !== 'creations'}>
+        <div id="activity-creations" className="feature-panel" role="tabpanel" aria-labelledby="tab-creations" hidden={activeTab !== 'creations'}>
           <ActivityErrorBoundary activity="My Creations">
             <Scrapbook items={scrapbook} onRemove={removeFromScrapbook} />
           </ActivityErrorBoundary>

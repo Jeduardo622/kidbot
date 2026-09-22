@@ -1,21 +1,12 @@
 import { useState } from 'react';
+import { EmptyState } from './EmptyState.js';
 import { LiveRegion } from './LiveRegion.js';
+import { ageBandPresentation } from '../utils/ageBand.js';
 import { buildAnnouncementState } from '../utils/announcementState.js';
 import type { ScrapbookDraft } from '../utils/scrapbook.js';
 import { defaultSessionContext, type SessionContext } from '../utils/sessionContext.js';
 import { isScienceResult, type ScienceResult } from '../utils/toolResult.js';
 import { useToolCall } from '../utils/useToolCall.js';
-
-export const suggestedTopics = [
-  'Buoyancy',
-  'Magnetism',
-  'Rainbows',
-  'Plant Growth',
-  'Static electricity',
-  'Baking soda volcano',
-  'Shadows and light',
-  'Melting ice',
-];
 
 const TOPIC_MIN = 3;
 const TOPIC_MAX = 120;
@@ -29,7 +20,9 @@ export const ScienceLab = ({
   sessionContext = defaultSessionContext,
   onSaveToScrapbook,
 }: ScienceLabProps) => {
-  const [topic, setTopic] = useState('Buoyancy');
+  const presentation = ageBandPresentation(sessionContext.ageBand);
+  const topics = presentation.scienceTopics;
+  const [topic, setTopic] = useState(topics[0] ?? 'Buoyancy');
   const [plan, setPlan] = useState<ScienceResult | undefined>();
   const [blocked, setBlocked] = useState<string | undefined>();
   const [selectedChoice, setSelectedChoice] = useState<number | undefined>();
@@ -97,17 +90,19 @@ export const ScienceLab = ({
       <h2>Science Lab</h2>
       <LiveRegion message={announcement.message} isAlert={announcement.isAlert} />
       <div className="control-row">
-        <label htmlFor="topic">Topic</label>
+        <label htmlFor="topic" className={presentation.simplified ? 'sr-only' : ''}>Topic</label>
         <input
           id="topic"
+          className={presentation.simplified ? 'sr-only' : ''}
           list="topic-ideas"
           maxLength={TOPIC_MAX}
           placeholder="What do you want to explore?"
+          readOnly={presentation.simplified}
           value={topic}
           onChange={(event) => setTopic(event.target.value)}
         />
         <datalist id="topic-ideas">
-          {suggestedTopics.map((item) => (
+          {topics.map((item) => (
             <option key={item} value={item} />
           ))}
         </datalist>
@@ -117,7 +112,7 @@ export const ScienceLab = ({
         </button>
       </div>
       <div className="topic-chips" aria-label="Topic ideas">
-        {suggestedTopics.slice(0, 4).map((item) => (
+        {topics.slice(0, presentation.simplified ? 4 : 6).map((item) => (
           <button
             key={item}
             type="button"
@@ -135,6 +130,16 @@ export const ScienceLab = ({
       {tool.error && <p className="error">{tool.error}</p>}
       {tool.unavailable && <p className="degraded">{tool.unavailable}</p>}
       {blocked && <p className="blocked">{blocked}</p>}
+      {!plan && !tool.loading && !blocked && !tool.error && !tool.unavailable && (
+        <EmptyState
+          icon="🧪"
+          title="Try an experiment!"
+          hint={presentation.greeting}
+          actionLabel={`Explore ${trimmedTopic || topics[0] || 'science'}`}
+          onAction={() => void fetchPlan()}
+          disabled={!topicValid}
+        />
+      )}
       {plan && (
         <article className="experiment-card">
           <h3>{plan.title}</h3>

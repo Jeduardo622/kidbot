@@ -1,13 +1,98 @@
 :root {
-  color-scheme: light;
-  font-family: 'Comic Neue', 'Baloo 2', 'Inter', sans-serif;
-  background: #f3f4ff;
-  color: #0f172a;
+  color-scheme: light dark;
+  /* Rounded system faces; the ChatGPT iframe CSP blocks font hosts, so nothing is fetched. */
+  font-family: 'Segoe UI Rounded', 'Nunito', 'Quicksand', ui-rounded, 'Segoe UI', system-ui, sans-serif;
+  --kb-ground: #f3f4ff;
+  --kb-ground-gradient: radial-gradient(circle, #eef2ff 0%, #e0f2fe 100%);
+  --kb-paper: #ffffffdd;
+  --kb-paper-solid: #ffffff;
+  --kb-card: #f8fafc;
+  --kb-card-edge: #e0f2fe;
+  --kb-ink: #0f172a;
+  --kb-ink-muted: #475569;
+  --kb-ink-soft: #334155;
+  --kb-accent: #2563eb;
+  --kb-accent-ink: #1e3a8a;
+  --kb-accent-soft: #e0e7ff;
+  --kb-accent-soft-strong: #c7d2fe;
+  --kb-info-soft: #e0f2fe;
+  --kb-info-ink: #075985;
+  --kb-field: #f8fafc;
+  --kb-field-edge: #c7d2fe;
+  --kb-bubble: #f1f5f9;
+  --kb-bubble-child: #dbeafe;
+  --kb-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
+  --kb-ok-ink: #166534;
+  --kb-danger-ink: #b91c1c;
+  --kb-error-ink: #dc2626;
+  --kb-pending-ink: #075985;
+  --kb-font-scale: 1;
+  --kb-target: 44px;
+  background: var(--kb-ground);
+  color: var(--kb-ink);
+  font-size: calc(1rem * var(--kb-font-scale));
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --kb-ground: #0f1420;
+    --kb-ground-gradient: radial-gradient(circle, #151b2b 0%, #0f1420 100%);
+    --kb-paper: #1a2130ee;
+    --kb-paper-solid: #1a2130;
+    --kb-card: #222b3d;
+    --kb-card-edge: #2f3b52;
+    --kb-ink: #e8ecf4;
+    --kb-ink-muted: #aab4c6;
+    --kb-ink-soft: #c3ccdc;
+    --kb-accent: #8fa6ff;
+    --kb-accent-ink: #dbe3ff;
+    --kb-accent-soft: #283452;
+    --kb-accent-soft-strong: #34446c;
+    --kb-info-soft: #1e2d3f;
+    --kb-info-ink: #9dd3f5;
+    --kb-field: #141a28;
+    --kb-field-edge: #3a4a6e;
+    --kb-bubble: #222b3d;
+    --kb-bubble-child: #24365a;
+    --kb-ok-ink: #6fcf97;
+    --kb-danger-ink: #f7a19a;
+    --kb-error-ink: #f7a19a;
+    --kb-pending-ink: #8fd0f5;
+    --kb-shadow: 0 12px 24px rgba(0, 0, 0, 0.45);
+  }
+}
+
+:root[data-theme='dark'] {
+  --kb-ground: #0f1420;
+  --kb-ground-gradient: radial-gradient(circle, #151b2b 0%, #0f1420 100%);
+  --kb-paper: #1a2130ee;
+  --kb-paper-solid: #1a2130;
+  --kb-card: #222b3d;
+  --kb-card-edge: #2f3b52;
+  --kb-ink: #e8ecf4;
+  --kb-ink-muted: #aab4c6;
+  --kb-ink-soft: #c3ccdc;
+  --kb-accent: #8fa6ff;
+  --kb-accent-ink: #dbe3ff;
+  --kb-accent-soft: #283452;
+  --kb-accent-soft-strong: #34446c;
+  --kb-info-soft: #1e2d3f;
+  --kb-info-ink: #9dd3f5;
+  --kb-field: #141a28;
+  --kb-field-edge: #3a4a6e;
+  --kb-bubble: #222b3d;
+  --kb-bubble-child: #24365a;
+  --kb-ok-ink: #6fcf97;
+  --kb-danger-ink: #f7a19a;
+  --kb-error-ink: #f7a19a;
+  --kb-pending-ink: #8fd0f5;
+  --kb-shadow: 0 12px 24px rgba(0, 0, 0, 0.45);
 }
 
 body {
   margin: 0;
-  background: radial-gradient(circle, #eef2ff 0%, #e0f2fe 100%);
+  background: var(--kb-ground-gradient);
+  color: var(--kb-ink);
 }
 
 .kidbot-app {
@@ -176,15 +261,15 @@ body {
 }
 
 .persistence-status.pending {
-  color: #075985;
+  color: var(--kb-pending-ink);
 }
 
 .persistence-status.success {
-  color: #166534;
+  color: var(--kb-ok-ink);
 }
 
 .persistence-status.error {
-  color: #b91c1c;
+  color: var(--kb-danger-ink);
 }
 
 .kidbot-header button:disabled {
@@ -332,12 +417,12 @@ textarea {
 }
 
 .error {
-  color: #dc2626;
+  color: var(--kb-error-ink);
   font-weight: 600;
 }
 
 .capture-status {
-  color: #166534;
+  color: var(--kb-ok-ink);
   font-weight: 600;
   margin: 0;
 }
@@ -478,12 +563,12 @@ img.panel-artwork {
 }
 
 .save-status.success {
-  color: #166534;
+  color: var(--kb-ok-ink);
   font-weight: 700;
 }
 
 .save-status.error {
-  color: #b91c1c;
+  color: var(--kb-danger-ink);
   font-weight: 700;
 }
 
@@ -763,13 +848,14 @@ img.panel-artwork {
 
 .palette {
   display: grid;
-  grid-template-columns: repeat(6, 32px);
+  grid-template-columns: repeat(6, minmax(0, 32px));
   gap: 0.4rem;
 }
 
 .panel .swatch {
-  width: 32px;
-  height: 32px;
+  width: 100%;
+  max-width: 32px;
+  aspect-ratio: 1;
   padding: 0;
   border-radius: 50%;
   border: 3px solid #e2e8f0;
@@ -899,4 +985,129 @@ img.panel-artwork {
 .scrapbook-explanation,
 .scrapbook-observation {
   color: #475569;
+}
+
+/* ---- Phase 3: tokens applied to the main surfaces (light values match the originals) ---- */
+.kidbot-header h1 { color: var(--kb-accent); }
+.transparency-note a { color: var(--kb-info-ink); }
+.parent-controls { background: var(--kb-paper); border-color: var(--kb-info-soft); }
+.session-summary { color: var(--kb-info-ink); }
+.parent-message { color: var(--kb-ink-soft); }
+.saved-activity { background: var(--kb-card); }
+.saved-activity li { border-color: var(--kb-card-edge); }
+.saved-activity time, .saved-activity span, .history-consent p, .delete-profile p, .tools p, .hint, .starter-label, .scrapbook-empty, .scrapbook-card-header, .scrapbook-explanation, .scrapbook-observation { color: var(--kb-ink-muted); }
+.kidbot-header button { background: var(--kb-accent-soft); color: var(--kb-accent-ink); }
+.kidbot-header button.active, .kidbot-header button:hover { background: var(--kb-accent-soft-strong); }
+.locked-age, .degraded { background: var(--kb-info-soft); color: var(--kb-info-ink); }
+.panel { background: var(--kb-paper); box-shadow: var(--kb-shadow); }
+.control-row input, .control-row select, .control-row textarea { background: var(--kb-field); border-color: var(--kb-field-edge); color: var(--kb-ink); }
+.response, .turn p, .persona-chip { background: var(--kb-bubble); color: var(--kb-ink); }
+.turn-child p { background: var(--kb-bubble-child); }
+.panel-card, .experiment-card, .scrapbook-card { background: var(--kb-card); box-shadow: inset 0 0 0 2px var(--kb-card-edge); }
+.panel button.chip, .panel .chip { background: var(--kb-accent-soft); color: var(--kb-accent-ink); }
+.panel button.subtle { background: var(--kb-bubble); color: var(--kb-ink-soft); }
+.step-track li { background: var(--kb-accent-soft); color: var(--kb-ink-soft); }
+.panel button.chip[aria-pressed='true'], .panel button.chip.selected { background: linear-gradient(135deg, #38bdf8, #6366f1); color: #fff; }
+.canvas-wrapper { background: #ffffff; }
+
+/* ---- Phase 3: touch targets ---- */
+.panel button,
+.kidbot-header button,
+.control-row input,
+.control-row select {
+  min-height: var(--kb-target);
+}
+
+.panel .swatch {
+  width: 40px;
+  height: 40px;
+}
+
+.palette {
+  grid-template-columns: repeat(6, minmax(0, 40px));
+}
+
+.panel button.big {
+  padding: 0.9rem 1.8rem;
+  font-size: 1.15em;
+  font-weight: 700;
+}
+
+/* ---- Phase 3: age-band scaling ----
+   The scale is declared on :root as well as on the widget, because :root's
+   own font-size is computed before a descendant can override the variable.
+   Without the :root rule the targets grow but the type does not. */
+:root[data-age-scale='large'],
+.kidbot-app[data-age-scale='large'] {
+  --kb-font-scale: 1.2;
+  --kb-target: 56px;
+}
+
+:root[data-age-scale='medium'],
+.kidbot-app[data-age-scale='medium'] {
+  --kb-font-scale: 1.08;
+  --kb-target: 48px;
+}
+
+.kidbot-app[data-age-scale='large'] .tab-icon,
+.kidbot-app[data-age-scale='large'] .empty-state-icon {
+  font-size: 1.6em;
+}
+
+.kidbot-app[data-age-scale='large'] .panel button {
+  font-size: 1.08em;
+  padding-inline: 1.5rem;
+}
+
+/* ---- Phase 3: empty states ---- */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1.5rem 1rem;
+  border-radius: 20px;
+  border: 2px dashed var(--kb-card-edge);
+  text-align: center;
+}
+
+.empty-state-icon {
+  font-size: 3rem;
+  line-height: 1;
+}
+
+.empty-state-title {
+  margin: 0;
+  font-size: 1.3em;
+  font-weight: 700;
+}
+
+.pin-entry {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.pin-hint {
+  max-width: 560px;
+  text-align: center;
+}
+
+.history-summary {
+  font-weight: 600;
+  color: var(--kb-info-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kidbot-header button,
+  .panel button {
+    transition: none;
+  }
+
+  .kidbot-header button.active,
+  .kidbot-header button:hover,
+  .panel button:not(:disabled):hover {
+    transform: none;
+  }
 }

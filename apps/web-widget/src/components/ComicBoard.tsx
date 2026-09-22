@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
+import { EmptyState } from './EmptyState.js';
 import { LiveRegion } from './LiveRegion.js';
+import { ageBandPresentation } from '../utils/ageBand.js';
 import { buildAnnouncementState } from '../utils/announcementState.js';
 import type { ScrapbookDraft } from '../utils/scrapbook.js';
 import { defaultSessionContext, type SessionContext } from '../utils/sessionContext.js';
@@ -62,8 +64,9 @@ export const ComicBoard = ({
   active = true,
   onSaveToScrapbook,
 }: ComicBoardProps) => {
+  const presentation = ageBandPresentation(sessionContext.ageBand);
   const [theme, setTheme] = useState('A brave turtle shares snacks');
-  const [panelCount, setPanelCount] = useState(4);
+  const [panelCount, setPanelCount] = useState(presentation.defaultPanels);
   const [panels, setPanels] = useState<StoryPanel[]>([]);
   const [blocked, setBlocked] = useState<string | undefined>();
   const [speaking, setSpeaking] = useState(false);
@@ -154,15 +157,19 @@ export const ComicBoard = ({
       <div className="control-row">
         <label htmlFor="theme">Theme</label>
         <input id="theme" value={theme} onChange={(event) => setTheme(event.target.value)} />
-        <label htmlFor="panels">Panels</label>
-        <input
-          id="panels"
-          type="number"
-          min={2}
-          max={8}
-          value={panelCount}
-          onChange={(event) => setPanelCount(Number(event.target.value))}
-        />
+        {!presentation.simplified && (
+          <>
+            <label htmlFor="panels">Panels</label>
+            <input
+              id="panels"
+              type="number"
+              min={2}
+              max={8}
+              value={panelCount}
+              onChange={(event) => setPanelCount(Number(event.target.value))}
+            />
+          </>
+        )}
         <span className="locked-age">Age: {sessionContext.ageBand}</span>
         <button type="button" onClick={() => void handlePlan()} disabled={tool.loading}>
           {tool.loading && !continuing ? 'Planning...' : 'Plan Panels'}
@@ -172,6 +179,15 @@ export const ComicBoard = ({
       {tool.unavailable && <p className="degraded">{tool.unavailable}</p>}
       {blocked && <p className="blocked">{blocked}</p>}
       {showSkeleton && <SkeletonPanels count={safePanelCount} />}
+      {panels.length === 0 && !tool.loading && !blocked && !tool.error && !tool.unavailable && (
+        <EmptyState
+          icon="📖"
+          title="Make a comic!"
+          hint={presentation.greeting}
+          actionLabel="Start my story"
+          onAction={() => void handlePlan()}
+        />
+      )}
       {panels.length > 0 && (
         <>
           <div className="control-row story-actions">
