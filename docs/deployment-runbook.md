@@ -29,7 +29,7 @@ Configure exact project, environment and service targets from operator-owned rec
 2. Build and verify frozen artifacts; record image digests and exact-head CI. Do not deploy a dirty worktree as a reviewed SHA.
 3. Deploy the agent first. Its `/healthz` must return 200 with `ready: true`, provider mode `openai`, ready shared limiter and ready image storage. `/livez` is process liveness only.
 4. Deploy MCP. `/healthz` must return 200 with `productionReady: true`, the React `dist` artifact, shared store readiness, and a downstream agent explicitly reporting `ready: true`. An old agent without the field is intentionally not production-ready.
-5. `Deploy Verify` runs automatically on every push to main: it waits for both services to report the pushed commit in `/healthz` `release.commit` and a production-ready posture, then re-checks the widget artifact. A red run means the deploy did not land, not that the code is wrong.
+5. `Deploy Verify` runs automatically on every push to main: it waits for the services that push could redeploy to report the pushed commit in `/healthz` `release.commit` and a production-ready posture, then re-checks the widget artifact. Which services are due is derived from the committed Railway watch patterns, so a docs-only push is not held to a rebuild that never happens; an unknown diff requires both. A red run means the deploy did not land, not that the code is wrong.
 6. Run the existing manual protected post-deploy workflows for widget distribution, provider-backed story panels, parent Redis create/history/delete and provider roundtrip. They may incur provider costs and synthetic writes; dispatch only against the reviewed target and approval.
 7. Record actual generated output/retrieval and parent-store cleanup, then verify all four activities in the supported host. Health checks alone do not prove credentials are accepted by OpenAI or that generated content is suitable.
 
@@ -43,7 +43,7 @@ Generated images retain the disclosed 24-hour expiry target with periodic best-e
 
 ## Ongoing verification
 
-- `Deploy Verify` (push to main): waits for the pushed commit to be live on both services. Read-only, no provider spend.
+- `Deploy Verify` (push to main): waits for the pushed commit to be live on each service that push could redeploy. Read-only, no provider spend.
 - `Nightly Production Smoke` (daily 09:17 UTC): release posture, widget artifact, and one provider-backed two-panel story. Opens or comments on a `nightly-smoke` issue when it fails.
 - `Provider Output Evaluation` (Mondays 08:40 UTC): records one real model response per corpus case and scores it with the deterministic rubric. Requires an `OPENAI_API_KEY` secret in the protected production environment. Recorded output is scored in-run and never committed.
 - Host checks a workflow cannot make are in `chatgpt-host-validation.md`; run that list before any submission.

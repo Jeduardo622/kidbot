@@ -6,9 +6,15 @@ import {
   collectReleaseFailures,
   normalizeCommit,
   normalizeMcpBaseUrl,
+  parseRequiredServices,
   releaseMatches,
   runProductionReleaseSmoke,
 } from '../scripts/smoke-production-release.mjs';
+import {
+  deployTargets,
+  matchesAnyWatchPattern,
+  resolveDeployTargets,
+} from '../scripts/railway-deploy-targets.mjs';
 
 const healthyBody = (overrides = {}) => ({
   ok: true,
@@ -156,13 +162,19 @@ test('smoke surfaces transport failures instead of hanging', async () => {
 
 test('deploy verify workflow gates on the pushed commit', async () => {
   const workflow = await readFile('.github/workflows/deploy-verify.yml', 'utf8');
+  const targetsIndex = workflow.indexOf('railway-deploy-targets.mjs');
   const releaseIndex = workflow.indexOf('pnpm run smoke:production-release');
   const preflightIndex = workflow.indexOf('pnpm run smoke:production-widget-dist-preflight');
 
   assert.match(workflow, /on:\s*\n\s*push:\s*\n\s*branches:\s*\n\s*- main/);
   assert.match(workflow, /environment:\s*production/);
   assert.match(workflow, /secrets\.KIDBOT_REMOTE_MCP_URL/);
-  assert.match(workflow, /--expect-commit "\$EXPECTED_COMMIT"/);
+  assert.match(workflow, /KIDBOT_EXPECTED_RELEASE_COMMIT=/);
+  assert.match(workflow, /KIDBOT_REQUIRED_RELEASE_SERVICES=/);
+  assert.match(workflow, /--unknown-changes/);
+  assert.match(workflow, /fetch-depth: 0/);
+  assert.ok(targetsIndex > 0, 'missing deploy target resolution');
+  assert.ok(releaseIndex > targetsIndex, 'release wait must follow target resolution');
   assert.ok(releaseIndex > 0, 'missing release smoke step');
   assert.ok(preflightIndex > releaseIndex, 'artifact preflight must follow the release wait');
   assert.doesNotMatch(workflow, /OPENAI_API_KEY/);
@@ -181,4 +193,80 @@ test('nightly smoke runs on a schedule and reports failures as an issue', async 
   assert.match(workflow, /gh issue (?:create|comment)/);
   assert.ok(preflightIndex > 0, 'missing widget dist preflight');
   assert.ok(storyIndex > preflightIndex, 'story smoke must run after the artifact preflight');
+});
+
+test('only the services a push can redeploy are held to the new commit', () => {
+  const stale = healthyBody({
+    release: { commit: '111111111111', environment: 'production' },
+  });
+
+  assert.deepEqual(
+    collectReleaseFailures({ health: stale, expectedCommit: 'abcdef123456', requiredServices: ['agent'] }),
+    [],
+  );
+  assert.deepEqual(
+    collectReleaseFailures({ health: stale, expectedCommit: 'abcdef123456', requiredServices: [] }),
+    [],
+  );
+  assert.equal(
+    collectReleaseFailures({ health: stale, expectedCommit: 'abcdef123456', requiredServices: ['mcp'] }).length,
+    1,
+  );
+  // A narrowed commit requirement never excuses an unhealthy service.
+  assert.ok(
+    collectReleaseFailures({
+      health: healthyBody({ ok: false }),
+      expectedCommit: 'abcdef123456',
+      requiredServices: [],
+    }).length > 0,
+  );
+});
+
+test('required service lists are parsed and validated', () => {
+  assert.deepEqual(parseRequiredServices(undefined), ['mcp', 'agent']);
+  assert.deepEqual(parseRequiredServices('none'), []);
+  assert.deepEqual(parseRequiredServices('mcp'), ['mcp']);
+  assert.deepEqual(parseRequiredServices('mcp,agent,mcp'), ['mcp', 'agent']);
+  assert.throws(() => parseRequiredServices('redis'), /accepts mcp, agent, or none/);
+});
+
+test('watch patterns decide which services a change set redeploys', () => {
+  const watchPatterns = {
+    agent: ['apps/agent-service/**', 'package.json', 'tsconfig*.json'],
+    mcp: ['apps/mcp-server/**', 'apps/web-widget/**', 'package.json'],
+  };
+
+  assert.deepEqual(deployTargets({ files: ['docs/readme.md'], watchPatterns }), []);
+  assert.deepEqual(deployTargets({ files: ['apps/web-widget/src/main.tsx'], watchPatterns }), ['mcp']);
+  assert.deepEqual(deployTargets({ files: ['apps/agent-service/src/index.ts'], watchPatterns }), ['agent']);
+  assert.deepEqual(deployTargets({ files: ['package.json'], watchPatterns }), ['agent', 'mcp']);
+  assert.deepEqual(deployTargets({ files: ['tsconfig.base.json'], watchPatterns }), ['agent']);
+  // An unknown diff must require every service rather than silently skip one.
+  assert.deepEqual(deployTargets({ files: undefined, watchPatterns }), ['agent', 'mcp']);
+  // A service with no watch patterns rebuilds on every push.
+  assert.deepEqual(
+    deployTargets({ files: ['docs/readme.md'], watchPatterns: { agent: undefined, mcp: watchPatterns.mcp } }),
+    ['agent'],
+  );
+});
+
+test('watch pattern matching separates * from **', () => {
+  assert.equal(matchesAnyWatchPattern('apps/mcp-server/src/a.ts', ['apps/mcp-server/**']), true);
+  assert.equal(matchesAnyWatchPattern('apps/mcp-server-extra/a.ts', ['apps/mcp-server/**']), false);
+  assert.equal(matchesAnyWatchPattern('tsconfig.base.json', ['tsconfig*.json']), true);
+  assert.equal(matchesAnyWatchPattern('nested/tsconfig.json', ['tsconfig*.json']), false);
+});
+
+test('the committed Railway configs resolve real change sets', async () => {
+  const repoRoot = '.';
+  assert.deepEqual(await resolveDeployTargets({ repoRoot, files: ['README.md'] }), []);
+  assert.deepEqual(
+    await resolveDeployTargets({ repoRoot, files: ['apps/web-widget/src/styles.css'] }),
+    ['mcp'],
+  );
+  assert.deepEqual(
+    await resolveDeployTargets({ repoRoot, files: ['pnpm-lock.yaml'] }),
+    ['agent', 'mcp'],
+  );
+  assert.deepEqual(await resolveDeployTargets({ repoRoot, files: undefined }), ['agent', 'mcp']);
 });

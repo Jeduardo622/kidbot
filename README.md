@@ -357,11 +357,11 @@ After each production deploy, run the manual `Production Railway Provider Roundt
 
 | Workflow | Trigger | What it proves | Cost |
 |---|---|---|---|
-| `Deploy Verify` | push to main | Both services report the pushed commit and a production-ready posture | none |
+| `Deploy Verify` | push to main | The services that push could redeploy report the pushed commit, with a production-ready posture | none |
 | `Nightly Production Smoke` | daily 09:17 UTC | Release posture, widget artifact, one provider-backed story; opens a `nightly-smoke` issue on failure | 2 images |
 | `Provider Output Evaluation` | Mondays 08:40 UTC | Real model output scored with the deterministic rubric | a few completions |
 
-`Deploy Verify` and the nightly smoke need the `KIDBOT_REMOTE_MCP_URL` production secret. The provider evaluation needs an `OPENAI_API_KEY` production secret.
+`Deploy Verify` derives which services to hold to the new commit from the committed Railway watch patterns, so a docs-only push does not wait for a rebuild that will never happen. It and the nightly smoke need the `KIDBOT_REMOTE_MCP_URL` production secret. The provider evaluation needs an `OPENAI_API_KEY` production secret.
 
 Checks a workflow cannot make, such as whether the widget actually works in the ChatGPT iframe on a phone, are in the [host validation checklist](docs/chatgpt-host-validation.md).
 

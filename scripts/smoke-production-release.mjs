@@ -40,13 +40,40 @@ export const releaseMatches = (deployed, expected) => {
   return actual.startsWith(wanted) || wanted.startsWith(actual);
 };
 
+export const releaseServices = Object.freeze(['mcp', 'agent']);
+
 /**
- * Everything a promoted build has to prove from the one public endpoint:
- * both services are ready, children are being served model output rather than
- * stubs, the React bundle is the deployed artifact, browser origins are
- * bounded, and — when a commit is expected — both services run that commit.
+ * Which services must report the expected commit. A push that cannot redeploy
+ * a service, because of that service's Railway watch patterns, must not be
+ * held to a commit it will never publish.
  */
-export const collectReleaseFailures = ({ health, expectedCommit }) => {
+export const parseRequiredServices = (value) => {
+  const raw = trimValue(value);
+  if (raw === undefined) {
+    return [...releaseServices];
+  }
+  if (raw === 'none') {
+    return [];
+  }
+  const requested = raw.split(',').map((item) => item.trim()).filter(Boolean);
+  const unknown = requested.filter((item) => !releaseServices.includes(item));
+  if (unknown.length > 0) {
+    throw new Error(`--require-commit-for accepts ${releaseServices.join(', ')}, or none.`);
+  }
+  return [...new Set(requested)];
+};
+
+/**
+ * Everything a promoted build has to prove from the one public endpoint: both
+ * services are ready, children are being served model output rather than
+ * stubs, the React bundle is the deployed artifact, browser origins are
+ * bounded, and each service that was due to redeploy runs the expected commit.
+ */
+export const collectReleaseFailures = ({
+  health,
+  expectedCommit,
+  requiredServices = releaseServices,
+}) => {
   const failures = [];
   const agent = health?.agentService ?? {};
 
@@ -69,10 +96,10 @@ export const collectReleaseFailures = ({ health, expectedCommit }) => {
   }
 
   if (expectedCommit) {
-    if (!releaseMatches(health?.release?.commit, expectedCommit)) {
+    if (requiredServices.includes('mcp') && !releaseMatches(health?.release?.commit, expectedCommit)) {
       failures.push(`MCP release=${health?.release?.commit ?? 'missing'}; expected ${expectedCommit}`);
     }
-    if (!releaseMatches(agent.release?.commit, expectedCommit)) {
+    if (requiredServices.includes('agent') && !releaseMatches(agent.release?.commit, expectedCommit)) {
       failures.push(`agent release=${agent.release?.commit ?? 'missing'}; expected ${expectedCommit}`);
     }
   }
@@ -103,6 +130,7 @@ const parseArgs = (argv) => {
   const options = {
     mcpBaseUrl: process.env.KIDBOT_REMOTE_MCP_URL,
     expectedCommit: process.env.KIDBOT_EXPECTED_RELEASE_COMMIT,
+    requiredServices: process.env.KIDBOT_REQUIRED_RELEASE_SERVICES,
     attempts: 40,
     delayMs: 15000,
     timeoutMs: 30000,
@@ -114,6 +142,8 @@ const parseArgs = (argv) => {
       options.mcpBaseUrl = argv[++i];
     } else if (arg === '--expect-commit') {
       options.expectedCommit = argv[++i];
+    } else if (arg === '--require-commit-for') {
+      options.requiredServices = argv[++i];
     } else if (arg === '--attempts') {
       options.attempts = Number(argv[++i]);
     } else if (arg === '--delay-ms') {
@@ -144,6 +174,7 @@ const parseArgs = (argv) => {
 
   return {
     ...options,
+    requiredServices: parseRequiredServices(options.requiredServices),
     expectedCommit: expectedCommit ? normalizeCommit(expectedCommit) : undefined,
     mcpBaseUrl: normalizeMcpBaseUrl(options.mcpBaseUrl),
   };
@@ -158,6 +189,7 @@ export const runProductionReleaseSmoke = async ({
   fetchImpl = fetch,
   mcpBaseUrl = process.env.KIDBOT_REMOTE_MCP_URL,
   expectedCommit,
+  requiredServices = releaseServices,
   attempts = 40,
   delayMs = 15000,
   timeoutMs = 30000,
@@ -182,7 +214,11 @@ export const runProductionReleaseSmoke = async ({
         timeoutMs,
       );
       lastHealth = await readJson(response, 'MCP healthz');
-      lastFailures = collectReleaseFailures({ health: lastHealth, expectedCommit: wanted });
+      lastFailures = collectReleaseFailures({
+        health: lastHealth,
+        expectedCommit: wanted,
+        requiredServices,
+      });
     } catch (error) {
       lastHealth = undefined;
       lastFailures = [`healthz request failed: ${error.message}`];
@@ -193,6 +229,7 @@ export const runProductionReleaseSmoke = async ({
         mcpBaseUrl: normalizedMcpBaseUrl,
         attempts: attempt,
         expectedCommit: wanted ?? null,
+        requiredServices: [...requiredServices],
         release: lastHealth?.release ?? null,
         agentRelease: lastHealth?.agentService?.release ?? null,
         originPolicy: lastHealth?.originPolicy ?? null,
@@ -218,7 +255,9 @@ const main = async () => {
   console.log(
     `production release smoke passed: mcp=${result.release?.commit ?? 'unknown'} agent=${
       result.agentRelease?.commit ?? 'unknown'
-    } provider=${result.provider} originPolicy=${result.originPolicy} attempts=${result.attempts}`,
+    } provider=${result.provider} originPolicy=${result.originPolicy} requiredCommitFrom=${
+      result.requiredServices.join(',') || 'none'
+    } attempts=${result.attempts}`,
   );
 };
 
