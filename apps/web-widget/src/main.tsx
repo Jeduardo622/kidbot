@@ -221,6 +221,20 @@ export const App = () => {
     return () => window.clearTimeout(timer);
   }, [pinLockedUntil]);
 
+  // The age scale sets --kb-font-scale, but the only rule that consumes it for
+  // general type is `font-size` on :root, which is computed before any
+  // descendant override. Mirroring the band onto the document element is what
+  // makes every rem-based size actually grow for younger children.
+  useEffect(() => {
+    const documentRoot = document.documentElement;
+    documentRoot.setAttribute('data-age-band', sessionState.ageBand);
+    documentRoot.setAttribute('data-age-scale', presentation.scale);
+    return () => {
+      documentRoot.removeAttribute('data-age-band');
+      documentRoot.removeAttribute('data-age-scale');
+    };
+  }, [sessionState.ageBand, presentation.scale]);
+
   useEffect(() => {
     setActiveTab(sessionState.tab);
     window.openai?.requestDisplayMode?.({ mode: 'fullscreen' });

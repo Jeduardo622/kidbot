@@ -22,6 +22,10 @@
   --kb-bubble: #f1f5f9;
   --kb-bubble-child: #dbeafe;
   --kb-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
+  --kb-ok-ink: #166534;
+  --kb-danger-ink: #b91c1c;
+  --kb-error-ink: #dc2626;
+  --kb-pending-ink: #075985;
   --kb-font-scale: 1;
   --kb-target: 44px;
   background: var(--kb-ground);
@@ -50,6 +54,10 @@
     --kb-field-edge: #3a4a6e;
     --kb-bubble: #222b3d;
     --kb-bubble-child: #24365a;
+    --kb-ok-ink: #6fcf97;
+    --kb-danger-ink: #f7a19a;
+    --kb-error-ink: #f7a19a;
+    --kb-pending-ink: #8fd0f5;
     --kb-shadow: 0 12px 24px rgba(0, 0, 0, 0.45);
   }
 }
@@ -74,6 +82,10 @@
   --kb-field-edge: #3a4a6e;
   --kb-bubble: #222b3d;
   --kb-bubble-child: #24365a;
+  --kb-ok-ink: #6fcf97;
+  --kb-danger-ink: #f7a19a;
+  --kb-error-ink: #f7a19a;
+  --kb-pending-ink: #8fd0f5;
   --kb-shadow: 0 12px 24px rgba(0, 0, 0, 0.45);
 }
 
@@ -249,15 +261,15 @@ body {
 }
 
 .persistence-status.pending {
-  color: #075985;
+  color: var(--kb-pending-ink);
 }
 
 .persistence-status.success {
-  color: #166534;
+  color: var(--kb-ok-ink);
 }
 
 .persistence-status.error {
-  color: #b91c1c;
+  color: var(--kb-danger-ink);
 }
 
 .kidbot-header button:disabled {
@@ -405,12 +417,12 @@ textarea {
 }
 
 .error {
-  color: #dc2626;
+  color: var(--kb-error-ink);
   font-weight: 600;
 }
 
 .capture-status {
-  color: #166534;
+  color: var(--kb-ok-ink);
   font-weight: 600;
   margin: 0;
 }
@@ -551,12 +563,12 @@ img.panel-artwork {
 }
 
 .save-status.success {
-  color: #166534;
+  color: var(--kb-ok-ink);
   font-weight: 700;
 }
 
 .save-status.error {
-  color: #b91c1c;
+  color: var(--kb-danger-ink);
   font-weight: 700;
 }
 
@@ -836,13 +848,14 @@ img.panel-artwork {
 
 .palette {
   display: grid;
-  grid-template-columns: repeat(6, 32px);
+  grid-template-columns: repeat(6, minmax(0, 32px));
   gap: 0.4rem;
 }
 
 .panel .swatch {
-  width: 32px;
-  height: 32px;
+  width: 100%;
+  max-width: 32px;
+  aspect-ratio: 1;
   padding: 0;
   border-radius: 50%;
   border: 3px solid #e2e8f0;
@@ -1011,7 +1024,7 @@ img.panel-artwork {
 }
 
 .palette {
-  grid-template-columns: repeat(6, 40px);
+  grid-template-columns: repeat(6, minmax(0, 40px));
 }
 
 .panel button.big {
@@ -1020,12 +1033,17 @@ img.panel-artwork {
   font-weight: 700;
 }
 
-/* ---- Phase 3: age-band scaling ---- */
+/* ---- Phase 3: age-band scaling ----
+   The scale is declared on :root as well as on the widget, because :root's
+   own font-size is computed before a descendant can override the variable.
+   Without the :root rule the targets grow but the type does not. */
+:root[data-age-scale='large'],
 .kidbot-app[data-age-scale='large'] {
   --kb-font-scale: 1.2;
   --kb-target: 56px;
 }
 
+:root[data-age-scale='medium'],
 .kidbot-app[data-age-scale='medium'] {
   --kb-font-scale: 1.08;
   --kb-target: 48px;

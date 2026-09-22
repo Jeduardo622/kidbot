@@ -54,6 +54,11 @@ describe('App activity tabs and age presentation', () => {
     fireEvent.change(screen.getByLabelText('Locked age'), { target: { value: '4-6' } });
     expect(root?.getAttribute('data-age-scale')).toBe('large');
 
+    // The document element carries the scale too; :root is where
+    // --kb-font-scale is consumed, so without this the type never grows.
+    expect(document.documentElement.getAttribute('data-age-scale')).toBe('large');
+    expect(document.documentElement.getAttribute('data-age-band')).toBe('4-6');
+
     fireEvent.click(screen.getByRole('tab', { name: 'Comics' }));
     expect(screen.queryByLabelText('Panels')).toBeNull();
     fireEvent.click(screen.getByRole('tab', { name: 'Coloring' }));
