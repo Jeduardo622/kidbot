@@ -1,3 +1,4 @@
+import { chatGptOrigins } from './originGuard.js';
 import { computeToolTimeoutMs, maxToolTimeoutMs, type RequestControlLimits } from './requestControls.js';
 
 export interface McpServerConfig {
@@ -18,6 +19,11 @@ export interface McpServerConfig {
   storyAgentRequestTimeoutMs: number;
   widgetDomain: string;
   widgetResourceDomains: string[];
+  /**
+   * Browser origins allowed to call `/mcp`. `undefined` accepts any origin and
+   * is the development default; production always resolves to a list.
+   */
+  allowedOrigins: string[] | undefined;
   /** Trust one reverse-proxy hop for client IPs; defaults to on only in production. */
   trustProxy: boolean;
 }
@@ -29,6 +35,7 @@ type McpServerEnv = Partial<
     | 'AGENT_SERVICE_TOKEN'
     | 'FALLBACK_WIDGET'
     | 'KIDBOT_LOCAL_DEV'
+    | 'KIDBOT_MCP_ALLOWED_ORIGINS'
     | 'KIDBOT_TRUST_PROXY'
     | 'KIDBOT_WIDGET_DOMAIN'
     | 'KIDBOT_WIDGET_RESOURCE_DOMAINS'
@@ -238,6 +245,19 @@ export const parseMcpServerConfig = (env: McpServerEnv = process.env): McpServer
       .map((value) => parseExactHttpsOrigin('KIDBOT_WIDGET_RESOURCE_DOMAINS', value))
     : [];
 
+  // Browser origins are bounded in production even when the operator sets
+  // nothing, so a public /mcp cannot be driven from an arbitrary page.
+  const configuredOrigins = trimOptional(env.KIDBOT_MCP_ALLOWED_ORIGINS);
+  const allowedOrigins = configuredOrigins
+    ? [...new Set(
+      configuredOrigins
+        .split(',')
+        .map((value) => parseExactHttpsOrigin('KIDBOT_MCP_ALLOWED_ORIGINS', value)),
+    )]
+    : production
+      ? [...new Set([...chatGptOrigins, widgetDomain])]
+      : undefined;
+
   return {
     agentPort,
     agentBaseUrl,
@@ -294,6 +314,7 @@ export const parseMcpServerConfig = (env: McpServerEnv = process.env): McpServer
     storyAgentRequestTimeoutMs,
     widgetDomain,
     widgetResourceDomains,
+    allowedOrigins,
     trustProxy: parseTrustProxy(env.KIDBOT_TRUST_PROXY, env.NODE_ENV),
   };
 };

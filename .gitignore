@@ -16,3 +16,6 @@ coverage/
 .superpowers/
 .playwright-cli/
 output/
+
+# Recorded model output: scored in-run, never committed.
+evals/snapshots/

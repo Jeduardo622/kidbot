@@ -1,0 +1,98 @@
+name: Deploy Verify
+
+# Railway deploys main on its own. This proves the deploy actually landed:
+# it waits for the services that were due to redeploy to report the pushed
+# commit and a production-ready posture, so a silently failed or rolled-back
+# release is visible in minutes instead of at the next manual smoke.
+# Read-only; no provider spend.
+#
+# Which services are due is derived from the committed Railway watch patterns,
+# because a docs-only push redeploys neither service and an app-specific push
+# redeploys one. Holding a service to a commit it was never going to build
+# would turn a healthy production into a red check.
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Commit the deployed services must report (health-only when empty)
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-verify
+  cancel-in-progress: false
+
+jobs:
+  verify-release:
+    name: Verify Production Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+
+    env:
+      KIDBOT_REMOTE_MCP_URL: ${{ secrets.KIDBOT_REMOTE_MCP_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: 8.15.8
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify production MCP URL secret
+        run: |
+          if [ -z "$KIDBOT_REMOTE_MCP_URL" ]; then
+            echo "KIDBOT_REMOTE_MCP_URL is required as a protected production environment secret."
+            exit 1
+          fi
+
+      - name: Resolve which services should report this commit
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          DISPATCH_COMMIT: ${{ inputs.commit }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "push" ]; then
+            expected="$GITHUB_SHA"
+            # An unknown diff (first push, force push, shallow history) must not
+            # weaken the gate, so the script then requires every service.
+            if [ -n "$BEFORE_SHA" ] && [ "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ] \
+              && git cat-file -e "$BEFORE_SHA^{commit}" 2>/dev/null; then
+              mapfile -t changed < <(git diff --name-only "$BEFORE_SHA" "$GITHUB_SHA")
+              targets="$(node ./scripts/railway-deploy-targets.mjs "${changed[@]}")"
+            else
+              targets="$(node ./scripts/railway-deploy-targets.mjs --unknown-changes)"
+            fi
+          else
+            expected="$DISPATCH_COMMIT"
+            targets="$(node ./scripts/railway-deploy-targets.mjs --unknown-changes)"
+          fi
+          echo "KIDBOT_EXPECTED_RELEASE_COMMIT=$expected" >> "$GITHUB_ENV"
+          echo "KIDBOT_REQUIRED_RELEASE_SERVICES=${targets:-none}" >> "$GITHUB_ENV"
+          echo "expecting $expected from: ${targets:-none}"
+
+      - name: Wait for the deployed release
+        run: pnpm run smoke:production-release -- --attempts 40 --delay-ms 15000
+
+      - name: Verify production readiness and widget artifact
+        run: pnpm run smoke:production-widget-dist-preflight

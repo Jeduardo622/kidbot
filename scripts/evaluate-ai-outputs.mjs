@@ -64,7 +64,7 @@ function assertInside(parent, child, label) {
   if (relative.startsWith("..") || path.isAbsolute(relative)) throw new Error(`${label} is outside repository`);
 }
 
-function assertCorpusHygiene(value, filename) {
+export function assertCorpusHygiene(value, filename) {
   const serialized = JSON.stringify(value);
   for (const [label, pattern] of CORPUS_HYGIENE_PATTERNS) {
     if (pattern.test(serialized)) throw new Error(`${filename} corpus hygiene rejected ${label}`);

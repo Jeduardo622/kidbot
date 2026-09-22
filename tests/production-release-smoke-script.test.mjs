@@ -1,0 +1,272 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { test } from 'node:test';
+
+import {
+  collectReleaseFailures,
+  normalizeCommit,
+  normalizeMcpBaseUrl,
+  parseRequiredServices,
+  releaseMatches,
+  runProductionReleaseSmoke,
+} from '../scripts/smoke-production-release.mjs';
+import {
+  deployTargets,
+  matchesAnyWatchPattern,
+  resolveDeployTargets,
+} from '../scripts/railway-deploy-targets.mjs';
+
+const healthyBody = (overrides = {}) => ({
+  ok: true,
+  productionReady: true,
+  mode: 'dist',
+  originPolicy: 'allowlist',
+  release: { commit: 'abcdef123456', environment: 'production' },
+  agentService: {
+    reachable: true,
+    productionReady: true,
+    provider: 'openai',
+    release: { commit: 'abcdef123456', environment: 'production' },
+  },
+  parentProfileStore: { mode: 'redis', ready: true },
+  requestControlStore: { mode: 'redis', ready: true },
+  ...overrides,
+});
+
+const jsonResponse = (body) => ({
+  ok: true,
+  text: async () => JSON.stringify(body),
+});
+
+test('MCP base URL normalization strips the /mcp path', () => {
+  assert.equal(
+    normalizeMcpBaseUrl('https://example.up.railway.app/mcp'),
+    'https://example.up.railway.app',
+  );
+  assert.equal(
+    normalizeMcpBaseUrl('https://example.up.railway.app/'),
+    'https://example.up.railway.app',
+  );
+  assert.throws(() => normalizeMcpBaseUrl(''), /KIDBOT_REMOTE_MCP_URL is required/);
+  assert.throws(() => normalizeMcpBaseUrl('not-a-url'), /must be a valid URL/);
+});
+
+test('commit normalization accepts only hexadecimal git commits', () => {
+  assert.equal(normalizeCommit('ABCDEF1234567890'), 'abcdef123456');
+  assert.equal(normalizeCommit('abcdef1'), 'abcdef1');
+  assert.equal(normalizeCommit('abcdef'), undefined);
+  assert.equal(normalizeCommit('zzzzzzz'), undefined);
+  assert.equal(normalizeCommit(undefined), undefined);
+});
+
+test('release comparison matches a short commit against a full SHA', () => {
+  assert.equal(releaseMatches('abcdef123456', 'abcdef123456789012345678901234567890abcd'), true);
+  assert.equal(releaseMatches('abcdef123456', 'abcdef1'), true);
+  assert.equal(releaseMatches('abcdef123456', 'bbcdef123456'), false);
+  assert.equal(releaseMatches(null, 'abcdef1'), false);
+  assert.equal(releaseMatches('abcdef123456', undefined), false);
+});
+
+test('a healthy production release reports no failures', () => {
+  assert.deepEqual(
+    collectReleaseFailures({ health: healthyBody(), expectedCommit: 'abcdef123456' }),
+    [],
+  );
+});
+
+test('release check rejects stub provider, fallback widget, and an open origin policy', () => {
+  const stub = collectReleaseFailures({
+    health: healthyBody({
+      agentService: { reachable: true, productionReady: true, provider: 'stub' },
+    }),
+  });
+  assert.ok(stub.some((failure) => failure.includes('expected openai')));
+
+  const fallback = collectReleaseFailures({ health: healthyBody({ mode: 'fallback' }) });
+  assert.ok(fallback.some((failure) => failure.includes('expected dist')));
+
+  const openOrigins = collectReleaseFailures({ health: healthyBody({ originPolicy: 'unrestricted' }) });
+  assert.ok(openOrigins.some((failure) => failure.includes('expected allowlist')));
+});
+
+test('release check fails when either service runs a different commit', () => {
+  const mcpStale = collectReleaseFailures({
+    health: healthyBody({ release: { commit: '111111111111', environment: 'production' } }),
+    expectedCommit: 'abcdef123456',
+  });
+  assert.deepEqual(mcpStale, ['MCP release=111111111111; expected abcdef123456']);
+
+  const agentStale = collectReleaseFailures({
+    health: healthyBody({
+      agentService: {
+        reachable: true,
+        productionReady: true,
+        provider: 'openai',
+        release: { commit: '222222222222', environment: 'production' },
+      },
+    }),
+    expectedCommit: 'abcdef123456',
+  });
+  assert.deepEqual(agentStale, ['agent release=222222222222; expected abcdef123456']);
+});
+
+test('smoke waits for the expected release and then passes', async () => {
+  const bodies = [
+    healthyBody({ release: { commit: '111111111111', environment: 'production' } }),
+    healthyBody(),
+  ];
+  let calls = 0;
+  const slept = [];
+
+  const result = await runProductionReleaseSmoke({
+    fetchImpl: async () => jsonResponse(bodies[calls++] ?? bodies[1]),
+    mcpBaseUrl: 'https://example.up.railway.app',
+    expectedCommit: 'abcdef123456789012345678901234567890abcd',
+    attempts: 5,
+    delayMs: 1,
+    sleep: async (ms) => { slept.push(ms); },
+  });
+
+  assert.equal(calls, 2);
+  assert.deepEqual(slept, [1]);
+  assert.equal(result.attempts, 2);
+  assert.equal(result.provider, 'openai');
+  assert.equal(result.originPolicy, 'allowlist');
+});
+
+test('smoke fails with the unmet conditions after exhausting attempts', async () => {
+  await assert.rejects(
+    runProductionReleaseSmoke({
+      fetchImpl: async () => jsonResponse(healthyBody({ ok: false, productionReady: false })),
+      mcpBaseUrl: 'https://example.up.railway.app',
+      attempts: 2,
+      delayMs: 0,
+      sleep: async () => {},
+    }),
+    /failed after 2 attempts.*productionReady=false/s,
+  );
+});
+
+test('smoke surfaces transport failures instead of hanging', async () => {
+  await assert.rejects(
+    runProductionReleaseSmoke({
+      fetchImpl: async () => { throw new Error('connection reset'); },
+      mcpBaseUrl: 'https://example.up.railway.app',
+      attempts: 1,
+      delayMs: 0,
+      sleep: async () => {},
+    }),
+    /healthz request failed: connection reset/,
+  );
+});
+
+test('deploy verify workflow gates on the pushed commit', async () => {
+  const workflow = await readFile('.github/workflows/deploy-verify.yml', 'utf8');
+  const targetsIndex = workflow.indexOf('railway-deploy-targets.mjs');
+  const releaseIndex = workflow.indexOf('pnpm run smoke:production-release');
+  const preflightIndex = workflow.indexOf('pnpm run smoke:production-widget-dist-preflight');
+
+  assert.match(workflow, /on:\s*\n\s*push:\s*\n\s*branches:\s*\n\s*- main/);
+  assert.match(workflow, /environment:\s*production/);
+  assert.match(workflow, /secrets\.KIDBOT_REMOTE_MCP_URL/);
+  assert.match(workflow, /KIDBOT_EXPECTED_RELEASE_COMMIT=/);
+  assert.match(workflow, /KIDBOT_REQUIRED_RELEASE_SERVICES=/);
+  assert.match(workflow, /--unknown-changes/);
+  assert.match(workflow, /fetch-depth: 0/);
+  assert.ok(targetsIndex > 0, 'missing deploy target resolution');
+  assert.ok(releaseIndex > targetsIndex, 'release wait must follow target resolution');
+  assert.ok(releaseIndex > 0, 'missing release smoke step');
+  assert.ok(preflightIndex > releaseIndex, 'artifact preflight must follow the release wait');
+  assert.doesNotMatch(workflow, /OPENAI_API_KEY/);
+});
+
+test('nightly smoke runs on a schedule and reports failures as an issue', async () => {
+  const workflow = await readFile('.github/workflows/nightly-production-smoke.yml', 'utf8');
+  const preflightIndex = workflow.indexOf('pnpm run smoke:production-widget-dist-preflight');
+  const storyIndex = workflow.indexOf('pnpm run smoke:production-mcp-story-panels');
+
+  assert.match(workflow, /schedule:\s*\n(?:\s*#[^\n]*\n)*\s*- cron: '17 9 \* \* \*'/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /environment:\s*production/);
+  assert.match(workflow, /issues:\s*write/);
+  assert.match(workflow, /if: failure\(\)/);
+  assert.match(workflow, /gh issue (?:create|comment)/);
+  assert.ok(preflightIndex > 0, 'missing widget dist preflight');
+  assert.ok(storyIndex > preflightIndex, 'story smoke must run after the artifact preflight');
+});
+
+test('only the services a push can redeploy are held to the new commit', () => {
+  const stale = healthyBody({
+    release: { commit: '111111111111', environment: 'production' },
+  });
+
+  assert.deepEqual(
+    collectReleaseFailures({ health: stale, expectedCommit: 'abcdef123456', requiredServices: ['agent'] }),
+    [],
+  );
+  assert.deepEqual(
+    collectReleaseFailures({ health: stale, expectedCommit: 'abcdef123456', requiredServices: [] }),
+    [],
+  );
+  assert.equal(
+    collectReleaseFailures({ health: stale, expectedCommit: 'abcdef123456', requiredServices: ['mcp'] }).length,
+    1,
+  );
+  // A narrowed commit requirement never excuses an unhealthy service.
+  assert.ok(
+    collectReleaseFailures({
+      health: healthyBody({ ok: false }),
+      expectedCommit: 'abcdef123456',
+      requiredServices: [],
+    }).length > 0,
+  );
+});
+
+test('required service lists are parsed and validated', () => {
+  assert.deepEqual(parseRequiredServices(undefined), ['mcp', 'agent']);
+  assert.deepEqual(parseRequiredServices('none'), []);
+  assert.deepEqual(parseRequiredServices('mcp'), ['mcp']);
+  assert.deepEqual(parseRequiredServices('mcp,agent,mcp'), ['mcp', 'agent']);
+  assert.throws(() => parseRequiredServices('redis'), /accepts mcp, agent, or none/);
+});
+
+test('watch patterns decide which services a change set redeploys', () => {
+  const watchPatterns = {
+    agent: ['apps/agent-service/**', 'package.json', 'tsconfig*.json'],
+    mcp: ['apps/mcp-server/**', 'apps/web-widget/**', 'package.json'],
+  };
+
+  assert.deepEqual(deployTargets({ files: ['docs/readme.md'], watchPatterns }), []);
+  assert.deepEqual(deployTargets({ files: ['apps/web-widget/src/main.tsx'], watchPatterns }), ['mcp']);
+  assert.deepEqual(deployTargets({ files: ['apps/agent-service/src/index.ts'], watchPatterns }), ['agent']);
+  assert.deepEqual(deployTargets({ files: ['package.json'], watchPatterns }), ['agent', 'mcp']);
+  assert.deepEqual(deployTargets({ files: ['tsconfig.base.json'], watchPatterns }), ['agent']);
+  // An unknown diff must require every service rather than silently skip one.
+  assert.deepEqual(deployTargets({ files: undefined, watchPatterns }), ['agent', 'mcp']);
+  // A service with no watch patterns rebuilds on every push.
+  assert.deepEqual(
+    deployTargets({ files: ['docs/readme.md'], watchPatterns: { agent: undefined, mcp: watchPatterns.mcp } }),
+    ['agent'],
+  );
+});
+
+test('watch pattern matching separates * from **', () => {
+  assert.equal(matchesAnyWatchPattern('apps/mcp-server/src/a.ts', ['apps/mcp-server/**']), true);
+  assert.equal(matchesAnyWatchPattern('apps/mcp-server-extra/a.ts', ['apps/mcp-server/**']), false);
+  assert.equal(matchesAnyWatchPattern('tsconfig.base.json', ['tsconfig*.json']), true);
+  assert.equal(matchesAnyWatchPattern('nested/tsconfig.json', ['tsconfig*.json']), false);
+});
+
+test('the committed Railway configs resolve real change sets', async () => {
+  const repoRoot = '.';
+  assert.deepEqual(await resolveDeployTargets({ repoRoot, files: ['README.md'] }), []);
+  assert.deepEqual(
+    await resolveDeployTargets({ repoRoot, files: ['apps/web-widget/src/styles.css'] }),
+    ['mcp'],
+  );
+  assert.deepEqual(
+    await resolveDeployTargets({ repoRoot, files: ['pnpm-lock.yaml'] }),
+    ['agent', 'mcp'],
+  );
+  assert.deepEqual(await resolveDeployTargets({ repoRoot, files: undefined }), ['agent', 'mcp']);
+});

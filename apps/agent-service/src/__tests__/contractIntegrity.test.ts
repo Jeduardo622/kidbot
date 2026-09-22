@@ -205,4 +205,10 @@ describe('contract integrity', () => {
     const mcpRules = readFileSync(path.join(repoRoot, 'apps/mcp-server/src/moderationRules.ts'), 'utf-8');
     expect(mcpRules).toEqual(agentRules);
   });
+
+  it('keeps the release identity module byte-identical between MCP and agent-service', () => {
+    const agentRelease = readFileSync(path.join(repoRoot, 'apps/agent-service/src/release.ts'), 'utf-8');
+    const mcpRelease = readFileSync(path.join(repoRoot, 'apps/mcp-server/src/release.ts'), 'utf-8');
+    expect(mcpRelease).toEqual(agentRelease);
+  });
 });

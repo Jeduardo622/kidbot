@@ -24,6 +24,7 @@ import {
 import { createRateLimiter, createRateLimitStoreFromEnv } from './rateLimit.js';
 import { createLogSubject } from './privacyLog.js';
 import { readImageStorageReadiness } from './readiness.js';
+import { resolveRelease } from './release.js';
 import { createDrain } from './shutdown.js';
 import { runBoundedRequest } from './requestDeadline.js';
 import { safeFallbackSvg, validateColoringSvg } from './svgSafety.js';
@@ -60,6 +61,7 @@ const {
   startupPosture,
   port,
 } = config;
+const release = resolveRelease();
 const providerFailurePolicy = parseProviderFailurePolicy(process.env);
 const imageAssetStorageConfig = parseImageAssetStorageConfig(process.env);
 const imageAssetStore = createImageAssetStore(imageAssetStorageConfig);
@@ -131,6 +133,8 @@ app.get('/healthz', (_req, res, next) => {
       draining,
       service: 'agent-service',
       startupPosture,
+      release,
+      trustProxy: config.trustProxy,
       provider: { mode: providerMode },
       rateLimitStore: limiter,
       imageStorage,

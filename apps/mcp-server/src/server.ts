@@ -13,6 +13,8 @@ import { parentProfileStore, registerTools, requestControlStore } from './tools.
 import type { Mode } from './types.js';
 import { createWidgetResourceMeta, widgetResourceUri } from './widgetMetadata.js';
 import { privacyPolicyHtml } from './privacyPolicy.js';
+import { createOriginGuard } from './originGuard.js';
+import { resolveRelease } from './release.js';
 import { createNetworkKey } from './requestControls.js';
 import { inspectWidgetArtifact, renderWidgetDocument, resolveWidgetMode } from './widgetArtifact.js';
 import {
@@ -30,6 +32,8 @@ let serviceLifecycle: ReturnType<typeof createServiceLifecycle> | undefined;
 app.set('trust proxy', mcpConfig.trustProxy ? 1 : false);
 app.use(cors());
 
+// Ahead of admission control: a refused origin must not spend a lease.
+app.use('/mcp', createOriginGuard(mcpConfig.allowedOrigins));
 app.use('/mcp', createDrainGuard(() => serviceLifecycle?.isDraining() === true));
 app.use('/mcp', (req, res, next) => {
   const networkIdentity = req.ip ?? req.socket.remoteAddress ?? 'unknown';
@@ -77,6 +81,7 @@ const fallbackHtmlPath = path.join(distDir, 'kidbot-fallback.html');
 const fallbackCssPath = path.join(distDir, 'kidbot-fallback.css');
 const fallbackJsPath = path.join(distDir, 'kidbot-fallback.js');
 
+const mcpRelease = resolveRelease();
 const widgetArtifact = inspectWidgetArtifact(distDir);
 const hasBundle = widgetArtifact.distReady;
 const fallbackRequested = mcpConfig.fallbackMode;
@@ -176,6 +181,7 @@ const readAgentProviderMode = async (): Promise<{
   reachable: boolean;
   productionReady: boolean;
   provider?: string;
+  release?: { commit: string | null; environment: string | null };
 }> => {
   if (mcpConfig.fallbackMode) {
     return { reachable: false, productionReady: false, provider: 'offline-fixture' };
@@ -190,12 +196,20 @@ const readAgentProviderMode = async (): Promise<{
     const body = (await response.json()) as {
       provider?: { mode?: unknown };
       ready?: unknown;
+      release?: { commit?: unknown; environment?: unknown };
     };
     const mode = body.provider?.mode;
+    // Republished so one public check can prove both services run the same
+    // build, including when agent-service is only reachable privately.
+    const commit = typeof body.release?.commit === 'string' ? body.release.commit : null;
+    const environment = typeof body.release?.environment === 'string'
+      ? body.release.environment
+      : null;
     return {
       reachable: true,
       productionReady: isAgentProductionReady(body),
       ...(typeof mode === 'string' ? { provider: mode } : {}),
+      release: { commit, environment },
     };
   } catch {
     return { reachable: false, productionReady: false };
@@ -223,6 +237,8 @@ app.get('/healthz', asyncRoute(async (_req, res) => {
     ok,
     productionReady,
     mode: widgetMode,
+    release: mcpRelease,
+    originPolicy: mcpConfig.allowedOrigins ? 'allowlist' : 'unrestricted',
     agentService,
     widgetArtifact: {
       distReady: widgetArtifact.distReady,
