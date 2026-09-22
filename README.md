@@ -341,9 +341,40 @@ The MCP server reserves caller, server-derived network, and deployment-global re
 
 Agent total request budgets default to 30 seconds (`AGENT_REQUEST_TIMEOUT_MS`) and 180 seconds for stories (`AGENT_STORY_REQUEST_TIMEOUT_MS`). MCP outer budgets default to 35/185 seconds, and concurrency leases outlive the longest outer budget. These are deadlines, not latency promises. If overriding budgets, keep the MCP values greater than the corresponding agent totals; provider retries and storage share the total budget. See [deployment and rollback checks](docs/deployment-runbook.md).
 
-Only expose the MCP service publicly for ChatGPT and the remote smoke. Keep agent-service private where Railway supports it; if a public agent URL is temporarily needed, `AGENT_SERVICE_TOKEN` and the secured startup posture still protect direct calls.
+Only expose the MCP service publicly for ChatGPT and the remote smoke. Keep agent-service private where Railway supports it; if a public agent URL is temporarily needed, `AGENT_SERVICE_TOKEN` and the secured startup posture still protect direct calls. Railway private networking is IPv6-only; set MCP's `AGENT_BASE_URL` to `http://<agent private domain>:<AGENT_PORT>` and confirm `agentService.reachable` on the MCP `/healthz` before removing the agent's public domain.
+
+Optional MCP env:
+
+```env
+KIDBOT_MCP_ALLOWED_ORIGINS=https://chatgpt.com,https://chat.openai.com
+```
+
+Browser origins allowed to call `/mcp`. In production this defaults to the ChatGPT origins plus `KIDBOT_WIDGET_DOMAIN`, so the endpoint is bounded even when nothing is set; setting it replaces that list. A request with no `Origin` header is a server-to-server MCP client and always passes, so tool calls from ChatGPT are unaffected. An unlisted browser origin is refused with 403 before it can spend admission budget. `/healthz` reports `originPolicy` and `release.commit`.
 
 After each production deploy, run the manual `Production Railway Provider Roundtrip Smoke` workflow before treating provider-backed story panels as healthy. The workflow requires the protected production environment secret `KIDBOT_AGENT_SERVICE_TOKEN` and may generate provider images.
+
+### Production Monitoring
+
+| Workflow | Trigger | What it proves | Cost |
+|---|---|---|---|
+| `Deploy Verify` | push to main | Both services report the pushed commit and a production-ready posture | none |
+| `Nightly Production Smoke` | daily 09:17 UTC | Release posture, widget artifact, one provider-backed story; opens a `nightly-smoke` issue on failure | 2 images |
+| `Provider Output Evaluation` | Mondays 08:40 UTC | Real model output scored with the deterministic rubric | a few completions |
+
+`Deploy Verify` and the nightly smoke need the `KIDBOT_REMOTE_MCP_URL` production secret. The provider evaluation needs an `OPENAI_API_KEY` production secret.
+
+Checks a workflow cannot make, such as whether the widget actually works in the ChatGPT iframe on a phone, are in the [host validation checklist](docs/chatgpt-host-validation.md).
+
+### Provider-Backed Evaluation
+
+`pnpm run eval:ai` scores the stub renderer, so it proves the response contract and nothing about what a child is told. To measure the model:
+
+```bash
+pnpm run eval:ai:record-provider   # needs OPENAI_API_KEY; text only, no images
+pnpm run eval:ai:provider          # scores the recording with the same rubric
+```
+
+Recordings land in `evals/snapshots/`, which is gitignored: model output is scored, not committed. A snapshot that drifts from the corpus fails loudly rather than silently scoring fewer cases.
 
 ### Ngrok (optional)
 
@@ -389,4 +420,5 @@ When you regain installs, exit fallback:
 
 ## Next Steps
 
-- Complete the [v1 acceptance contract](docs/v1-acceptance.md), including Realtime voice, visual-output review and production proof. Story images and generated SVG coloring outlines already have provider-backed implementations.
+- Complete the [v1 acceptance contract](docs/v1-acceptance.md), including visual-output review and production proof. Story images and generated SVG coloring outlines already have provider-backed implementations.
+- Spoken voice is a design spike, not an implementation: see [the Realtime voice spike](docs/realtime-voice-spike.md) for the shape, the risks, and the exit criteria.

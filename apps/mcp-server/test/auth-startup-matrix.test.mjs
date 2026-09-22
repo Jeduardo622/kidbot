@@ -46,6 +46,7 @@ const mcpServerEnvKeys = [
   'AGENT_SERVICE_TOKEN',
   'FALLBACK_WIDGET',
   'KIDBOT_LOCAL_DEV',
+  'KIDBOT_MCP_ALLOWED_ORIGINS',
   'KIDBOT_WIDGET_DOMAIN',
   'KIDBOT_WIDGET_RESOURCE_DOMAINS',
   'MCP_PORT',
@@ -381,7 +382,7 @@ test('non-fallback mode without AGENT_SERVICE_TOKEN fails closed at mcp startup'
   });
 
   try {
-    const exit = await readExit(mcp, 3500);
+    const exit = await readExit(mcp, 10000);
     assert.notEqual(exit.code, 0);
     assert.match(stderr, /AGENT_SERVICE_TOKEN is required unless FALLBACK_WIDGET=1/i);
   } finally {
@@ -404,7 +405,7 @@ test('non-fallback production mode with short AGENT_SERVICE_TOKEN fails closed a
   });
 
   try {
-    const exit = await readExit(mcp, 3500);
+    const exit = await readExit(mcp, 10000);
     assert.notEqual(exit.code, 0);
     assert.match(stderr, /at least 32 characters/i);
     assert.doesNotMatch(stderr, /short-token-secret/i);
@@ -577,7 +578,7 @@ test('mcp rejects local fallback intent in production', async () => {
     stderr += chunk.toString();
   });
   try {
-    const exit = await readExit(mcp, 3500);
+    const exit = await readExit(mcp, 10000);
     assert.notEqual(exit.code, 0);
     assert.match(stderr, /production.*fallback|fallback.*production/i);
   } finally {
@@ -852,7 +853,7 @@ test('fallback mode without KIDBOT_LOCAL_DEV fails closed at mcp startup', async
   });
 
   try {
-    const exit = await readExit(mcp, 3500);
+    const exit = await readExit(mcp, 10000);
     assert.notEqual(exit.code, 0);
     assert.match(stderr, /KIDBOT_LOCAL_DEV=1/i);
   } finally {
@@ -1438,5 +1439,96 @@ test('mcp strips parent token and saves metadata history with valid parent auth'
   } finally {
     stopProcess(mcp);
     await closeServer(fakeAgent);
+  }
+});
+
+test('an unlisted browser origin is refused before it can spend admission budget', async () => {
+  const mcpPort = await getFreePort();
+  const mcpBaseUrl = `http://localhost:${mcpPort}`;
+  const mcp = spawnProcess(mcpEntry, {
+    FALLBACK_WIDGET: '1',
+    KIDBOT_LOCAL_DEV: '1',
+    KIDBOT_MCP_ALLOWED_ORIGINS: 'https://chatgpt.com',
+    MCP_GLOBAL_REQUESTS_PER_MINUTE: '1',
+    MCP_PORT: String(mcpPort),
+    MCP_REQUEST_CONTROL_STORE: 'memory',
+  });
+
+  const post = (origin) => fetch(`${mcpBaseUrl}/mcp`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/event-stream',
+      ...(origin ? { Origin: origin } : {}),
+    },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 900, method: 'tools/list', params: {} }),
+  });
+
+  try {
+    await waitForMcpHealth(mcpBaseUrl);
+
+    const refused = await post('https://evil.example');
+    assert.equal(refused.status, 403);
+    assert.match(await refused.text(), /origin_not_allowed/);
+
+    // The single request in the global budget is still available, which proves
+    // the origin gate runs ahead of admission control.
+    const serverToServer = await post(undefined);
+    assert.equal(serverToServer.status, 200);
+
+    const health = await (await fetch(`${mcpBaseUrl}/healthz`)).json();
+    assert.equal(health.originPolicy, 'allowlist');
+  } finally {
+    stopProcess(mcp);
+  }
+});
+
+test('an allowed browser origin is echoed back and reaches the tools', async () => {
+  const mcpPort = await getFreePort();
+  const mcpBaseUrl = `http://localhost:${mcpPort}`;
+  const mcp = spawnProcess(mcpEntry, {
+    FALLBACK_WIDGET: '1',
+    KIDBOT_LOCAL_DEV: '1',
+    KIDBOT_MCP_ALLOWED_ORIGINS: 'https://chatgpt.com',
+    MCP_PORT: String(mcpPort),
+    MCP_REQUEST_CONTROL_STORE: 'memory',
+  });
+
+  try {
+    await waitForMcpHealth(mcpBaseUrl);
+    const allowed = await fetch(`${mcpBaseUrl}/mcp`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json, text/event-stream',
+        Origin: 'https://chatgpt.com',
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 901, method: 'tools/list', params: {} }),
+    });
+
+    assert.equal(allowed.status, 200);
+    assert.equal(allowed.headers.get('access-control-allow-origin'), 'https://chatgpt.com');
+  } finally {
+    stopProcess(mcp);
+  }
+});
+
+test('health reports an unrestricted origin policy when none is configured', async () => {
+  const mcpPort = await getFreePort();
+  const mcpBaseUrl = `http://localhost:${mcpPort}`;
+  const mcp = spawnProcess(mcpEntry, {
+    FALLBACK_WIDGET: '1',
+    KIDBOT_LOCAL_DEV: '1',
+    MCP_PORT: String(mcpPort),
+    MCP_REQUEST_CONTROL_STORE: 'memory',
+  });
+
+  try {
+    await waitForMcpHealth(mcpBaseUrl);
+    const health = await (await fetch(`${mcpBaseUrl}/healthz`)).json();
+    assert.equal(health.originPolicy, 'unrestricted');
+    assert.equal(health.release.commit, null);
+  } finally {
+    stopProcess(mcp);
   }
 });

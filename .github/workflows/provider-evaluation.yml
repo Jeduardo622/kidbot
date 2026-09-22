@@ -1,0 +1,64 @@
+name: Provider Output Evaluation
+
+# `eval:ai` scores the stub renderer, so it can only prove the response
+# contract. This records one real model response per corpus case and scores it
+# with the same rubric, which is the only run that can notice the model getting
+# worse at talking to a child.
+#
+# Text only: story recording omits image generation, so a run costs a handful
+# of completions and generates no images. Recorded output is scored in-run and
+# never committed — model output is not repository content.
+
+on:
+  schedule:
+    # Mondays 08:40 UTC.
+    - cron: '40 8 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: provider-evaluation
+  cancel-in-progress: false
+
+jobs:
+  provider-evaluation:
+    name: Provider Output Evaluation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: 8.15.8
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify provider key secret
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "OPENAI_API_KEY is required as a protected production environment secret."
+            exit 1
+          fi
+
+      - name: Record provider output
+        run: pnpm run eval:ai:record-provider
+
+      - name: Score recorded provider output
+        run: pnpm run eval:ai:provider
